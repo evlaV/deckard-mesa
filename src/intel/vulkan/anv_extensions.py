@@ -170,6 +170,7 @@ EXTENSIONS = [
     Extension('VK_ANDROID_external_memory_android_hardware_buffer', 3, 'ANDROID'),
     Extension('VK_ANDROID_native_buffer',                 7, 'ANDROID'),
     Extension('VK_GOOGLE_decorate_string',                1, True),
+    Extension('VK_GOOGLE_display_timing',                 1, True),
     Extension('VK_GOOGLE_hlsl_functionality1',            1, True),
     Extension('VK_GOOGLE_user_type',                      1, True),
     Extension('VK_INTEL_performance_query',               2, 'device->perf && device->perf->i915_perf_version >= 3'),

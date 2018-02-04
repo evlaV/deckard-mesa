@@ -187,6 +187,7 @@ EXTENSIONS = [
     Extension('VK_ANDROID_external_memory_android_hardware_buffer', 3, 'RADV_SUPPORT_ANDROID_HARDWARE_BUFFER  && device->rad_info.has_syncobj_wait_for_submit'),
     Extension('VK_ANDROID_native_buffer',                 5, 'ANDROID && device->rad_info.has_syncobj_wait_for_submit'),
     Extension('VK_GOOGLE_decorate_string',                1, True),
+    Extension('VK_GOOGLE_display_timing',                 1, True),
     Extension('VK_GOOGLE_hlsl_functionality1',            1, True),
     Extension('VK_GOOGLE_user_type',                      1, True),
     Extension('VK_NV_compute_shader_derivatives',         1, True),
