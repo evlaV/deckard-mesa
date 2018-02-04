@@ -76,6 +76,8 @@ typedef struct wsi_display_connector {
    char                         *name;
    bool                         connected;
    bool                         active;
+   uint64_t                     last_frame;
+   uint64_t                     last_nsec;
    struct list_head             display_modes;
    wsi_display_mode             *current_mode;
    drmModeModeInfo              current_drm_mode;
@@ -110,6 +112,7 @@ struct wsi_display {
 enum wsi_image_state {
    WSI_IMAGE_IDLE,
    WSI_IMAGE_DRAWING,
+   WSI_IMAGE_WAITING,
    WSI_IMAGE_QUEUED,
    WSI_IMAGE_FLIPPING,
    WSI_IMAGE_DISPLAYING
@@ -119,6 +122,7 @@ struct wsi_display_image {
    struct wsi_image             base;
    struct wsi_display_swapchain *chain;
    enum wsi_image_state         state;
+   struct wsi_display_fence     *fence;
    uint32_t                     fb_id;
    uint32_t                     buffer[4];
    uint64_t                     flip_sequence;
@@ -139,6 +143,7 @@ struct wsi_display_fence {
    bool                         destroyed;
    uint32_t                     syncobj; /* syncobj to signal on event */
    uint64_t                     sequence;
+   struct wsi_display_image     *image;
 };
 
 static uint64_t fence_sequence;
@@ -1152,6 +1157,7 @@ wsi_display_image_init(VkDevice device_h,
 
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
+   image->fence = NULL;
    image->fb_id = 0;
 
    int ret = drmModeAddFB2WithModifiers(wsi->fd,
@@ -1245,6 +1251,11 @@ wsi_display_idle_old_displaying(struct wsi_display_image *active_image)
 static VkResult
 _wsi_display_queue_next(struct wsi_swapchain *drv_chain);
 
+static uint64_t widen_32_to_64(uint32_t narrow, uint64_t near)
+{
+	return near + (int32_t) (narrow - near);
+}
+
 static void
 wsi_display_page_flip_handler2(int fd,
                                unsigned int frame,
@@ -1255,17 +1266,38 @@ wsi_display_page_flip_handler2(int fd,
 {
    struct wsi_display_image *image = data;
    struct wsi_display_swapchain *chain = image->chain;
+   VkIcdSurfaceDisplay *surface = chain->surface;
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(surface->displayMode);
+   wsi_display_connector *connector = display_mode->connector;
+   uint64_t nsec = (uint64_t) sec * 1000000000ull + (uint64_t) usec * 1000;
 
    wsi_display_debug("image %ld displayed at %d\n",
                      image - &(image->chain->images[0]), frame);
+
+   /* Don't let time go backwards because this function has lower resolution
+    * than ktime */
+
+   if (nsec < connector->last_nsec)
+      nsec = connector->last_nsec;
+
    image->state = WSI_IMAGE_DISPLAYING;
+
+   uint64_t frame64 = widen_32_to_64(frame, connector->last_frame);
+
+   connector->last_frame = frame64;
+   connector->last_nsec = nsec;
+   wsi_present_complete(&image->chain->base, &image->base,
+                        nsec, frame64);
    wsi_display_idle_old_displaying(image);
    VkResult result = _wsi_display_queue_next(&(chain->base));
    if (result != VK_SUCCESS)
       chain->status = result;
 }
 
-static void wsi_display_fence_event_handler(struct wsi_display_fence *fence);
+static void wsi_display_fence_event_handler(struct wsi_display_fence *fence,
+                                            uint64_t nsec,
+                                            uint64_t frame);
 
 static void wsi_display_page_flip_handler(int fd,
                                           unsigned int frame,
@@ -1281,8 +1313,17 @@ static void wsi_display_vblank_handler(int fd, unsigned int frame,
                                        void *data)
 {
    struct wsi_display_fence *fence = data;
+   struct wsi_display_connector *connector =
+      wsi_display_connector_from_handle(fence->base.display);
+   uint64_t frame64 = widen_32_to_64(frame, connector->last_frame);
+   uint64_t nsec = (uint64_t) sec * 1000000000 + (uint64_t) usec * 1000;
 
-   wsi_display_fence_event_handler(fence);
+   /* Don't let time go backwards because this function has lower resolution
+    * than ktime */
+   if (nsec < connector->last_nsec)
+      nsec = connector->last_nsec;
+
+   wsi_display_fence_event_handler(fence, nsec, frame64);
 }
 
 static void wsi_display_sequence_handler(int fd, uint64_t frame,
@@ -1291,7 +1332,7 @@ static void wsi_display_sequence_handler(int fd, uint64_t frame,
    struct wsi_display_fence *fence =
       (struct wsi_display_fence *) (uintptr_t) user_data;
 
-   wsi_display_fence_event_handler(fence);
+   wsi_display_fence_event_handler(fence, nsec, frame);
 }
 
 static drmEventContext event_context = {
@@ -1635,19 +1676,38 @@ wsi_display_fence_check_free(struct wsi_display_fence *fence)
       vk_free(fence->base.alloc, fence);
 }
 
-static void wsi_display_fence_event_handler(struct wsi_display_fence *fence)
+static void wsi_display_fence_event_handler(struct wsi_display_fence *fence,
+                                            uint64_t nsec,
+                                            uint64_t frame)
 {
    struct wsi_display *wsi =
       (struct wsi_display *) fence->base.wsi_device->wsi[VK_ICD_WSI_PLATFORM_DISPLAY];
+   struct wsi_display_connector *connector =
+      wsi_display_connector_from_handle(fence->base.display);
+   struct wsi_display_image *image = fence->image;
+
+   wsi_display_debug("%9lu fence %lu received %lu nsec %lu\n",
+                     pthread_self(), fence->sequence, frame, nsec);
 
    if (fence->syncobj) {
       (void) drmSyncobjSignal(wsi->fd, &fence->syncobj, 1);
       (void) drmSyncobjDestroy(wsi->fd, fence->syncobj);
    }
 
+   connector->last_nsec = nsec;
+   connector->last_frame = frame;
+
    fence->event_received = true;
    wsi_display_fence_check_free(fence);
+   if (image) {
+      image->flip_sequence = ++image->chain->flip_sequence;
+      image->state = WSI_IMAGE_QUEUED;
+      VkResult result = _wsi_display_queue_next(&image->chain->base);
+      if (result != VK_SUCCESS)
+         image->chain->status = result;
+   }
 }
+
 
 static void
 wsi_display_fence_destroy(struct wsi_fence *fence_wsi)
@@ -1692,6 +1752,7 @@ wsi_display_fence_alloc(VkDevice device,
    fence->event_received = false;
    fence->destroyed = false;
    fence->sequence = ++fence_sequence;
+   fence->image = NULL;
    return fence;
 }
 
@@ -1799,7 +1860,14 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
       if (!image)
          return VK_SUCCESS;
 
+      if (image->fence) {
+         image->fence->image = NULL;
+         wsi_display_fence_destroy(&image->fence->base);
+         image->fence = NULL;
+      }
+
       int ret;
+
       if (connector->active) {
          ret = drmModePageFlip(wsi->fd, connector->crtc_id, image->fb_id,
                                    DRM_MODE_PAGE_FLIP_EVENT, image);
@@ -1879,6 +1947,67 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
 
    pthread_mutex_lock(&wsi->wait_mutex);
 
+   if (image->base.timing && image->base.timing->target_msc != 0) {
+      VkIcdSurfaceDisplay *surface = chain->surface;
+      wsi_display_mode *display_mode =
+         wsi_display_mode_from_handle(surface->displayMode);
+      wsi_display_connector *connector = display_mode->connector;
+
+      wsi_display_debug("delta frame %ld\n",
+                        image->base.timing->target_msc - connector->last_frame);
+      if (image->base.timing->target_msc > connector->last_frame) {
+         uint64_t frame_queued;
+         VkDisplayKHR display = wsi_display_connector_to_handle(connector);
+
+         wsi_display_debug_code(uint64_t current_frame, current_nsec;
+                                drmCrtcGetSequence(wsi->fd, connector->crtc_id,
+                                                   &current_frame,
+                                                   &current_nsec);
+                                wsi_display_debug("from current: %ld\n",
+                                                  image->base.timing->target_msc
+                                                  - current_frame));
+
+         image->fence = wsi_display_fence_alloc(chain->base.device,
+                                                chain->base.wsi,
+                                                display, &chain->base.alloc,
+                                                -1);
+
+         if (!image->fence) {
+            result = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto bail_unlock;
+         }
+
+         result = wsi_register_vblank_event(image->fence,
+                                            chain->base.wsi,
+                                            display,
+                                            0,
+                                            image->base.timing->target_msc - 1,
+                                            &frame_queued);
+
+         if (result != VK_SUCCESS)
+            goto bail_unlock;
+
+         /* Check and make sure we are queued for the right frame, otherwise
+          * just go queue an image
+          */
+         if (frame_queued <= image->base.timing->target_msc - 1) {
+            image->state = WSI_IMAGE_WAITING;
+
+            /*
+             * Don't set the image member until we're going to wait for the
+             * event to arrive before flipping to the image. That way, if the
+             * register_vblank_event call happens to process the event, it
+             * won't actually do anything
+             */
+            image->fence->image = image;
+            wsi_display_start_wait_thread(wsi);
+            result = VK_SUCCESS;
+            goto bail_unlock;
+         }
+
+      }
+   }
+
    image->flip_sequence = ++chain->flip_sequence;
    image->state = WSI_IMAGE_QUEUED;
 
@@ -1886,12 +2015,28 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
    if (result != VK_SUCCESS)
       chain->status = result;
 
+bail_unlock:
    pthread_mutex_unlock(&wsi->wait_mutex);
 
    if (result != VK_SUCCESS)
       return result;
 
    return chain->status;
+}
+
+static VkResult
+wsi_display_get_refresh_cycle_duration(struct wsi_swapchain *drv_chain,
+                                       VkRefreshCycleDurationGOOGLE *duration)
+{
+   struct wsi_display_swapchain *chain =
+      (struct wsi_display_swapchain *) drv_chain;
+   VkIcdSurfaceDisplay *surface = chain->surface;
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(surface->displayMode);
+   double refresh = wsi_display_mode_refresh(display_mode);
+
+   duration->refreshDuration = (uint64_t) (floor (1.0/refresh * 1e9 + 0.5));
+   return VK_SUCCESS;
 }
 
 static VkResult
@@ -1929,6 +2074,8 @@ wsi_display_surface_create_swapchain(
    chain->base.acquire_next_image = wsi_display_acquire_next_image;
    chain->base.queue_present = wsi_display_queue_present;
    chain->base.present_mode = wsi_swapchain_get_present_mode(wsi_device, create_info);
+   chain->base.get_refresh_cycle_duration =
+      wsi_display_get_refresh_cycle_duration;
    chain->base.image_count = num_images;
 
    chain->wsi = wsi;
@@ -2700,9 +2847,14 @@ wsi_get_swapchain_counter(VkDevice device,
       return VK_SUCCESS;
    }
 
-   int ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id, value, NULL);
-   if (ret)
+   uint64_t nsec;
+   int ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id, value, &nsec);
+   if (ret) {
       *value = 0;
+   } else {
+      connector->last_frame = *value;
+      connector->last_nsec = nsec;
+   }
 
    return VK_SUCCESS;
 }
