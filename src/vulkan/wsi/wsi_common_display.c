@@ -20,6 +20,7 @@
  * OF THIS SOFTWARE.
  */
 
+#include "util/u_atomic.h"
 #include "util/macros.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -89,6 +90,7 @@ typedef struct wsi_display_connector {
    bool                         active;
    uint64_t                     last_frame;
    uint64_t                     last_nsec;
+   int                          refcount; /* swapchains using this connector */
    struct list_head             display_modes;
    wsi_display_mode             *current_mode;
    drmModeModeInfo              current_drm_mode;
@@ -290,6 +292,18 @@ wsi_display_find_connector(struct wsi_device *wsi_device,
    }
 
    return NULL;
+}
+
+
+static uint32_t
+wsi_display_is_crtc_available(const struct wsi_display * const wsi,
+                             const uint32_t crtc_id)
+{
+   wsi_for_each_connector(connector, wsi)
+      if (connector->crtc_id == crtc_id)
+         return false;
+
+   return true;
 }
 
 static struct wsi_display_connector *
@@ -1139,7 +1153,13 @@ wsi_display_swapchain_destroy(struct wsi_swapchain *drv_chain,
       wsi_display_image_finish(drv_chain, allocator, &chain->images[i]);
    wsi_destroy_image_info(&chain->base, &chain->base.image_info);
 
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(chain->surface->displayMode);
+   if (p_atomic_dec_zero(&display_mode->connector->refcount))
+      display_mode->connector->crtc_id = 0;
+
    wsi_swapchain_finish(&chain->base);
+
    vk_free(allocator, chain);
    return VK_SUCCESS;
 }
@@ -1478,7 +1498,8 @@ wsi_display_select_crtc(const struct wsi_display_connector *connector,
    uint32_t crtc_id = 0;
    for (int c = 0; crtc_id == 0 && c < mode_res->count_crtcs; c++) {
       drmModeCrtcPtr crtc = drmModeGetCrtc(wsi->fd, mode_res->crtcs[c]);
-      if (crtc && crtc->buffer_id == 0)
+      if (crtc && crtc->buffer_id == 0 &&
+          wsi_display_is_crtc_available(wsi, crtc->crtc_id))
          crtc_id = crtc->crtc_id;
       drmModeFreeCrtc(crtc);
    }
@@ -1885,13 +1906,6 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
       }
 
       if (ret == -EINVAL) {
-         VkResult result = wsi_display_setup_connector(connector, display_mode);
-
-         if (result != VK_SUCCESS) {
-            image->state = WSI_IMAGE_IDLE;
-            return result;
-         }
-
          /* XXX allow setting of position */
          ret = drmModeSetCrtc(wsi->fd, connector->crtc_id,
                               image->fb_id, 0, 0,
@@ -2082,6 +2096,19 @@ wsi_display_surface_create_swapchain(
    chain->status = VK_SUCCESS;
 
    chain->surface = (VkIcdSurfaceDisplay *) icd_surface;
+
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(chain->surface->displayMode);
+
+   result = wsi_display_setup_connector(display_mode->connector, display_mode);
+   if (result != VK_SUCCESS)
+      return result;
+
+   p_atomic_inc(&display_mode->connector->refcount);
+
+   const uint64_t modifiers[] = {DRM_FORMAT_MOD_LINEAR, DRM_FORMAT_MOD_QCOM_COMPRESSED};
+   uint32_t num_modifiers = ARRAY_SIZE(modifiers);
+   const uint64_t *mods_ptr = modifiers;
 
    result = wsi_configure_native_image(&chain->base, create_info,
                                        0, NULL, NULL,
