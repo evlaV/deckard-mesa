@@ -84,6 +84,12 @@ struct wsi_swapchain {
 
    float timestamp_period;
 
+   pthread_mutex_t present_id_mutex;
+   pthread_cond_t present_id_cond;
+
+   uint64_t present_id;
+   bool out_of_date;
+
    /* Command pools, one per queue family */
    VkCommandPool *cmd_pools;
 
@@ -151,6 +157,9 @@ wsi_present_complete(struct wsi_swapchain *swapchain,
                      struct wsi_image *image,
                      uint64_t ust,
                      uint64_t msc);
+
+void
+wsi_swapchain_out_of_date(struct wsi_swapchain *swapchain);
 
 struct wsi_interface {
    VkResult (*get_support)(VkIcdSurfaceBase *surface,

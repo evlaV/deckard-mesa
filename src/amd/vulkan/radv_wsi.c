@@ -316,3 +316,18 @@ radv_GetPastPresentationTimingGOOGLE(VkDevice _device,
 						       pPresentationTimingCount,
 						       pPresentationTimings);
 }
+
+VkResult
+radv_WaitForPresentKHR(VkDevice _device,
+                       VkSwapchainKHR swapchain,
+                       uint64_t waitValue,
+                       uint64_t timeout)
+{
+	RADV_FROM_HANDLE(radv_device, device, _device);
+	struct radv_physical_device *pdevice = device->physical_device;
+
+	return wsi_common_wait_for_present(&pdevice->wsi_device,
+                                           swapchain,
+                                           waitValue,
+                                           timeout);
+}

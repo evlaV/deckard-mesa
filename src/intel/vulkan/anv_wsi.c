@@ -430,3 +430,18 @@ anv_GetPastPresentationTimingGOOGLE(VkDevice _device,
                                                   pPresentationTimingCount,
                                                   pPresentationTimings);
 }
+
+/* KHR_present_wait */
+VkResult
+anv_WaitForPresentKHR(VkDevice _device,
+                       VkSwapchainKHR swapchain,
+                       uint64_t waitValue,
+                       uint64_t timeout)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+
+   return wsi_common_wait_for_present(&device->physical->wsi_device,
+                                      swapchain,
+                                      waitValue,
+                                      timeout);
+}
