@@ -9372,6 +9372,13 @@ typedef void <name>CAMetalLayer</name>;
             <param optional="false,true"><type>uint32_t</type>* <name>pSwapchainTimeDomainCount</name></param>
             <param optional="true" len="pSwapchainTimeDomainCount"><type>VkSwapchainTimeDomainPropertiesEXT</type>* <name>pSwapchainTimeDomains</name></param>
         </command>
+	<command successcodes="VK_SUCCESS,VK_TIMEOUT" errorcodes="VK_ERROR_OUT_OF_HOST_MEMORY,VK_ERROR_OUT_OF_DEVICE_MEMORY,VK_ERROR_DEVICE_LOST">
+	    <proto><type>VkResult</type> <name>vkWaitForPresentKHR</name></proto>
+	    <param><type>VkDevice</type> <name>device</name></param>
+	    <param><type>VkSwapchainKHR</type> <name>swapchain</name></param>
+	    <param><type>uint64_t</type> <name>presentId</name></param>
+	    <param><type>uint64_t</type> <name>timeout</name></param>
+	</command>
     </commands>
 
     <feature api="vulkan" name="VK_VERSION_1_0" number="1.0" comment="Vulkan core API interface definitions">
@@ -13573,10 +13580,11 @@ typedef void <name>CAMetalLayer</name>;
                 <type name="VkValidationFeatureDisableEXT"/>
             </require>
         </extension>
-        <extension name="VK_KHR_extension_249" number="249" author="KHR" contact="Keith Packard @keithp" supported="disabled">
+        <extension name="VK_KHR_present_wait" number="249" type="device" requires="VK_KHR_swapchain,VK_KHR_present_id" author="KHR" contact="Keith Packard @keithp" supported="vulkan">
             <require>
-                <enum value="0"                                             name="VK_KHR_EXTENSION_249_SPEC_VERSION"/>
-                <enum value="&quot;VK_KHR_extension_249&quot;"              name="VK_KHR_EXTENSION_249_EXTENSION_NAME"/>
+                <enum value="1"                                         name="VK_KHR_PRESENT_WAIT_SPEC_VERSION"/>
+                <enum value="&quot;VK_KHR_present_wait&quot;"           name="VK_KHR_PRESENT_WAIT_EXTENSION_NAME"/>
+		<command name="vkWaitForPresentKHR"/>
             </require>
         </extension>
         <extension name="VK_NV_cooperative_matrix" number="250" type="device" requires="VK_KHR_get_physical_device_properties2" author="NV" contact="Jeff Bolz @jeffbolznv" supported="vulkan">

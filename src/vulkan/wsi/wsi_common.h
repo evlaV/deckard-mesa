@@ -329,6 +329,11 @@ wsi_common_get_past_presentation_timing(const struct wsi_device *wsi,
                                         uint32_t *pPresentationTimingCount,
                                         VkPastPresentationTimingGOOGLE
                                         *pPresentationTimings);
+VkResult
+wsi_common_wait_for_present(const struct wsi_device *wsi,
+                            VkSwapchainKHR swapchain,
+                            uint64_t waitValue,
+                            uint64_t timeout);
 
 /* VK_EXT_present_timing */
 VkResult

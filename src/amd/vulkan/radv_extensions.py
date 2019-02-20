@@ -92,6 +92,7 @@ EXTENSIONS = [
     Extension('VK_KHR_multiview',                         1, True),
     Extension('VK_KHR_pipeline_executable_properties',    1, True),
     Extension('VK_KHR_present_id',                        1, True),
+    Extension('VK_KHR_present_wait',                      1, True),
     Extension('VK_KHR_push_descriptor',                   2, True),
     Extension('VK_KHR_relaxed_block_layout',              1, True),
     Extension('VK_KHR_sampler_mirror_clamp_to_edge',      3, True),
