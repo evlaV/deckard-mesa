@@ -161,7 +161,7 @@ ir3_optimize_loop(nir_shader *s)
 			progress |= OPT(s, nir_opt_gcm, true);
 		else if (gcm == 2)
 			progress |= OPT(s, nir_opt_gcm, false);
-		progress |= OPT(s, nir_opt_peephole_select, 16, true, true);
+		progress |= OPT(s, nir_opt_peephole_select, 200, true, true);
 		progress |= OPT(s, nir_opt_intrinsics);
 		progress |= OPT(s, nir_opt_algebraic);
 		progress |= OPT(s, nir_lower_alu);
@@ -194,6 +194,7 @@ ir3_optimize_loop(nir_shader *s)
 			OPT(s, nir_opt_dce);
 		}
 		progress |= OPT(s, nir_opt_if, false);
+		progress |= OPT(s, nir_opt_loop_unroll, nir_var_all);
 		progress |= OPT(s, nir_opt_remove_phis);
 		progress |= OPT(s, nir_opt_undef);
 	} while (progress);
