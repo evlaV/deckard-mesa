@@ -521,6 +521,23 @@ tu_gather_xfb_info(nir_shader *nir, struct ir3_stream_output_info *info)
    ralloc_free(xfb);
 }
 
+static void
+tu_setup_struct_members(struct exec_list *var_list)
+{
+   nir_foreach_variable(var, var_list) {
+      if (!glsl_type_is_struct_or_ifc(var->type) || var->num_members)
+         continue;
+
+      var->num_members = glsl_get_length(var->type);
+      var->members = rzalloc_array(var, struct nir_variable_data, var->num_members);
+
+      for (unsigned i = 0; i < var->num_members; i++) {
+         var->members[i] = var->data;
+         var->members[i].location = var->data.location + i;
+      }
+   }
+}
+
 struct tu_shader *
 tu_shader_create(struct tu_device *dev,
                  gl_shader_stage stage,
@@ -565,6 +582,14 @@ tu_shader_create(struct tu_device *dev,
       fprintf(stderr, "translated nir:\n");
       nir_print_shader(nir, stderr);
    }
+
+   /* set up variable members so nir_split_per_member_structs can split them
+    * TODO: is this the right way of doing this?
+    */
+   if (stage == MESA_SHADER_FRAGMENT)
+      tu_setup_struct_members(&nir->inputs);
+   else if (stage == MESA_SHADER_VERTEX)
+      tu_setup_struct_members(&nir->outputs);
 
    /* multi step inlining procedure */
    NIR_PASS_V(nir, nir_lower_variable_initializers, nir_var_function_temp);
