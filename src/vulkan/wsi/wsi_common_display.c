@@ -1001,6 +1001,97 @@ wsi_display_destroy_buffer(struct wsi_display *wsi,
                    &((struct drm_gem_close) { .handle = buffer }));
 }
 
+static unsigned
+wsi_display_find_modifiers(struct wsi_display *wsi,
+                           struct wsi_display_mode *display_mode,
+                           uint32_t drm_format,
+                           uint64_t *modifiers,
+                           unsigned max_modifiers)
+{
+   drmModePlaneResPtr plane_resources;
+   drmModePlanePtr plane;
+   drmModeObjectPropertiesPtr props;
+   drmModePropertyBlobPtr blob;
+   struct drm_format_modifier_blob *m;
+   struct drm_format_modifier *mod;
+   int plane_id = -1, format_index = -1, blob_id = -1;
+   unsigned num_modifiers = 0;
+
+   plane_resources = drmModeGetPlaneResources(wsi->fd);
+   if (!plane_resources)
+      goto fail;
+
+   /* TODO: dont just take the first plane id
+    * this assumes all planes support the same modifiers
+    * to do this correctly we need to know the plane_id that will be used
+    */
+   if (plane_resources->count_planes)
+      plane_id = plane_resources->planes[0];
+
+   drmModeFreePlaneResources(plane_resources);
+
+   if (plane_id < 0)
+      goto fail;
+
+   plane = drmModeGetPlane(wsi->fd, plane_id);
+   if (!plane)
+      goto fail;
+
+   for (unsigned i = 0; i < plane->count_formats; i++) {
+      if (plane->formats[i] == drm_format)
+         format_index = i;
+   }
+   drmModeFreePlane(plane);
+
+   /* the plane doesn't support this format.. */
+   if (format_index < 0)
+      goto fail;
+
+   props = drmModeObjectGetProperties(wsi->fd, plane_id, DRM_MODE_OBJECT_PLANE);
+   if (!props)
+      goto fail;
+
+   for (unsigned i = 0; i < props->count_props; i++) {
+      drmModePropertyPtr info = drmModeGetProperty(wsi->fd, props->props[i]);
+      if (!info)
+         continue;
+
+      if (!strcmp(info->name, "IN_FORMATS"))
+         blob_id = props->prop_values[i];
+
+      drmModeFreeProperty(info);
+   }
+   drmModeFreeObjectProperties(props);
+
+   if (blob_id < 0)
+      goto fail;
+
+   blob = drmModeGetPropertyBlob(wsi->fd, blob_id);
+   if (!blob)
+      goto fail;
+
+   m = (struct drm_format_modifier_blob *)blob->data;
+   mod = (struct drm_format_modifier *)(((char *)m) + m->modifiers_offset);
+   for (unsigned i = 0; i < m->count_modifiers; i++) {
+         int index = format_index - mod[i].offset;
+         if (index < 0 || index >= 64)
+            continue;
+
+         if (mod[i].formats & ((uint64_t) 1 << index))
+               modifiers[num_modifiers++] = mod[i].modifier;
+
+         if (num_modifiers == max_modifiers)
+            break;
+   }
+   drmModeFreePropertyBlob(blob);
+
+   return num_modifiers;
+
+fail:
+   modifiers[0] = DRM_FORMAT_MOD_LINEAR;
+   return 1;
+}
+
 static VkResult
 wsi_display_image_init(VkDevice device_h,
                        struct wsi_swapchain *drv_chain,
@@ -1010,8 +1101,13 @@ wsi_display_image_init(VkDevice device_h,
 {
    struct wsi_display_swapchain *chain =
       (struct wsi_display_swapchain *) drv_chain;
+   struct wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(chain->surface->displayMode);
    struct wsi_display *wsi = chain->wsi;
    uint32_t drm_format = 0;
+   uint64_t modifiers[16];
+   uint32_t num_modifiers;
+   const uint64_t *mods_ptr = modifiers;
 
    for (unsigned i = 0; i < ARRAY_SIZE(available_surface_formats); i++) {
       if (create_info->imageFormat == available_surface_formats[i].format) {
@@ -1024,8 +1120,14 @@ wsi_display_image_init(VkDevice device_h,
    if (drm_format == 0)
       return VK_ERROR_DEVICE_LOST;
 
+   num_modifiers = wsi_display_find_modifiers(wsi,
+                                              display_mode,
+                                              drm_format,
+                                              modifiers,
+                                              ARRAY_SIZE(modifiers));
+
    VkResult result = wsi_create_native_image(&chain->base, create_info,
-                                             0, NULL, NULL,
+                                             1, &num_modifiers, &mods_ptr,
                                              &image->base);
    if (result != VK_SUCCESS)
       return result;
@@ -1039,21 +1141,26 @@ wsi_display_image_init(VkDevice device_h,
       close(image->base.fds[i]);
       image->base.fds[i] = -1;
       if (ret < 0)
-         goto fail_handle;
+         goto fail_handle;;
    }
+
+   for (unsigned i = 0; i < 4; i++)
+      modifiers[i] = i < image->base.num_planes ? image->base.drm_modifier : 0;
 
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
 
-   int ret = drmModeAddFB2(wsi->fd,
+   int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
                            create_info->imageExtent.height,
                            drm_format,
                            image->buffer,
                            image->base.row_pitches,
                            image->base.offsets,
-                           &image->fb_id, 0);
+                           modifiers,
+                           &image->fb_id,
+                           DRM_MODE_FB_MODIFIERS);
 
    if (ret)
       goto fail_fb;
