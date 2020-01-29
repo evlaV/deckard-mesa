@@ -352,10 +352,13 @@ finalize_current_cmd(struct fd_ringbuffer *ring)
 	debug_assert(!(ring->flags & _FD_RINGBUFFER_OBJECT));
 
 	struct msm_ringbuffer_sp *msm_ring = to_msm_ringbuffer_sp(ring);
-	unsigned idx = APPEND(&msm_ring->u, cmds);
+	unsigned size = offset_bytes(ring->cur, ring->start);
+	if (size) {
+		unsigned idx = APPEND(&msm_ring->u, cmds);
 
-	msm_ring->u.cmds[idx].ring_bo = fd_bo_ref(msm_ring->ring_bo);
-	msm_ring->u.cmds[idx].size = offset_bytes(ring->cur, ring->start);
+		msm_ring->u.cmds[idx].ring_bo = fd_bo_ref(msm_ring->ring_bo);
+		msm_ring->u.cmds[idx].size = size;
+	}
 }
 
 static void
