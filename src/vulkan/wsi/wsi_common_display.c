@@ -1587,9 +1587,12 @@ wsi_display_fence_wait(struct wsi_fence *fence_wsi, uint64_t timeout)
 
    wsi_display_debug("%9lu wait fence %lu %ld\n",
                      pthread_self(), fence->sequence,
-                     (int64_t) (timeout - wsi_common_get_current_time()));
+                     timeout);
    wsi_display_debug_code(uint64_t start_ns = wsi_common_get_current_time());
    pthread_mutex_lock(&wsi->wait_mutex);
+
+   if (timeout != 0 && timeout != UINT64_MAX)
+      timeout = wsi_rel_to_abs_time(timeout);
 
    VkResult result;
    int ret = 0;
