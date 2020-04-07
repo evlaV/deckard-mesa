@@ -101,6 +101,11 @@ struct fd_resource {
 	struct fd_bo *lrz;
 };
 
+struct fd_memory_object {
+	struct pipe_memory_object b;
+	struct fd_bo *bo;
+};
+
 static inline struct fd_resource *
 fd_resource(struct pipe_resource *ptex)
 {
