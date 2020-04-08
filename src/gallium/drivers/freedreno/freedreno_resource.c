@@ -1169,6 +1169,43 @@ fd_layout_resource_for_modifier(struct fd_resource *rsc, uint64_t modifier)
 	}
 }
 
+static struct fd_memory_object *
+fd_memory_object(struct pipe_memory_object *pmemobj)
+{
+	return (struct fd_memory_object *)pmemobj;
+}
+
+static struct pipe_resource *
+fd_resource_from_memobj(struct pipe_screen *pscreen,
+						const struct pipe_resource *templ,
+						struct pipe_memory_object *pmemobj,
+						uint64_t offset)
+{
+	struct fd_screen *screen = fd_screen(pscreen);
+	struct fd_memory_object *fd_memobj = fd_memory_object(pmemobj);
+	assert(fd_memobj->bo);
+
+	uint64_t modifier = DRM_FORMAT_MOD_INVALID;
+	if (templ->flags & PIPE_RESOURCE_FLAG_FORCE_LINEAR_TILING) {
+		modifier = DRM_FORMAT_MOD_LINEAR;
+	} else if (is_a6xx(screen) && templ->width0 >= FDL_MIN_UBWC_WIDTH) {
+		modifier = DRM_FORMAT_MOD_QCOM_COMPRESSED;
+	}
+
+	struct pipe_resource *p_res =
+		fd_resource_create_with_modifiers(pscreen, templ, &modifier, 1);
+	if (!p_res)
+		return NULL;
+
+	struct fd_resource *fd_res = fd_resource(p_res);
+	assert(fd_res);
+
+	/* Steal bo's reference from the memory object. */
+	fd_res->bo = fd_memobj->bo;
+
+	return p_res;
+}
+
 static struct pipe_memory_object *
 fd_memobj_create_from_handle(struct pipe_screen *pscreen,
 							 struct winsys_handle *whandle,
@@ -1217,6 +1254,7 @@ fd_resource_screen_init(struct pipe_screen *pscreen)
 
 	/* GL_EXT_memory_object */
 	pscreen->memobj_create_from_handle = fd_memobj_create_from_handle;
+	pscreen->resource_from_memobj = fd_resource_from_memobj;
 }
 
 static void
