@@ -48,7 +48,7 @@ fdl6_get_ubwc_blockwidth(struct fdl_layout *layout,
 		uint8_t width;
 		uint8_t height;
 	} blocksize[] = {
-		{ 16, 4 }, /* cpp = 1 */
+		{ 32, 8 }, /* cpp = 1 */
 		{ 16, 4 }, /* cpp = 2 */
 		{ 16, 4 }, /* cpp = 4 */
 		{ 8, 4, }, /* cpp = 8 */
