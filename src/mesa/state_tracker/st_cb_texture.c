@@ -2902,6 +2902,9 @@ st_texture_create_from_memory(struct st_context *st,
    pt.bind = bind;
    /* only set this for OpenGL textures, not renderbuffers */
    pt.flags = PIPE_RESOURCE_FLAG_TEXTURING_MORE_LIKELY;
+   if (memObj->TextureTiling == GL_LINEAR_TILING_EXT)
+      pt.flags |= PIPE_RESOURCE_FLAG_FORCE_LINEAR_TILING;
+
    pt.nr_samples = nr_samples;
    pt.nr_storage_samples = nr_samples;
 
@@ -2980,6 +2983,9 @@ st_texture_storage(struct gl_context *ctx,
                                    &ptWidth, &ptHeight, &ptDepth, &ptLayers);
 
    if (smObj) {
+      smObj->TextureTiling = texObj->TextureTiling;
+      bindings |= PIPE_BIND_SHARED;
+
       stObj->pt = st_texture_create_from_memory(st,
                                                 smObj,
                                                 offset,
