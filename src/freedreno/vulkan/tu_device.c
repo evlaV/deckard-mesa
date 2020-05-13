@@ -1952,8 +1952,8 @@ tu_GetImageMemoryRequirements(VkDevice _device,
    TU_FROM_HANDLE(tu_image, image, _image);
 
    pMemoryRequirements->memoryTypeBits = 1;
-   pMemoryRequirements->size = image->layout.size;
-   pMemoryRequirements->alignment = image->layout.base_align;
+   pMemoryRequirements->size = image->total_size;
+   pMemoryRequirements->alignment = image->layout[0].base_align;
 }
 
 void
@@ -2385,6 +2385,7 @@ tu_CreateSampler(VkDevice _device,
       return vk_error(device->instance, VK_ERROR_OUT_OF_HOST_MEMORY);
 
    tu_init_sampler(device, sampler, pCreateInfo);
+
    *pSampler = tu_sampler_to_handle(sampler);
 
    return VK_SUCCESS;
