@@ -1562,25 +1562,6 @@ tu_GetSemaphoreFdKHR(VkDevice _device,
 }
 
 VkResult
-tu_ImportFenceFdKHR(VkDevice _device,
-                    const VkImportFenceFdInfoKHR *pImportFenceFdInfo)
-{
-   tu_stub();
-
-   return VK_SUCCESS;
-}
-
-VkResult
-tu_GetFenceFdKHR(VkDevice _device,
-                 const VkFenceGetFdInfoKHR *pGetFdInfo,
-                 int *pFd)
-{
-   tu_stub();
-
-   return VK_SUCCESS;
-}
-
-VkResult
 tu_EnumerateInstanceExtensionProperties(const char *pLayerName,
                                         uint32_t *pPropertyCount,
                                         VkExtensionProperties *pProperties)

@@ -199,6 +199,36 @@ tu_DestroyFence(VkDevice _device,
    vk_free2(&device->alloc, pAllocator, fence);
 }
 
+VkResult
+tu_ImportFenceFdKHR(VkDevice _device,
+                    const VkImportFenceFdInfoKHR *pImportFenceFdInfo)
+{
+   tu_stub();
+
+   return VK_SUCCESS;
+}
+
+VkResult
+tu_GetFenceFdKHR(VkDevice _device,
+                 const VkFenceGetFdInfoKHR *pGetFdInfo,
+                 int *pFd)
+{
+   TU_FROM_HANDLE(tu_fence, fence, pGetFdInfo->fence);
+
+   if (pGetFdInfo->handleType != VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT) {
+      /* behavior may not be valid */
+      tu_finishme("vkGetFenceFdKHR non sync fd");
+   }
+
+   if (fence->fence_wsi) {
+      /* wsi really needs to just give us an out fence.. */
+      tu_finishme("vkGetFenceFdKHR on wsi fence");
+   }
+
+   *pFd = dup(fence->fd);
+   return VK_SUCCESS;
+}
+
 /**
  * Initialize a pollfd array from fences.
  */
