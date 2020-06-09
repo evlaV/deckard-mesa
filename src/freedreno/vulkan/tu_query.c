@@ -780,7 +780,7 @@ tu_CmdWriteTimestamp(VkCommandBuffer commandBuffer,
 {
    TU_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    TU_FROM_HANDLE(tu_query_pool, pool, queryPool);
-   struct tu_cs *cs = cmd->state.pass ? &cmd->draw_epilogue_cs : &cmd->cs;
+   struct tu_cs *cs = cmd->state.pass ? &cmd->draw_cs : &cmd->cs;
 
    tu_bo_list_add(&cmd->bo_list, &pool->bo, MSM_SUBMIT_BO_WRITE);
 
@@ -790,7 +790,8 @@ tu_CmdWriteTimestamp(VkCommandBuffer commandBuffer,
    tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
    tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(REG_A6XX_CP_ALWAYS_ON_COUNTER_LO) |
                   CP_REG_TO_MEM_0_CNT(2) |
-                  CP_REG_TO_MEM_0_64B);
+                  CP_REG_TO_MEM_0_64B |
+                  CP_REG_TO_MEM_0_ACCUMULATE);
    tu_cs_emit_qw(cs, query_result_iova(pool, query, 0));
 
    tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
