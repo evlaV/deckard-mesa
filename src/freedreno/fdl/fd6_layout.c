@@ -29,49 +29,13 @@
 
 #include "freedreno_layout.h"
 
-static bool
-is_r8g8(struct fdl_layout *layout, enum pipe_format format)
-{
-	return layout->cpp == 2 && util_format_get_nr_components(format) == 2;
-}
-
 static void
-fdl6_get_ubwc_blockwidth(struct fdl_layout *layout, enum pipe_format format,
-		uint8_t *blockwidth, uint8_t *blockheight)
-{
-	static const struct {
-		uint8_t width;
-		uint8_t height;
-	} blocksize[] = {
-		{ 16, 4 }, /* cpp = 1 */
-		{ 16, 4 }, /* cpp = 2 */
-		{ 16, 4 }, /* cpp = 4 */
-		{ 8, 4, }, /* cpp = 8 */
-		{ 4, 4, }, /* cpp = 16 */
-		{ 4, 2 },  /* cpp = 32 */
-		{ 0, 0 },  /* cpp = 64 (TODO) */
-	};
-
-	/* special case for r8g8: */
-	if (is_r8g8(layout, format)) {
-		*blockwidth = 16;
-		*blockheight = 8;
-		return;
-	}
-
-	uint32_t cpp = fdl_cpp_shift(layout);
-	assert(cpp < ARRAY_SIZE(blocksize));
-	*blockwidth = blocksize[cpp].width;
-	*blockheight = blocksize[cpp].height;
-}
-
-static void
-fdl6_tile_alignment(struct fdl_layout *layout, enum pipe_format format, uint32_t *heightalign)
+fdl6_tile_alignment(struct fdl_layout *layout, bool is_r8g8, uint32_t *heightalign)
 {
 	layout->pitchalign = fdl_cpp_shift(layout);
 	*heightalign = 16;
 
-	if (is_r8g8(layout, format) || layout->cpp == 1) {
+	if (is_r8g8 || layout->cpp == 1) {
 		layout->pitchalign = 1;
 		*heightalign = 32;
 	} else if (layout->cpp == 2) {
@@ -98,9 +62,10 @@ fdl6_layout(struct fdl_layout *layout,
 		enum pipe_format format, uint32_t nr_samples,
 		uint32_t width0, uint32_t height0, uint32_t depth0,
 		uint32_t mip_levels, uint32_t array_size, bool is_3d,
-		struct fdl_explicit_layout *explicit_layout)
+		struct fdl_explicit_layout *explicit_layout, bool is_y8)
 {
 	uint32_t offset = 0, heightalign;
+	bool is_r8g8 = false;
 
 	assert(nr_samples > 0);
 	layout->width0 = width0;
@@ -114,7 +79,37 @@ fdl6_layout(struct fdl_layout *layout,
 	layout->nr_samples = nr_samples;
 	layout->layer_first = !is_3d;
 
-	fdl6_get_ubwc_blockwidth(layout, format, &layout->ubwc_blockwidth, &layout->ubwc_blockheight);
+	if (layout->cpp == 2 && util_format_get_nr_components(format) == 2)
+		is_r8g8 = true;
+
+	/* media formats have different UBWC block width/height,
+	 * for Y this only applies to FMT6_8_PLANE_UNORM, but
+	 * for UV this affects all 8_8 formats
+	 */
+	if (is_y8) {
+		layout->ubwc_blockwidth = 32;
+		layout->ubwc_blockheight = 8;
+	} else if (is_r8g8) {
+		layout->ubwc_blockwidth = 16;
+		layout->ubwc_blockheight = 8;
+	} else {
+		static const struct {
+			uint8_t width;
+			uint8_t height;
+		} blocksize[] = {
+			{ 16, 4 }, /* cpp = 1 */
+			{ 16, 4 }, /* cpp = 2 */
+			{ 16, 4 }, /* cpp = 4 */
+			{ 8, 4, }, /* cpp = 8 */
+			{ 4, 4, }, /* cpp = 16 */
+			{ 4, 2 },  /* cpp = 32 */
+			{ 0, 0 },  /* cpp = 64 (TODO) */
+		};
+		uint32_t cpp = fdl_cpp_shift(layout);
+		assert(cpp < ARRAY_SIZE(blocksize));
+		layout->ubwc_blockwidth = blocksize[cpp].width;
+		layout->ubwc_blockheight = blocksize[cpp].height;
+	}
 
 	if (depth0 > 1 || layout->ubwc_blockwidth == 0)
 		layout->ubwc = false;
@@ -132,7 +127,7 @@ fdl6_layout(struct fdl_layout *layout,
 	 * expect the tiled alignment on the tiled levels)
 	 */
 	if (layout->tile_mode) {
-		fdl6_tile_alignment(layout, format, &heightalign);
+		fdl6_tile_alignment(layout, is_r8g8, &heightalign);
 	} else {
 		layout->base_align = 64;
 		layout->pitchalign = 0;
