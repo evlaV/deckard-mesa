@@ -1525,7 +1525,7 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
                   staging_image.level_count,
                   staging_image.layer_count,
                   extent.depth > 1,
-                  NULL);
+                  NULL, false);
 
       VkResult result = tu_get_scratch_bo(cmd->device,
                                           staging_image.layout[0].size,
