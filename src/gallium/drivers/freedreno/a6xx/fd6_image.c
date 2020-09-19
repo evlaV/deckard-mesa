@@ -192,8 +192,8 @@ static void emit_image_tex(struct fd_ringbuffer *ring, struct fd6_image *img)
 	OUT_RING(ring, 0x00000000);   /* texconst6 */
 
 	if (ubwc_enabled) {
-		uint32_t block_width, block_height;
-		fdl6_get_ubwc_blockwidth(&rsc->layout, &block_width, &block_height);
+		uint32_t block_width = rsc->layout.ubwc_blockwidth;
+		uint32_t block_height = rsc->layout.ubwc_blockheight;
 
 		OUT_RELOC(ring, rsc->bo, img->ubwc_offset, 0, 0);
 		OUT_RING(ring, A6XX_TEX_CONST_9_FLAG_BUFFER_ARRAY_PITCH(rsc->layout.ubwc_layer_size >> 2));
