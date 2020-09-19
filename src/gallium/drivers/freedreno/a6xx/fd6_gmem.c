@@ -295,8 +295,8 @@ patch_fb_read_sysmem(struct fd_batch *batch)
    uint32_t texconst0 = fd6_tex_const_0(
       psurf->texture, psurf->u.tex.level, psurf->format, PIPE_SWIZZLE_X,
       PIPE_SWIZZLE_Y, PIPE_SWIZZLE_Z, PIPE_SWIZZLE_W);
-   uint32_t block_width, block_height;
-   fdl6_get_ubwc_blockwidth(&rsc->layout, &block_width, &block_height);
+   uint32_t block_width = rsc->layout.ubwc_blockwidth;
+   uint32_t block_height = rsc->layout.ubwc_blockheight;
 
    for (unsigned i = 0; i < num_patches; i++) {
       struct fd_cs_patch *patch = fd_patch_element(&batch->fb_read_patches, i);

@@ -319,8 +319,8 @@ fd6_sampler_view_update(struct fd_context *ctx,
       so->texconst3 |= A6XX_TEX_CONST_3_TILE_ALL;
 
    if (ubwc_enabled) {
-      uint32_t block_width, block_height;
-      fdl6_get_ubwc_blockwidth(&rsc->layout, &block_width, &block_height);
+      uint32_t block_width = rsc->layout.ubwc_blockwidth;
+      uint32_t block_height = rsc->layout.ubwc_blockheight;
 
       so->texconst3 |= A6XX_TEX_CONST_3_FLAG;
       so->texconst9 |= A6XX_TEX_CONST_9_FLAG_BUFFER_ARRAY_PITCH(

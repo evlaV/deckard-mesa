@@ -36,9 +36,9 @@ is_r8g8(struct fdl_layout *layout)
           util_format_get_nr_components(layout->format) == 2;
 }
 
-void
-fdl6_get_ubwc_blockwidth(struct fdl_layout *layout, uint32_t *blockwidth,
-                         uint32_t *blockheight)
+static void
+fdl6_get_ubwc_blockwidth(struct fdl_layout *layout, uint8_t *blockwidth,
+                         uint8_t *blockheight)
 {
    static const struct {
       uint8_t width;
@@ -101,7 +101,6 @@ fdl6_layout(struct fdl_layout *layout, enum pipe_format format,
             bool is_3d, struct fdl_explicit_layout *explicit_layout)
 {
    uint32_t offset = 0, heightalign;
-   uint32_t ubwc_blockwidth, ubwc_blockheight;
 
    assert(nr_samples > 0);
    layout->width0 = width0;
@@ -116,9 +115,9 @@ fdl6_layout(struct fdl_layout *layout, enum pipe_format format,
    layout->nr_samples = nr_samples;
    layout->layer_first = !is_3d;
 
-   fdl6_get_ubwc_blockwidth(layout, &ubwc_blockwidth, &ubwc_blockheight);
+   fdl6_get_ubwc_blockwidth(layout, &layout->ubwc_blockwidth, &layout->ubwc_blockheight);
 
-   if (depth0 > 1 || ubwc_blockwidth == 0)
+   if (depth0 > 1 || layout->ubwc_blockwidth == 0)
       layout->ubwc = false;
 
    if (layout->ubwc || util_format_is_depth_or_stencil(format))
@@ -178,9 +177,9 @@ fdl6_layout(struct fdl_layout *layout, enum pipe_format format,
       ubwc_height0 = util_next_power_of_two(height0);
       ubwc_tile_height_alignment = 64;
    }
-   layout->ubwc_width0 = align(DIV_ROUND_UP(ubwc_width0, ubwc_blockwidth),
+   layout->ubwc_width0 = align(DIV_ROUND_UP(ubwc_width0, layout->ubwc_blockwidth),
                                RGB_TILE_WIDTH_ALIGNMENT);
-   ubwc_height0 = align(DIV_ROUND_UP(ubwc_height0, ubwc_blockheight),
+   ubwc_height0 = align(DIV_ROUND_UP(ubwc_height0, layout->ubwc_blockheight),
                         ubwc_tile_height_alignment);
 
    for (uint32_t level = 0; level < mip_levels; level++) {

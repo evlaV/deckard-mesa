@@ -327,8 +327,8 @@ tu_image_view_init(struct tu_image_view *iview,
    }
 
    if (ubwc_enabled) {
-      uint32_t block_width, block_height;
-      fdl6_get_ubwc_blockwidth(layout, &block_width, &block_height);
+      uint32_t block_width = layout->ubwc_blockwidth;
+      uint32_t block_height = layout->ubwc_blockheight;
 
       iview->descriptor[3] |= A6XX_TEX_CONST_3_FLAG;
       iview->descriptor[7] = ubwc_addr;

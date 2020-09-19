@@ -130,6 +130,9 @@ struct fdl_layout {
    uint32_t size;       /* Size of the whole image, in bytes. */
    uint32_t base_align; /* Alignment of the base address, in bytes. */
    uint8_t pitchalign;  /* log2(pitchalign) */
+
+   uint8_t ubwc_blockwidth;
+   uint8_t ubwc_blockheight;
 };
 
 static inline uint32_t
@@ -251,8 +254,5 @@ fdl_set_pitchalign(struct fdl_layout *layout, unsigned pitchalign)
 }
 
 void fdl_dump_layout(struct fdl_layout *layout);
-
-void fdl6_get_ubwc_blockwidth(struct fdl_layout *layout, uint32_t *blockwidth,
-                              uint32_t *blockheight);
 
 #endif /* FREEDRENO_LAYOUT_H_ */
