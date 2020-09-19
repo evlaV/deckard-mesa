@@ -44,7 +44,6 @@ fdl5_layout(struct fdl_layout *layout, enum pipe_format format,
    layout->cpp *= nr_samples;
    layout->cpp_shift = ffs(layout->cpp) - 1;
 
-   layout->format = format;
    layout->nr_samples = nr_samples;
    layout->layer_first = !is_3d;
 
@@ -56,9 +55,9 @@ fdl5_layout(struct fdl_layout *layout, enum pipe_format format,
 
    /* use 128 pixel alignment for cpp=1 and cpp=2 */
    if (layout->cpp < 4 && layout->tile_mode)
-      fdl_set_pitchalign(layout, fdl_cpp_shift(layout) + 7);
+      fdl_set_pitchalign(layout, format, fdl_cpp_shift(layout) + 7);
    else
-      fdl_set_pitchalign(layout, fdl_cpp_shift(layout) + 6);
+      fdl_set_pitchalign(layout, format, fdl_cpp_shift(layout) + 6);
 
    for (uint32_t level = 0; level < mip_levels; level++) {
       struct fdl_slice *slice = &layout->slices[level];

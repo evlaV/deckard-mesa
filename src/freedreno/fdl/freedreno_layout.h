@@ -125,7 +125,6 @@ struct fdl_layout {
 
    uint32_t width0, height0, depth0;
    uint32_t nr_samples;
-   enum pipe_format format;
 
    uint32_t size;       /* Size of the whole image, in bytes. */
    uint32_t base_align; /* Alignment of the base address, in bytes. */
@@ -246,9 +245,10 @@ bool fdl6_layout(struct fdl_layout *layout, enum pipe_format format,
                  bool is_3d, struct fdl_explicit_layout *plane_layout);
 
 static inline void
-fdl_set_pitchalign(struct fdl_layout *layout, unsigned pitchalign)
+fdl_set_pitchalign(struct fdl_layout *layout, enum pipe_format format,
+                   unsigned pitchalign)
 {
-   uint32_t nblocksx = util_format_get_nblocksx(layout->format, layout->width0);
+   uint32_t nblocksx = util_format_get_nblocksx(format, layout->width0);
    layout->pitchalign = pitchalign;
    layout->pitch0 = align(nblocksx * layout->cpp, 1 << pitchalign);
 }

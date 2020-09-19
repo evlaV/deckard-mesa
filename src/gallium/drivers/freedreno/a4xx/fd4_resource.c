@@ -52,7 +52,7 @@ fd4_setup_slices(struct fd_resource *rsc)
    }
 
    /* 32 pixel alignment */
-   fdl_set_pitchalign(&rsc->layout, fdl_cpp_shift(&rsc->layout) + 5);
+   fdl_set_pitchalign(&rsc->layout, format, fdl_cpp_shift(&rsc->layout) + 5);
 
    for (level = 0; level <= prsc->last_level; level++) {
       struct fdl_slice *slice = fd_resource_slice(rsc, level);

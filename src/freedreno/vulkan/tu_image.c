@@ -690,7 +690,7 @@ tu_CreateImage(VkDevice _device,
       image->total_size = MAX2(image->total_size, layout->size);
    }
 
-   const struct util_format_description *desc = util_format_description(image->layout[0].format);
+   const struct util_format_description *desc = vk_format_description(image->vk_format);
    if (util_format_has_depth(desc) && !(device->instance->debug_flags & TU_DEBUG_NOLRZ))
    {
       /* Depth plane is the first one */

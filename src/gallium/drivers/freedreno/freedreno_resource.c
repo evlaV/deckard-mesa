@@ -1066,8 +1066,6 @@ fd_resource_layout_init(struct pipe_resource *prsc)
    struct fd_resource *rsc = fd_resource(prsc);
    struct fdl_layout *layout = &rsc->layout;
 
-   layout->format = prsc->format;
-
    layout->width0 = prsc->width0;
    layout->height0 = prsc->height0;
    layout->depth0 = prsc->depth0;
