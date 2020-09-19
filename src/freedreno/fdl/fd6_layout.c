@@ -30,14 +30,13 @@
 #include "freedreno_layout.h"
 
 static bool
-is_r8g8(struct fdl_layout *layout)
+is_r8g8(struct fdl_layout *layout, enum pipe_format format)
 {
-	return layout->cpp == 2 &&
-		   util_format_get_nr_components(layout->format) == 2;
+	return layout->cpp == 2 && util_format_get_nr_components(format) == 2;
 }
 
 static void
-fdl6_get_ubwc_blockwidth(struct fdl_layout *layout,
+fdl6_get_ubwc_blockwidth(struct fdl_layout *layout, enum pipe_format format,
 		uint8_t *blockwidth, uint8_t *blockheight)
 {
 	static const struct {
@@ -54,7 +53,7 @@ fdl6_get_ubwc_blockwidth(struct fdl_layout *layout,
 	};
 
 	/* special case for r8g8: */
-	if (is_r8g8(layout)) {
+	if (is_r8g8(layout, format)) {
 		*blockwidth = 16;
 		*blockheight = 8;
 		return;
@@ -67,12 +66,12 @@ fdl6_get_ubwc_blockwidth(struct fdl_layout *layout,
 }
 
 static void
-fdl6_tile_alignment(struct fdl_layout *layout, uint32_t *heightalign)
+fdl6_tile_alignment(struct fdl_layout *layout, enum pipe_format format, uint32_t *heightalign)
 {
 	layout->pitchalign = fdl_cpp_shift(layout);
 	*heightalign = 16;
 
-	if (is_r8g8(layout) || layout->cpp == 1) {
+	if (is_r8g8(layout, format) || layout->cpp == 1) {
 		layout->pitchalign = 1;
 		*heightalign = 32;
 	} else if (layout->cpp == 2) {
@@ -112,11 +111,10 @@ fdl6_layout(struct fdl_layout *layout,
 	layout->cpp *= nr_samples;
 	layout->cpp_shift = ffs(layout->cpp) - 1;
 
-	layout->format = format;
 	layout->nr_samples = nr_samples;
 	layout->layer_first = !is_3d;
 
-	fdl6_get_ubwc_blockwidth(layout, &layout->ubwc_blockwidth, &layout->ubwc_blockheight);
+	fdl6_get_ubwc_blockwidth(layout, format, &layout->ubwc_blockwidth, &layout->ubwc_blockheight);
 
 	if (depth0 > 1 || layout->ubwc_blockwidth == 0)
 		layout->ubwc = false;
@@ -134,7 +132,7 @@ fdl6_layout(struct fdl_layout *layout,
 	 * expect the tiled alignment on the tiled levels)
 	 */
 	if (layout->tile_mode) {
-		fdl6_tile_alignment(layout, &heightalign);
+		fdl6_tile_alignment(layout, format, &heightalign);
 	} else {
 		layout->base_align = 64;
 		layout->pitchalign = 0;
@@ -156,7 +154,7 @@ fdl6_layout(struct fdl_layout *layout,
 		heightalign = 1;
 	}
 
-	fdl_set_pitchalign(layout, layout->pitchalign + 6);
+	fdl_set_pitchalign(layout, format, layout->pitchalign + 6);
 
 	if (explicit_layout) {
 		offset = explicit_layout->offset;
