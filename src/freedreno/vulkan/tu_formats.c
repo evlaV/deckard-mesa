@@ -307,6 +307,7 @@ tu6_get_native_format(VkFormat format)
       TU6_xTx(B8G8R8G8_422_UNORM,         G8R8B8R8_422_UNORM,        WZYX)
       TU6_xTx(G8_B8_R8_3PLANE_420_UNORM,  R8_G8_B8_3PLANE_420_UNORM, WZYX)
       TU6_xTx(G8_B8R8_2PLANE_420_UNORM,   R8_G8B8_2PLANE_420_UNORM,  WZYX)
+      TU6_xTC(Y8_UNORM,                   NV12_Y,                    WZYX)
       TU6_xTC(A4R4G4B4_UNORM_PACK16_EXT,  4_4_4_4_UNORM,             WXYZ)
       TU6_xTC(A4B4G4R4_UNORM_PACK16_EXT,  4_4_4_4_UNORM,             WZYX)
       default:
@@ -339,6 +340,12 @@ tu6_format_color(VkFormat format, enum a6xx_tile_mode tile_mode)
    if (fmt.fmt == FMT6_10_10_10_2_UNORM)
       fmt.fmt = FMT6_10_10_10_2_UNORM_DEST;
 
+   /* note: this may be more about UBWC than tiling,
+    * but we don't support tiled non-UBWC NV12
+    */
+   if (!tile_mode && format == VK_FORMAT_Y8_UNORM)
+         fmt.fmt = FMT6_8_UNORM;
+
    if (tile_mode)
       fmt.swap = WZYX;
 
@@ -357,6 +364,11 @@ tu6_format_texture(VkFormat format, enum a6xx_tile_mode tile_mode)
          fmt.fmt = FMT6_1_5_5_5_UNORM, fmt.swap = WXYZ;
       if (format == VK_FORMAT_B5G5R5A1_UNORM_PACK16)
          fmt.fmt = FMT6_1_5_5_5_UNORM, fmt.swap = WZYX;
+      /* note: this may be more about UBWC than tiling,
+       * but we don't support tiled non-UBWC NV12
+       */
+      if (format == VK_FORMAT_Y8_UNORM)
+         fmt.fmt = FMT6_8_UNORM;
    } else {
       fmt.swap = WZYX;
    }
@@ -452,10 +464,7 @@ tu_physical_device_get_format_properties(
 
    if (format == VK_FORMAT_G8B8G8R8_422_UNORM ||
        format == VK_FORMAT_B8G8R8G8_422_UNORM) {
-      /* no tiling for special UBWC formats
-       * TODO: NV12 can be UBWC but has a special UBWC format for accessing the Y plane aspect
-       * for 3plane, tiling/UBWC might be supported, but the blob doesn't use tiling
-       */
+      /* no tiling for special YUYV formats */
       optimal = 0;
    }
 

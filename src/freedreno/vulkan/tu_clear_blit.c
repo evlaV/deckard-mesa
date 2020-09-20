@@ -937,6 +937,9 @@ r3d_dst(struct tu_cs *cs, const struct tu_image_view *iview, uint32_t layer)
    tu_cs_emit_pkt4(cs, REG_A6XX_RB_MRT_FLAG_BUFFER(0), 3);
    tu_cs_image_flag_ref(cs, iview, layer);
 
+   /* use color format from RB_MRT_BUF_INFO. this register is relevant for FMT6_8_PLANE_UNORM */
+   tu_cs_emit_regs(cs, A6XX_GRAS_2D_BLIT_INFO(.color_format = iview->RB_MRT_BUF_INFO & 0xff));
+
    tu_cs_emit_regs(cs, A6XX_RB_RENDER_CNTL(.flag_mrts = iview->ubwc_enabled));
 }
 
@@ -1204,7 +1207,7 @@ copy_format(VkFormat format, VkImageAspectFlags aspect_mask, bool copy_buffer)
       if (aspect_mask == VK_IMAGE_ASPECT_PLANE_1_BIT)
          return VK_FORMAT_R8G8_UNORM;
       else
-         return VK_FORMAT_R8_UNORM;
+         return VK_FORMAT_Y8_UNORM;
    case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
       return VK_FORMAT_R8_UNORM;
 
@@ -1507,9 +1510,9 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
       ops = &r3d_ops;
    }
 
-   /* TODO: G8_B8R8_2PLANE_420_UNORM Y plane has different hardware format,
-    * which matters for UBWC. buffer_to_image/etc can fail because of this
-    */
+   /* note: could use "R8_UNORM" when no UBWC */
+   if (src_format == VK_FORMAT_Y8_UNORM)
+      ops = &r3d_ops;
 
    VkOffset3D offset = info->imageOffset;
    VkExtent3D extent = info->imageExtent;
@@ -1579,14 +1582,19 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
    uint32_t layers = MAX2(info->imageExtent.depth, info->imageSubresource.layerCount);
    VkFormat dst_format =
       copy_format(src_image->vk_format, info->imageSubresource.aspectMask, true);
+   const struct blit_ops *ops = &r2d_ops;
    bool stencil_read = false;
 
    if (src_image->vk_format == VK_FORMAT_D24_UNORM_S8_UINT &&
        info->imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT) {
+      ops = &r3d_ops;
       stencil_read = true;
    }
 
-   const struct blit_ops *ops = stencil_read ? &r3d_ops : &r2d_ops;
+   /* note: could use "R8_UNORM" when no UBWC */
+   if (dst_format == VK_FORMAT_Y8_UNORM)
+      ops = &r3d_ops;
+
    VkOffset3D offset = info->imageOffset;
    VkExtent3D extent = info->imageExtent;
    uint32_t dst_width = info->bufferRowLength ?: extent.width;
@@ -1710,6 +1718,11 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
 
    VkFormat dst_format = copy_format(dst_image->vk_format, info->dstSubresource.aspectMask, false);
    VkFormat src_format = copy_format(src_image->vk_format, info->srcSubresource.aspectMask, false);
+
+   /* note: could use "R8_UNORM" when no UBWC */
+   if (dst_format == VK_FORMAT_Y8_UNORM ||
+       src_format == VK_FORMAT_Y8_UNORM)
+      ops = &r3d_ops;
 
    bool use_staging_blit = false;
 

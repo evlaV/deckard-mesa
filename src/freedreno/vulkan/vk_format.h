@@ -27,12 +27,7 @@
 #ifndef VK_FORMAT_H
 #define VK_FORMAT_H
 
-#include <assert.h>
-#include <util/macros.h>
-#include <util/format/u_format.h>
-#include <vulkan/util/vk_format.h>
-
-#include <vulkan/vulkan.h>
+#include "tu_util.h"
 
 static inline const struct util_format_description *
 vk_format_description(VkFormat format)

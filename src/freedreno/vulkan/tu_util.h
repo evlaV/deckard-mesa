@@ -22,8 +22,18 @@
 #include "adreno_pm4.xml.h"
 #include "a6xx.xml.h"
 
+#include <vulkan/util/vk_format.h>
 #include <vulkan/vulkan.h>
 #include "vk_util.h"
+
+/* internal format for the Y plane of NV12 */
+#define VK_FORMAT_Y8_UNORM VK_FORMAT_MAX_ENUM
+
+/* until there is a better solution (Vulkan format for Y8?): */
+#define vk_format_to_pipe_format(x) ({ \
+   VkFormat _fmt = (x); \
+   _fmt == VK_FORMAT_Y8_UNORM ? PIPE_FORMAT_Y8_UNORM : vk_format_to_pipe_format(_fmt); \
+})
 
 #define TU_STAGE_MASK ((1 << MESA_SHADER_STAGES) - 1)
 

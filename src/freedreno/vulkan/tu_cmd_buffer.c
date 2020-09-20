@@ -276,6 +276,11 @@ tu6_emit_mrt(struct tu_cmd_buffer *cmd,
       tu_cs_image_flag_ref(cs, iview, 0);
    }
 
+   /* not clear exactly what the value should be with MRT involved,
+    * but seems to be fine being 0 for non-FMT6_8_PLANE_UNORM formats
+    */
+   tu_cs_emit_regs(cs, A6XX_GRAS_2D_BLIT_INFO());
+
    tu_cs_emit_regs(cs,
                    A6XX_RB_SRGB_CNTL(.dword = subpass->srgb_cntl));
    tu_cs_emit_regs(cs,
