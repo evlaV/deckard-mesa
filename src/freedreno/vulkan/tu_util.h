@@ -22,7 +22,17 @@
 #include "adreno_pm4.xml.h"
 #include "a6xx.xml.h"
 
+#include <vulkan/util/vk_format.h>
 #include <vulkan/vulkan.h>
+
+/* internal format for the Y plane of NV12 */
+#define VK_FORMAT_Y8_UNORM VK_FORMAT_MAX_ENUM
+
+/* until there is a better solution (pipe format for Y8?): */
+#define vk_format_to_pipe_format(x) ({ \
+   VkFormat _fmt = (x); \
+   _fmt == VK_FORMAT_Y8_UNORM ? PIPE_FORMAT_R8_UNORM : vk_format_to_pipe_format(_fmt); \
+})
 
 static inline gl_shader_stage
 vk_to_mesa_shader_stage(VkShaderStageFlagBits vk_stage)
