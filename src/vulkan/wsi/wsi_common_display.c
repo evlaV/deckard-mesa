@@ -1046,7 +1046,9 @@ static const struct {
    uint32_t     drm_format;
 } available_surface_formats[] = {
    { .format = VK_FORMAT_B8G8R8A8_SRGB, .drm_format = DRM_FORMAT_XRGB8888 },
+   { .format = VK_FORMAT_R8G8B8A8_SRGB, .drm_format = DRM_FORMAT_XBGR8888 },
    { .format = VK_FORMAT_B8G8R8A8_UNORM, .drm_format = DRM_FORMAT_XRGB8888 },
+   { .format = VK_FORMAT_R8G8B8A8_UNORM, .drm_format = DRM_FORMAT_XBGR8888 },
 };
 
 static void
