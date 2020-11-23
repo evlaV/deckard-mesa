@@ -960,3 +960,41 @@ wsi_common_get_past_presentation_timing(
 
    return VK_SUCCESS;
 }
+
+VkResult
+wsi_common_get_swapchain_timing_properties_ext(const struct wsi_device *wsi,
+                                               VkDevice device_h,
+                                               VkSwapchainKHR swapchain,
+                                               VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
+{
+   return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+VkResult
+wsi_common_get_swapchain_time_domains_ext(const struct wsi_device *wsi,
+                                          VkDevice _device,
+                                          VkSwapchainKHR swapchain,
+                                          uint32_t *pSwapchainTimeDomainCount,
+                                          VkSwapchainTimeDomainPropertiesEXT *pSwapchainTimeDomains)
+{
+   return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+VkResult
+wsi_common_get_past_presentation_timing_ext(const struct wsi_device *wsi,
+                                            VkDevice _device,
+                                            VkSwapchainKHR swapchain,
+                                            uint32_t *pPresentationTimingCount,
+                                            VkPastPresentationTimingEXT *pPresentationTimings)
+{
+   return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+VkResult
+wsi_common_set_swapchain_timing_ext(const struct wsi_device *wsi,
+                                    VkDevice _device,
+                                    VkSwapchainKHR swapchain,
+                                    const VkSwapchainTimingInfoEXT *pSwapchainTimingInfo)
+{
+   return VK_ERROR_EXTENSION_NOT_PRESENT;
+}

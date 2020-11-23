@@ -422,3 +422,60 @@ anv_GetPastPresentationTimingGOOGLE(VkDevice _device,
                                                   pPresentationTimingCount,
                                                   pPresentationTimings);
 }
+
+/* EXT_present_timing */
+VkResult
+anv_GetSwapchainTimingPropertiesEXT(VkDevice _device,
+                                    VkSwapchainKHR swapchain,
+                                    VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+
+   return wsi_common_get_swapchain_timing_properties_ext(&device->physical->wsi_device,
+                                                         _device,
+                                                         swapchain,
+                                                         pSwapchainTimingProperties);
+}
+
+VkResult
+anv_GetSwapchainTimeDomainsEXT(VkDevice _device,
+                               VkSwapchainKHR swapchain,
+                               uint32_t *pSwapchainTimeDomainCount,
+                               VkSwapchainTimeDomainPropertiesEXT *pSwapchainTimeDomains)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+
+   return wsi_common_get_swapchain_time_domains_ext(&device->physical->wsi_device,
+                                                    _device,
+                                                    swapchain,
+                                                    pSwapchainTimeDomainCount,
+                                                    pSwapchainTimeDomains);
+}
+
+VkResult
+anv_GetPastPresentationTimingEXT(VkDevice _device,
+                                 VkSwapchainKHR swapchain,
+                                 uint32_t *pPresentationTimingCount,
+                                 VkPastPresentationTimingEXT *pPresentationTimings)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+
+   return wsi_common_get_past_presentation_timing_ext(&device->physical->wsi_device,
+                                                      _device,
+                                                      swapchain,
+                                                      pPresentationTimingCount,
+                                                      pPresentationTimings);
+}
+
+VkResult
+anv_SetSwapchainTimingEXT(VkDevice _device,
+                          VkSwapchainKHR swapchain,
+                          const VkSwapchainTimingInfoEXT *pSwapchainTimingInfo)
+{
+   ANV_FROM_HANDLE(anv_device, device, _device);
+
+   return wsi_common_set_swapchain_timing_ext(&device->physical->wsi_device,
+                                              _device,
+                                              swapchain,
+                                              pSwapchainTimingInfo);
+}

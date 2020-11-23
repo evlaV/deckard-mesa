@@ -330,4 +330,31 @@ wsi_common_get_past_presentation_timing(const struct wsi_device *wsi,
                                         VkPastPresentationTimingGOOGLE
                                         *pPresentationTimings);
 
+/* VK_EXT_present_timing */
+VkResult
+wsi_common_get_swapchain_timing_properties_ext(const struct wsi_device *wsi,
+                                               VkDevice device_h,
+                                               VkSwapchainKHR swapchain,
+                                               VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties);
+
+VkResult
+wsi_common_get_swapchain_time_domains_ext(const struct wsi_device *wsi,
+                                          VkDevice _device,
+                                          VkSwapchainKHR swapchain,
+                                          uint32_t *pSwapchainTimeDomainCount,
+                                          VkSwapchainTimeDomainPropertiesEXT *pSwapchainTimeDomains);
+
+VkResult
+wsi_common_get_past_presentation_timing_ext(const struct wsi_device *wsi,
+                                            VkDevice _device,
+                                            VkSwapchainKHR swapchain,
+                                            uint32_t *pPresentationTimingCount,
+                                            VkPastPresentationTimingEXT *pPresentationTimings);
+
+VkResult
+wsi_common_set_swapchain_timing_ext(const struct wsi_device *wsi,
+                                    VkDevice _device,
+                                    VkSwapchainKHR swapchain,
+                                    const VkSwapchainTimingInfoEXT *pSwapchainTimingInfo);
+
 #endif
