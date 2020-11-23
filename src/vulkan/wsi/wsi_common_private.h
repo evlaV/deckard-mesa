@@ -98,7 +98,9 @@ struct wsi_swapchain {
    VkResult (*get_refresh_cycle_duration)(struct wsi_swapchain *swap_chain,
                                           VkRefreshCycleDurationGOOGLE
                                           *pDisplayTimingProperties);
-
+   VkResult (*get_timing_properties)(struct wsi_swapchain *swap_chain,
+                                     VkSwapchainTimingPropertiesEXT
+                                     *pSwapchainTimingProperties);
 };
 
 bool

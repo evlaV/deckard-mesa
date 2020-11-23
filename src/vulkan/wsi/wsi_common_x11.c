@@ -1254,6 +1254,17 @@ x11_get_refresh(struct wsi_swapchain *wsi_chain,
    return VK_SUCCESS;
 }
 
+static VkResult
+x11_get_timing_properties(struct wsi_swapchain *wsi_chain,
+                          VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
+{
+   struct x11_swapchain *chain = (struct x11_swapchain *)wsi_chain;
+
+   pSwapchainTimingProperties->refreshDuration = x11_refresh_duration(chain);
+   pSwapchainTimingProperties->variableRefresh = VK_FALSE; /* XXX */
+   return VK_SUCCESS;
+}
+
 static void *
 x11_manage_fifo_queues(void *state)
 {
@@ -1658,6 +1669,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    chain->base.queue_present = x11_queue_present;
    chain->base.present_mode = present_mode;
    chain->base.get_refresh_cycle_duration = x11_get_refresh;
+   chain->base.get_timing_properties = x11_get_timing_properties;
    chain->base.image_count = num_images;
    chain->conn = conn;
    chain->window = window;

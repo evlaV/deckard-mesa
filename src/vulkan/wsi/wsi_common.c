@@ -967,7 +967,9 @@ wsi_common_get_swapchain_timing_properties_ext(const struct wsi_device *wsi,
                                                VkSwapchainKHR swapchain,
                                                VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
 {
-   return VK_ERROR_EXTENSION_NOT_PRESENT;
+   if (!swapchain->get_timing_properties)
+      return VK_ERROR_EXTENSION_NOT_PRESENT;
+   return swapchain->get_timing_properties(swapchain, pSwapchainTimingProperties);
 }
 
 VkResult
@@ -977,17 +979,40 @@ wsi_common_get_swapchain_time_domains_ext(const struct wsi_device *wsi,
                                           uint32_t *pSwapchainTimeDomainCount,
                                           VkSwapchainTimeDomainPropertiesEXT *pSwapchainTimeDomains)
 {
-   return VK_ERROR_EXTENSION_NOT_PRESENT;
+   pSwapchainTimeDomains->timeDomain = VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT;
+   return VK_SUCCESS;
 }
 
 VkResult
 wsi_common_get_past_presentation_timing_ext(const struct wsi_device *wsi,
                                             VkDevice _device,
                                             VkSwapchainKHR swapchain,
-                                            uint32_t *pPresentationTimingCount,
-                                            VkPastPresentationTimingEXT *pPresentationTimings)
+                                            uint32_t *count,
+                                            VkPastPresentationTimingEXT *timings)
 {
-   return VK_ERROR_EXTENSION_NOT_PRESENT;
+   VK_FROM_HANDLE(wsi_swapchain, swapchain, _swapchain);
+   uint32_t timing_count_requested = *count;
+   uint32_t timing_count_available = 0;
+
+   /* Count the number of completed entries, copy */
+   for (uint32_t t = 0; t < swapchain->timing_count; t++) {
+      struct wsi_timing *timing = wsi_get_timing(swapchain, t);
+
+      if (timing->complete && !timing->consumed) {
+         if (timings && timing_count_available < timing_count_requested) {
+            timings[timing_count_available] = timing->timing;
+            timing->consumed = true;
+         }
+         timing_count_available++;
+      }
+   }
+
+   *count = timing_count_available;
+
+   if (timing_count_available > timing_count_requested && timings != NULL)
+      return VK_INCOMPLETE;
+
+   return VK_SUCCESS;
 }
 
 VkResult
