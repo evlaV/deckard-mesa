@@ -512,6 +512,11 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV = 1000205002,
     VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV = 1000206000,
     VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV = 1000206001,
+    VK_STRUCTURE_TYPE_SWAPCHAIN_TIMING_PROPERTIES_EXT = 1000208000,
+    VK_STRUCTURE_TYPE_SWAPCHAIN_TIME_DOMAIN_PROPERTIES_EXT = 1000208001,
+    VK_STRUCTURE_TYPE_SWAPCHAIN_TIMING_INFO_EXT = 1000208002,
+    VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_EXT = 1000208003,
+    VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_EXT = 1000208004,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS_2_FEATURES_INTEL = 1000209000,
     VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_QUERY_CREATE_INFO_INTEL = 1000210000,
     VK_STRUCTURE_TYPE_INITIALIZE_PERFORMANCE_API_INFO_INTEL = 1000210001,
@@ -5673,6 +5678,7 @@ typedef enum VkPresentModeKHR {
     VK_PRESENT_MODE_FIFO_RELAXED_KHR = 3,
     VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR = 1000111000,
     VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR = 1000111001,
+    VK_PRESENT_MODE_FIFO_LATEST_READY_EXT = 1000208000,
     VK_PRESENT_MODE_MAX_ENUM_KHR = 0x7FFFFFFF
 } VkPresentModeKHR;
 
@@ -5784,6 +5790,8 @@ typedef enum VkSwapchainCreateFlagBitsKHR {
     VK_SWAPCHAIN_CREATE_SPLIT_INSTANCE_BIND_REGIONS_BIT_KHR = 0x00000001,
     VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR = 0x00000002,
     VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR = 0x00000004,
+    VK_SWAPCHAIN_CREATE_ABSOLUTE_TIME_BIT_EXT = 0x00000008,
+    VK_SWAPCHAIN_CREATE_RELATIVE_TIME_BIT_EXT = 0x00000010,
     VK_SWAPCHAIN_CREATE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
 } VkSwapchainCreateFlagBitsKHR;
 typedef VkFlags VkSwapchainCreateFlagsKHR;
@@ -9801,6 +9809,7 @@ typedef enum VkTimeDomainEXT {
     VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT = 1,
     VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT = 2,
     VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT = 3,
+    VK_TIME_DOMAIN_SWAPCHAIN_LOCAL_EXT = 1000208000,
     VK_TIME_DOMAIN_MAX_ENUM_EXT = 0x7FFFFFFF
 } VkTimeDomainEXT;
 typedef struct VkCalibratedTimestampInfoEXT {
@@ -10080,6 +10089,95 @@ VKAPI_ATTR void VKAPI_CALL vkGetQueueCheckpointDataNV(
     VkQueue                                     queue,
     uint32_t*                                   pCheckpointDataCount,
     VkCheckpointDataNV*                         pCheckpointData);
+#endif
+
+
+#define VK_EXT_present_timing 1
+#define VK_EXT_PRESENT_TIMING_SPEC_VERSION 1
+#define VK_EXT_PRESENT_TIMING_EXTENSION_NAME "VK_EXT_present_timing"
+typedef struct VkSwapchainTimingPropertiesEXT {
+    VkStructureType    sType;
+    const void*        pNext;
+    uint64_t           refreshDuration;
+    VkBool32           variableRefresh;
+} VkSwapchainTimingPropertiesEXT;
+
+typedef struct VkSwapchainTimeDomainPropertiesEXT {
+    VkStructureType    sType;
+    void*              pNext;
+    VkTimeDomainEXT    timeDomain;
+} VkSwapchainTimeDomainPropertiesEXT;
+
+typedef struct VkSwapchainTimingInfoEXT {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkTimeDomainEXT    timeDomain;
+} VkSwapchainTimingInfoEXT;
+
+typedef struct VkPastPresentationTimingEXT {
+    VkStructureType    sType;
+    void*              pNext;
+    uint32_t           presentID;
+    uint64_t           targetPresentTime;
+    uint64_t           actualPresentTime;
+    uint64_t           optimalPresentTime;
+    VkBool32           timingPropertiesChanged;
+    VkBool32           timeDomainChanged;
+} VkPastPresentationTimingEXT;
+
+typedef struct VkAbsolutePresentTimeEXT {
+    uint32_t    presentID;
+    uint64_t    targetPresentTime;
+    uint64_t    idealPresentTime;
+    uint64_t    presentSlop;
+} VkAbsolutePresentTimeEXT;
+
+typedef struct VkRelativePresentTimeEXT {
+    uint32_t    presentID;
+    uint64_t    minPresentDuration;
+    uint64_t    idealPresentDuration;
+    uint64_t    presentSlop;
+} VkRelativePresentTimeEXT;
+
+typedef union VkPresentTimeEXT {
+    VkAbsolutePresentTimeEXT    absolutePresentTime;
+    VkRelativePresentTimeEXT    relativePresentTime;
+} VkPresentTimeEXT;
+
+typedef struct VkPresentTimesInfoEXT {
+    VkStructureType            sType;
+    const void*                pNext;
+    uint32_t                   swapchainCount;
+    const VkPresentTimeEXT*    pTimes;
+} VkPresentTimesInfoEXT;
+
+typedef VkResult (VKAPI_PTR *PFN_vkGetSwapchainTimingPropertiesEXT)(VkDevice device, VkSwapchainKHR swapchain, VkSwapchainTimingPropertiesEXT* pSwapchainTimingProperties);
+typedef VkResult (VKAPI_PTR *PFN_vkGetSwapchainTimeDomainsEXT)(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainTimeDomainCount, VkSwapchainTimeDomainPropertiesEXT* pSwapchainTimeDomains);
+typedef VkResult (VKAPI_PTR *PFN_vkGetPastPresentationTimingEXT)(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pPresentationTimingCount, VkPastPresentationTimingEXT* pPresentationTimings);
+typedef VkResult (VKAPI_PTR *PFN_vkSetSwapchainTimingEXT)(VkDevice device, VkSwapchainKHR swapchain, const VkSwapchainTimingInfoEXT* pSwapchainTimingInfo);
+
+#ifndef VK_NO_PROTOTYPES
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainTimingPropertiesEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    VkSwapchainTimingPropertiesEXT*             pSwapchainTimingProperties);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainTimeDomainsEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint32_t*                                   pSwapchainTimeDomainCount,
+    VkSwapchainTimeDomainPropertiesEXT*         pSwapchainTimeDomains);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPastPresentationTimingEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint32_t*                                   pPresentationTimingCount,
+    VkPastPresentationTimingEXT*                pPresentationTimings);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkSetSwapchainTimingEXT(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    const VkSwapchainTimingInfoEXT*             pSwapchainTimingInfo);
 #endif
 
 
