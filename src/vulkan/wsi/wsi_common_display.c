@@ -2040,6 +2040,23 @@ wsi_display_get_refresh_cycle_duration(struct wsi_swapchain *drv_chain,
 }
 
 static VkResult
+wsi_display_get_timing_properties(struct wsi_swapchain *drv_chain,
+                                  VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
+{
+   struct wsi_display_swapchain *chain =
+      (struct wsi_display_swapchain *) drv_chain;
+
+   VkIcdSurfaceDisplay *surface = chain->surface;
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(surface->displayMode);
+   double refresh = wsi_display_mode_refresh(display_mode);
+
+   pSwapchainTimingProperties->refreshDuration = (uint64_t) (floor (1.0/refresh * 1e9 + 0.5));
+   pSwapchainTimingProperties->variableRefresh = VK_FALSE; /* XXX */
+   return VK_SUCCESS;
+}
+
+static VkResult
 wsi_display_surface_create_swapchain(
    VkIcdSurfaceBase *icd_surface,
    VkDevice device,
@@ -2076,6 +2093,7 @@ wsi_display_surface_create_swapchain(
    chain->base.present_mode = wsi_swapchain_get_present_mode(wsi_device, create_info);
    chain->base.get_refresh_cycle_duration =
       wsi_display_get_refresh_cycle_duration;
+   chain->base.get_timing_properties = wsi_display_get_timing_properties;
    chain->base.image_count = num_images;
 
    chain->wsi = wsi;

@@ -735,9 +735,9 @@ wsi_present_complete(struct wsi_swapchain *swapchain,
    if (earliest_time > ust)
       earliest_time = ust;
 
-   timing->timing.actualPresentTime = ust;
-   timing->timing.earliestPresentTime = earliest_time;
-   timing->timing.presentMargin = earliest_time - render_time;
+   timing->actualPresentTime = ust;
+   timing->optimalPresentTime = earliest_time;
+   timing->presentMargin = earliest_time - render_time;
    timing->complete = true;
 
    swapchain->frame_msc = msc;
@@ -755,7 +755,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
 
    const VkPresentRegionsKHR *regions =
       vk_find_struct_const(pPresentInfo->pNext, PRESENT_REGIONS_KHR);
-   const VkPresentTimesInfoGOOGLE *present_times_info =
+   const VkPresentTimesInfoEXT *present_times_info_ext =
+      vk_find_struct_const(pPresentInfo->pNext, PRESENT_TIMES_INFO_EXT);
+   const VkPresentTimesInfoGOOGLE *present_times_info_google =
       vk_find_struct_const(pPresentInfo->pNext, PRESENT_TIMES_INFO_GOOGLE);
 
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
@@ -838,17 +840,55 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             image->prime.blit_cmd_buffers[queue_family_index];
       }
 
-      /* Set up GOOGLE_display_timing bits */
-      if (present_times_info &&
-          present_times_info->pTimes != NULL &&
-          i < present_times_info->swapchainCount)
+      /* Set up EXT_present_timing bits */
+      if (present_times_info_ext &&
+          present_times_info_ext->pTimes != NULL &&
+          i < present_times_info_ext->swapchainCount)
       {
-         const VkPresentTimeGOOGLE *present_time =
-            &present_times_info->pTimes[i];
+         const VkPresentTimeEXT *present_time =
+            &present_times_info_ext->pTimes[i];
 
          timing = wsi_next_timing(swapchain, pPresentInfo->pImageIndices[i]);
-         timing->timing.presentID = present_time->presentID;
-         timing->timing.desiredPresentTime = present_time->desiredPresentTime;
+         timing->presentID = present_time->absolutePresentTime.presentID;       /* XXX relative? */
+         timing->targetPresentTime = present_time->absolutePresentTime.targetPresentTime;       /* XXX relative? */
+         timing->target_msc = 0;
+         image->timing = timing;
+
+         if (timing->targetPresentTime != 0)
+         {
+            int64_t delta_nsec = (int64_t) (timing->targetPresentTime -
+                                            swapchain->frame_ust);
+
+            /* Set the target msc only if it's no more than two seconds from
+             * now, and not stale
+             */
+            if (0 <= delta_nsec && delta_nsec <= 2000000000ul) {
+               VkSwapchainTimingPropertiesEXT timing_properties = {};
+
+               swapchain->get_timing_properties(swapchain,
+                                                &timing_properties);
+
+               int64_t refresh = (int64_t) timing_properties.refreshDuration;
+               int64_t frames = (delta_nsec + refresh - 1) / refresh;
+               timing->target_msc = swapchain->frame_msc + frames;
+            }
+         }
+
+         submit_buffers[submit_info.commandBufferCount++] =
+            image->timestamp_buffer;
+      }
+
+      /* Set up GOOGLE_display_timing bits */
+      if (present_times_info_google &&
+          present_times_info_google->pTimes != NULL &&
+          i < present_times_info_google->swapchainCount)
+      {
+         const VkPresentTimeGOOGLE *present_time =
+            &present_times_info_google->pTimes[i];
+
+         timing = wsi_next_timing(swapchain, pPresentInfo->pImageIndices[i]);
+         timing->presentID = present_time->presentID;
+         timing->targetPresentTime = present_time->desiredPresentTime;
          timing->target_msc = 0;
          image->timing = timing;
 
@@ -946,7 +986,12 @@ wsi_common_get_past_presentation_timing(
 
       if (timing->complete && !timing->consumed) {
          if (timings && timing_count_available < timing_count_requested) {
-            timings[timing_count_available] = timing->timing;
+            VkPastPresentationTimingGOOGLE *tg = &timings[timing_count_available];
+            tg->presentID = timing->presentID;
+            tg->desiredPresentTime = timing->targetPresentTime;
+            tg->actualPresentTime = timing->actualPresentTime;
+            tg->earliestPresentTime = timing->optimalPresentTime;
+            tg->presentMargin = timing->presentMargin;
             timing->consumed = true;
          }
          timing_count_available++;
@@ -964,9 +1009,11 @@ wsi_common_get_past_presentation_timing(
 VkResult
 wsi_common_get_swapchain_timing_properties_ext(const struct wsi_device *wsi,
                                                VkDevice device_h,
-                                               VkSwapchainKHR swapchain,
+                                               VkSwapchainKHR _swapchain,
                                                VkSwapchainTimingPropertiesEXT *pSwapchainTimingProperties)
 {
+   VK_FROM_HANDLE(wsi_swapchain, swapchain, _swapchain);
+
    if (!swapchain->get_timing_properties)
       return VK_ERROR_EXTENSION_NOT_PRESENT;
    return swapchain->get_timing_properties(swapchain, pSwapchainTimingProperties);
@@ -986,7 +1033,7 @@ wsi_common_get_swapchain_time_domains_ext(const struct wsi_device *wsi,
 VkResult
 wsi_common_get_past_presentation_timing_ext(const struct wsi_device *wsi,
                                             VkDevice _device,
-                                            VkSwapchainKHR swapchain,
+                                            VkSwapchainKHR _swapchain,
                                             uint32_t *count,
                                             VkPastPresentationTimingEXT *timings)
 {
@@ -1000,7 +1047,13 @@ wsi_common_get_past_presentation_timing_ext(const struct wsi_device *wsi,
 
       if (timing->complete && !timing->consumed) {
          if (timings && timing_count_available < timing_count_requested) {
-            timings[timing_count_available] = timing->timing;
+            VkPastPresentationTimingEXT *te = &timings[timing_count_available];
+            te->presentID = timing->presentID;
+            te->targetPresentTime = timing->targetPresentTime;
+            te->actualPresentTime = timing->actualPresentTime;
+            te->optimalPresentTime = timing->optimalPresentTime;
+            te->timingPropertiesChanged = VK_FALSE; /* XXX */
+            te->timeDomainChanged = VK_FALSE;
             timing->consumed = true;
          }
          timing_count_available++;

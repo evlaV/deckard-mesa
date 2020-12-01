@@ -30,7 +30,13 @@ struct wsi_timing {
    bool complete;
    bool consumed;
    uint64_t target_msc;
-   VkPastPresentationTimingGOOGLE timing;
+   uint32_t presentID;
+   uint64_t targetPresentTime;
+   uint64_t actualPresentTime;
+   uint64_t optimalPresentTime;
+   uint64_t presentMargin;
+   VkBool32 timingPropertiesChanged;
+   VkBool32 timeDomainChanged;
 };
 
 struct wsi_image {
