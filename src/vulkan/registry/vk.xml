@@ -2627,7 +2627,12 @@ typedef void <name>CAMetalLayer</name>;
             <member><type>VkAbsolutePresentTimeEXT</type>         <name>absolutePresentTime</name></member>
             <member><type>VkRelativePresentTimeEXT</type>         <name>relativePresentTime</name></member>
         </type>
-
+        <type category="struct" name="VkPresentIdKHR" structextends="VkPresentInfoKHR">
+            <member values="VK_STRUCTURE_TYPE_PRESENT_ID_KHR"><type>VkStructureType</type> <name>sType</name></member>
+            <member>const <type>void</type>*                      <name>pNext</name></member>
+            <member><type>uint32_t</type>                         <name>swapchainCount</name><comment>Copy of VkPresentInfoKHR::swapchainCount</comment></member>
+            <member len="swapchainCount" optional="true">const <type>uint64_t</type>* <name>pPresentIds</name><comment>Present ID values for each swapchain</comment></member>
+        </type>
         <type category="struct" name="VkHdrMetadataEXT">
                 <comment>Display primary in chromaticity coordinates</comment>
             <member values="VK_STRUCTURE_TYPE_HDR_METADATA_EXT"><type>VkStructureType</type> <name>sType</name></member>
@@ -14090,10 +14095,12 @@ typedef void <name>CAMetalLayer</name>;
                 <enum value="&quot;VK_KHR_shader_non_semantic_info&quot;"   name="VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME"/>
             </require>
         </extension>
-        <extension name="VK_KHR_extension_295" number="295" author="KHR" contact="Keith Packard @keithp" supported="disabled">
+        <extension name="VK_KHR_present_id" number="295" type="device" requires="VK_KHR_swapchain" author="KHR" contact="Keith Packard @keithp" supported="vulkan">
             <require>
-                <enum value="0"                                             name="VK_KHR_EXTENSION_295_SPEC_VERSION"/>
-                <enum value="&quot;VK_KHR_extension_295&quot;"              name="VK_KHR_EXTENSION_295_EXTENSION_NAME"/>
+                <enum value="1"                                         name="VK_KHR_PRESENT_ID_SPEC_VERSION"/>
+                <enum value="&quot;VK_KHR_present_id&quot;"             name="VK_KHR_PRESENT_ID_EXTENSION_NAME"/>
+                <enum offset="0" extends="VkStructureType"              name="VK_STRUCTURE_TYPE_PRESENT_ID_KHR"/>
+                <type name="VkPresentIdKHR"/>
             </require>
         </extension>
         <extension name="VK_EXT_private_data" number="296" type="device" author="NV" contact="Matthew Rusch @mattruschnv" supported="vulkan">
