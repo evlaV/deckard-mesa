@@ -155,6 +155,8 @@ tu_emit_cache_flush_ccu(struct tu_cmd_buffer *cmd_buffer,
    tu6_emit_flushes(cmd_buffer, cs, flushes);
    cmd_buffer->state.cache.flush_bits = 0;
 
+   tu_cs_emit_wfi(cs);
+
    if (ccu_state != cmd_buffer->state.ccu_state) {
       struct tu_physical_device *phys_dev = cmd_buffer->device->physical_device;
       tu_cs_emit_regs(cs,

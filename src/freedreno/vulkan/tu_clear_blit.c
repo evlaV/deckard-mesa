@@ -2370,6 +2370,7 @@ tu_clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
       tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
       tu6_emit_event_write(cmd, cs, PC_CCU_INVALIDATE_COLOR);
    }
+   tu_cs_emit_wfi(cs);
 }
 
 void
