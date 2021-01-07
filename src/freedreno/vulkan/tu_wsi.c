@@ -289,3 +289,18 @@ tu_GetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice physicalDevice,
    return wsi_common_get_present_rectangles(&device->wsi_device, surface,
                                             pRectCount, pRects);
 }
+
+VkResult
+tu_WaitForPresentKHR(VkDevice _device,
+                       VkSwapchainKHR swapchain,
+                       uint64_t waitValue,
+                       uint64_t timeout)
+{
+   TU_FROM_HANDLE(tu_device, device, _device);
+   struct tu_physical_device *pdevice = device->physical_device;
+
+   return wsi_common_wait_for_present(&pdevice->wsi_device,
+                                      swapchain,
+                                      waitValue,
+                                      timeout);
+}
