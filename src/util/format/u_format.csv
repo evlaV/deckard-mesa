@@ -401,6 +401,8 @@ PIPE_FORMAT_NV21                  , planar2, 1, 1, 1,     ,     ,     ,     , xy
 # multiplane textures but needs color-space conversion in the shader.
 PIPE_FORMAT_R8_G8B8_420_UNORM     , planar2, 1, 1, 1,  un8,     ,     ,     , xyzw, rgb
 
+PIPE_FORMAT_Y8_UNORM              , planar1, 1, 1, 1,  un8,     ,     ,     , x001, yuv
+
 PIPE_FORMAT_Y8_U8_V8_422_UNORM    , planar3, 1, 1, 1,     ,     ,     ,     , xyzw, yuv
 PIPE_FORMAT_Y8_U8V8_422_UNORM     , planar2, 1, 1, 1,     ,     ,     ,     , xyzw, yuv
 PIPE_FORMAT_Y8_U8_V8_444_UNORM    , planar3, 1, 1, 1,     ,     ,     ,     , xyzw, yuv

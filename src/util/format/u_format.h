@@ -89,6 +89,7 @@ enum util_format_layout {
    UTIL_FORMAT_LAYOUT_ATC,
 
    /** Formats with 2 or more planes. */
+   UTIL_FORMAT_LAYOUT_PLANAR1,
    UTIL_FORMAT_LAYOUT_PLANAR2,
    UTIL_FORMAT_LAYOUT_PLANAR3,
 
