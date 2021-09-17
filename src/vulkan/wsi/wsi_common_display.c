@@ -1018,6 +1018,9 @@ wsi_display_image_init(VkDevice device_h,
       (struct wsi_display_swapchain *) drv_chain;
    struct wsi_display *wsi = chain->wsi;
    uint32_t drm_format = 0;
+   uint64_t modifiers[4] = {DRM_FORMAT_MOD_LINEAR, DRM_FORMAT_MOD_QCOM_COMPRESSED};
+   uint32_t num_modifiers = 2;
+   const uint64_t *mods_ptr = modifiers;
 
    for (unsigned i = 0; i < ARRAY_SIZE(available_surface_formats); i++) {
       if (create_info->imageFormat == available_surface_formats[i].format) {
@@ -1031,7 +1034,7 @@ wsi_display_image_init(VkDevice device_h,
       return VK_ERROR_DEVICE_LOST;
 
    VkResult result = wsi_create_native_image(&chain->base, create_info,
-                                             0, NULL, NULL, NULL,
+                                             1, &num_modifiers, &mods_ptr, NULL,
                                              &image->base);
    if (result != VK_SUCCESS)
       return result;
@@ -1048,18 +1051,23 @@ wsi_display_image_init(VkDevice device_h,
          goto fail_handle;
    }
 
+   for (unsigned i = 0; i < 4; i++)
+      modifiers[i] = i < image->base.num_planes ? image->base.drm_modifier : 0;
+
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
 
-   int ret = drmModeAddFB2(wsi->fd,
+   int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
                            create_info->imageExtent.height,
                            drm_format,
                            image->buffer,
                            image->base.row_pitches,
                            image->base.offsets,
-                           &image->fb_id, 0);
+                           modifiers,
+                           &image->fb_id,
+                           DRM_MODE_FB_MODIFIERS);
 
    if (ret)
       goto fail_fb;
