@@ -57,6 +57,17 @@
 #include "wsi_common_display.h"
 #include "wsi_common_queue.h"
 
+// KHR_display CAC "extension"
+#define VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE 1000002099
+typedef struct VkDisplaySurfaceCreateCACInfoVALVE {
+    VkStructureType                   sType;
+    const void*                       pNext;
+    // TODO: use 16.16 fixed point for these
+    // TODO: want offsets for each channel instead of just scaling?
+    VkOffset2D red_scale;
+    VkOffset2D blue_scale;
+} VkDisplaySurfaceCreateCACInfoVALVE;
+
 #if 0
 #define wsi_display_debug(...) fprintf(stderr, __VA_ARGS__)
 #define wsi_display_debug_code(...)     __VA_ARGS__
@@ -106,12 +117,14 @@ enum plane_property {
    PLANE_PROPERTY_MAX,
 };
 
+#define NUM_PLANES 6
+
 typedef struct wsi_display_connector {
    struct list_head             list;
    struct wsi_display           *wsi;
    uint32_t                     id;
    uint32_t                     crtc_id;
-   uint32_t                     plane_id;
+   uint32_t                     plane_id[NUM_PLANES];
    char                         *name;
    bool                         connected;
    bool                         active;
@@ -121,7 +134,7 @@ typedef struct wsi_display_connector {
    drmModeModeInfo              current_drm_mode;
    uint32_t                     property[CONNECTOR_PROPERTY_MAX];
    uint32_t                     crtc_property[CRTC_PROPERTY_MAX];
-   uint32_t                     plane_property[PLANE_PROPERTY_MAX];
+   uint32_t                     plane_property[NUM_PLANES][PLANE_PROPERTY_MAX];
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
    xcb_randr_output_t           output;
 #endif
@@ -149,7 +162,7 @@ struct wsi_display {
 
 
 static bool
-find_properties(struct wsi_display_connector *connector, uint32_t type)
+find_properties(struct wsi_display_connector *connector, uint32_t type, uint32_t id)
 {
    int fd = connector->wsi->fd;
    uint32_t *prop_id, prop_count, obj_id;
@@ -167,9 +180,9 @@ find_properties(struct wsi_display_connector *connector, uint32_t type)
       prop_count = ARRAY_SIZE(connector->crtc_property);
       break;
    case DRM_MODE_OBJECT_PLANE:
-      obj_id = connector->plane_id;
-      prop_id = connector->plane_property;
-      prop_count = ARRAY_SIZE(connector->plane_property);
+      obj_id = connector->plane_id[id];
+      prop_id = connector->plane_property[id];
+      prop_count = ARRAY_SIZE(connector->plane_property[id]);
       break;
    default:
       unreachable("unexpected drm object type");
@@ -427,7 +440,7 @@ wsi_display_alloc_connector(struct wsi_display *wsi,
    /* note: drmModeConnector has props pointer, the extra
     * drmModeObjectGetProperties here could be avoided
     */
-   if (!find_properties(connector, DRM_MODE_OBJECT_CONNECTOR)) {
+   if (!find_properties(connector, DRM_MODE_OBJECT_CONNECTOR, 0)) {
       vk_free(wsi->alloc, connector);
       return NULL;
    }
@@ -921,6 +934,12 @@ wsi_GetDisplayPlaneCapabilities2KHR(VkPhysicalDevice physicalDevice,
    return result;
 }
 
+typedef struct VkIcdSurfaceDisplay2 {
+   VkIcdSurfaceDisplay base;
+   VkOffset2D red_scale;
+   VkOffset2D blue_scale;
+} VkIcdSurfaceDisplay2;
+
 VKAPI_ATTR VkResult VKAPI_CALL
 wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
                                  const VkDisplaySurfaceCreateInfoKHR *pCreateInfo,
@@ -929,13 +948,19 @@ wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
 {
    VK_FROM_HANDLE(vk_instance, instance, _instance);
    VkIcdSurfaceDisplay *surface;
+   VkIcdSurfaceDisplay2 *surface2;
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR);
 
-   surface = vk_zalloc2(&instance->alloc, pAllocator, sizeof(*surface), 8,
+   const VkDisplaySurfaceCreateCACInfoVALVE *cac_info =
+      vk_find_struct_const(pCreateInfo->pNext, DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE);
+
+   surface2 = vk_zalloc2(&instance->alloc, pAllocator, sizeof(*surface2), 8,
                         VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-   if (surface == NULL)
+   if (surface2 == NULL)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+   surface = &surface2->base;
 
    surface->base.platform = VK_ICD_WSI_PLATFORM_DISPLAY;
 
@@ -947,8 +972,12 @@ wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
    surface->alphaMode = pCreateInfo->alphaMode;
    surface->imageExtent = pCreateInfo->imageExtent;
 
-   *pSurface = VkIcdSurfaceBase_to_handle(&surface->base);
+   if (cac_info) {
+      surface2->red_scale = cac_info->red_scale;
+      surface2->blue_scale = cac_info->blue_scale;
+   }
 
+   *pSurface = VkIcdSurfaceBase_to_handle(&surface->base);
    return VK_SUCCESS;
 }
 
@@ -1576,96 +1605,30 @@ wsi_display_select_crtc(const struct wsi_display_connector *connector,
    return crtc_id;
 }
 
-static int
-wsi_display_plane_type(int dev_fd, uint32_t plane_id)
-{
-   int type = -1;
-   drmModeObjectPropertiesPtr props;
-
-   props = drmModeObjectGetProperties(dev_fd, plane_id, DRM_MODE_OBJECT_PLANE);
-   if (!props)
-      return -1;
-
-   for (size_t i = 0; i < props->count_props; i++) {
-      drmModePropertyPtr prop = drmModeGetProperty(dev_fd, props->props[i]);
-      if (!prop)
-         continue;
-
-      if (!strcmp(prop->name, "type"))
-         type = props->prop_values[i];
-
-      drmModeFreeProperty(prop);
-   }
-
-   drmModeFreeObjectProperties(props);
-
-   return type;
-}
-
 /*
  * Pick a suitable primary plane for the current CRTC. Prefer a plane
  * currently active on the CRTC. Settle for a plane which is currently
  * idle but is compatible with the CRTC. Fall back to the first idle
  * plane found.
  */
-static uint32_t
-wsi_display_select_plane(const struct wsi_display_connector *connector,
-                         drmModeResPtr mode_res)
+static void
+wsi_display_select_planes(struct wsi_display_connector *connector,
+                          drmModeResPtr mode_res)
 {
    struct wsi_display *wsi = connector->wsi;
-   uint32_t plane_id = connector->plane_id;
-   uint32_t active_plane = 0;
-   uint32_t possible_plane = 0;
-   int crtc_index = -1;
 
-   if (plane_id)
-      return plane_id;
-
-   /* possible_crtcs uses the crtc index and not the object id */
-   for (int i = 0; i < mode_res->count_crtcs; i++) {
-      if (mode_res->crtcs[i] == connector->crtc_id)
-         crtc_index = i;
-   }
-   if (crtc_index < 0)
-      return 0;
+   if (connector->plane_id[0])
+      return;
 
    drmModePlaneRes *plane_res = drmModeGetPlaneResources(wsi->fd);
    if (!plane_res)
-      return 0;
+      return;
 
-   for (size_t i = 0; i < plane_res->count_planes; i++) {
-      drmModePlane *plane = drmModeGetPlane(wsi->fd, plane_res->planes[i]);
-      if (!plane)
-         continue;
-
-      /* only select primary planes */
-      int plane_type = wsi_display_plane_type(wsi->fd, plane->plane_id);
-      if (plane_type != DRM_PLANE_TYPE_PRIMARY) {
-         drmModeFreePlane(plane);
-         continue;
-      }
-
-      /* if there's a plane is active on the connector's crtc, pick it */
-      if (plane->crtc_id == connector->crtc_id) {
-         active_plane = plane->plane_id;
-      }
-
-      /* if a plane is not active on any crtc but the connector's crtc is
-       * in the plane's possible_crtcs, pick it */
-      if (plane->possible_crtcs & (1u << crtc_index)) {
-         possible_plane = plane->plane_id;
-      }
-
-      drmModeFreePlane(plane);
-   }
-
-   if (active_plane)
-      plane_id = active_plane;
-   else if (possible_plane)
-      plane_id = possible_plane;
+   assert(plane_res->count_planes >= NUM_PLANES);
+   for (unsigned i = 0; i < 6; i++)
+      connector->plane_id[i] = plane_res->planes[i];
 
    drmModeFreePlaneResources(plane_res);
-   return plane_id;
 }
 
 static VkResult
@@ -1704,18 +1667,20 @@ wsi_display_setup_connector(wsi_display_connector *connector,
       connector->crtc_id = wsi_display_select_crtc(connector, mode_res,
                                                    drm_connector);
       if (!connector->crtc_id ||
-          !find_properties(connector, DRM_MODE_OBJECT_CRTC)) {
+          !find_properties(connector, DRM_MODE_OBJECT_CRTC, 0)) {
          result = VK_ERROR_SURFACE_LOST_KHR;
          goto bail_connector;
       }
 
       /* Select the primary plane of that CRTC, and populate the
        * format/modifier lists for that plane */
-      connector->plane_id = wsi_display_select_plane(connector, mode_res);
-      if (!connector->plane_id ||
-          !find_properties(connector, DRM_MODE_OBJECT_PLANE)) {
-         result = VK_ERROR_SURFACE_LOST_KHR;
-         goto bail_connector;
+      wsi_display_select_planes(connector, mode_res);
+      for (int i = 0; i < NUM_PLANES; i++) {
+         if (!connector->plane_id[i] ||
+            !find_properties(connector, DRM_MODE_OBJECT_PLANE, i)) {
+            result = VK_ERROR_SURFACE_LOST_KHR;
+            goto bail_connector;
+         }
       }
    }
 
@@ -1986,14 +1951,13 @@ wsi_register_vblank_event(struct wsi_display_fence *fence,
 }
 
 static int
-drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *image)
+drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *image, VkIcdSurfaceDisplay2 *surface)
 {
    const drmModeModeInfo *mode = &connector->current_drm_mode;
    int fd = connector->wsi->fd;
    drmModeAtomicReq *req;
    uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
    uint32_t crtc_id = connector->crtc_id;
-   uint32_t plane_id = connector->plane_id;
    uint32_t blob_id;
    int ret;
 
@@ -2012,17 +1976,54 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
    }
 
-   const uint32_t *prop = connector->plane_property;
-   drmModeAtomicAddProperty(req, plane_id, prop[FB_ID], image->fb_id);
-   drmModeAtomicAddProperty(req, plane_id, prop[CRTC_ID], crtc_id);
-   drmModeAtomicAddProperty(req, plane_id, prop[SRC_X], 0);
-   drmModeAtomicAddProperty(req, plane_id, prop[SRC_Y], 0);
-   drmModeAtomicAddProperty(req, plane_id, prop[SRC_W], mode->hdisplay << 16);
-   drmModeAtomicAddProperty(req, plane_id, prop[SRC_H], mode->vdisplay << 16);
-   drmModeAtomicAddProperty(req, plane_id, prop[CRTC_X], 0);
-   drmModeAtomicAddProperty(req, plane_id, prop[CRTC_Y], 0);
-   drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], mode->hdisplay);
-   drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], mode->vdisplay);
+   for (int i = 0; i < NUM_PLANES; i++) {
+      uint32_t plane_id = connector->plane_id[i];
+      const uint32_t *prop = connector->plane_property[i];
+
+      VkOffset2D offset = {};
+      if (i/2 == 0) { // red
+         offset = surface->red_scale;
+      } else if (i/2 == 1) { // blue
+         offset = surface->blue_scale;
+      }
+
+      unsigned dst_x = 0, dst_w = mode->hdisplay/2;
+      unsigned dst_y = 0, dst_h = mode->vdisplay;
+      unsigned src_x = 0, src_w = mode->hdisplay/2;
+      unsigned src_y = 0, src_h = mode->vdisplay;
+
+      if (offset.x >= 0) {
+         src_x += offset.x;
+         src_w -= offset.x * 2;
+      } else {
+         dst_x += -offset.x;
+         dst_w -= -offset.x * 2;
+      }
+
+      if (offset.y >= 0) {
+         src_y += offset.y;
+         src_h -= offset.y * 2;
+      } else {
+         dst_y += -offset.y;
+         dst_h -= -offset.y * 2;
+      }
+
+      if (i&1) { // right side
+         src_x += mode->hdisplay/2;
+         dst_x += mode->hdisplay/2;
+      }
+
+      drmModeAtomicAddProperty(req, plane_id, prop[FB_ID], image->fb_id);
+      drmModeAtomicAddProperty(req, plane_id, prop[CRTC_ID], crtc_id);
+      drmModeAtomicAddProperty(req, plane_id, prop[SRC_X], src_x << 16);
+      drmModeAtomicAddProperty(req, plane_id, prop[SRC_Y], src_y << 16);
+      drmModeAtomicAddProperty(req, plane_id, prop[SRC_W], src_w << 16);
+      drmModeAtomicAddProperty(req, plane_id, prop[SRC_H], src_h << 16);
+      drmModeAtomicAddProperty(req, plane_id, prop[CRTC_X], dst_x);
+      drmModeAtomicAddProperty(req, plane_id, prop[CRTC_Y], dst_y);
+      drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], dst_w);
+      drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], dst_h);
+   }
 
    ret = drmModeAtomicCommit(fd, req, flags, image);
    if (ret)
@@ -2082,7 +2083,7 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
       if (!image)
          return VK_SUCCESS;
 
-      int ret = drm_atomic_commit(connector, image);
+      int ret = drm_atomic_commit(connector, image, (VkIcdSurfaceDisplay2*) surface);
       if (ret == 0) {
          image->state = WSI_IMAGE_FLIPPING;
          connector->active = true;
