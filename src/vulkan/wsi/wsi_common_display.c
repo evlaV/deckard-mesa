@@ -1256,6 +1256,7 @@ wsi_display_image_init(struct wsi_swapchain *drv_chain,
       (struct wsi_display_swapchain *) drv_chain;
    struct wsi_display *wsi = chain->wsi;
    uint32_t drm_format = 0;
+   uint64_t modifiers[4];
 
    for (unsigned i = 0; i < ARRAY_SIZE(available_surface_formats); i++) {
       if (create_info->imageFormat == available_surface_formats[i].surface_format.format &&
@@ -1283,18 +1284,23 @@ wsi_display_image_init(struct wsi_swapchain *drv_chain,
          goto fail_handle;
    }
 
+   for (unsigned i = 0; i < 4; i++)
+      modifiers[i] = i < image->base.num_planes ? image->base.drm_modifier : 0;
+
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
 
-   int ret = drmModeAddFB2(wsi->fd,
+   int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
                            create_info->imageExtent.height,
                            drm_format,
                            image->buffer,
                            image->base.row_pitches,
                            image->base.offsets,
-                           &image->fb_id, 0);
+                           modifiers,
+                           &image->fb_id,
+                           DRM_MODE_FB_MODIFIERS);
 
    if (ret)
       goto fail_fb;
