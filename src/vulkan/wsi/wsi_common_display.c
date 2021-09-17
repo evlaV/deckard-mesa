@@ -1202,6 +1202,7 @@ wsi_display_image_init(VkDevice device_h,
       (struct wsi_display_swapchain *) drv_chain;
    struct wsi_display *wsi = chain->wsi;
    uint32_t drm_format = 0;
+   uint64_t modifiers[4];
 
    for (unsigned i = 0; i < ARRAY_SIZE(available_surface_formats); i++) {
       if (create_info->imageFormat == available_surface_formats[i].format) {
@@ -1228,18 +1229,23 @@ wsi_display_image_init(VkDevice device_h,
          goto fail_handle;
    }
 
+   for (unsigned i = 0; i < 4; i++)
+      modifiers[i] = i < image->base.num_planes ? image->base.drm_modifier : 0;
+
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
 
-   int ret = drmModeAddFB2(wsi->fd,
+   int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
                            create_info->imageExtent.height,
                            drm_format,
                            image->buffer,
                            image->base.row_pitches,
                            image->base.offsets,
-                           &image->fb_id, 0);
+                           modifiers,
+                           &image->fb_id,
+                           DRM_MODE_FB_MODIFIERS);
 
    if (ret)
       goto fail_fb;
@@ -2187,9 +2193,16 @@ wsi_display_surface_create_swapchain(
    if (chain == NULL)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
 
+   const uint64_t modifiers[] = {DRM_FORMAT_MOD_LINEAR, DRM_FORMAT_MOD_QCOM_COMPRESSED};
+   uint32_t num_modifiers = ARRAY_SIZE(modifiers);
+   const uint64_t *mods_ptr = modifiers;
+
    struct wsi_drm_image_params image_params = {
       .base.image_type = WSI_IMAGE_TYPE_DRM,
       .same_gpu = true,
+      .num_modifier_lists = 1,
+      .num_modifiers = &num_modifiers,
+      .modifiers = &mods_ptr,
    };
 
    VkResult result = wsi_swapchain_init(wsi_device, &chain->base, device,
