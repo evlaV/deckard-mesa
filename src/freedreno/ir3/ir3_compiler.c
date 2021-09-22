@@ -40,6 +40,7 @@ static const struct debug_named_value shader_debug_options[] = {
    {"cs",         IR3_DBG_SHADER_CS,  "Print shader disasm for compute shaders"},
    {"internal",   IR3_DBG_SHADER_INTERNAL, "Print shader disasm for internal shaders (normally not included in vs/fs/cs/etc)"},
    {"disasm",     IR3_DBG_DISASM,     "Dump NIR and adreno shader disassembly"},
+   {"disasm2",    IR3_DBG_DISASM2,    "Dump final adreno shader disassembly"},
    {"optmsgs",    IR3_DBG_OPTMSGS,    "Enable optimizer debug messages"},
    {"forces2en",  IR3_DBG_FORCES2EN,  "Force s2en mode for tex sampler instructions"},
    {"nouboopt",   IR3_DBG_NOUBOOPT,   "Disable lowering UBO to uniform"},
