@@ -233,7 +233,7 @@ assemble_variant(struct ir3_shader_variant *v)
 {
    v->bin = ir3_shader_assemble(v);
 
-   bool dbg_enabled = shader_debug_enabled(v->shader->type);
+   bool dbg_enabled = shader_debug_enabled(v->shader->type) || (ir3_shader_debug & IR3_DBG_DISASM2);
    if (dbg_enabled || ir3_shader_override_path || v->disasm_info.write_disasm) {
       unsigned char sha1[21];
       char sha1buf[41];
@@ -277,7 +277,7 @@ assemble_variant(struct ir3_shader_variant *v)
          ir3_shader_disasm(v, v->bin, stream);
          fclose(stream);
 
-         mesa_log_multiline(MESA_LOG_INFO, stream_data);
+         printf("%s\n", stream_data);
          free(stream_data);
       }
    }
