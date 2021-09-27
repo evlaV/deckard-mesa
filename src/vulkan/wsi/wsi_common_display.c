@@ -57,15 +57,30 @@
 #include "wsi_common_display.h"
 #include "wsi_common_queue.h"
 
+enum VALVESURFACEPLANES { //ordered as they are in DPU plane ordering -- R, B, G
+   RED_L = 0,
+   RED_R,
+   BLUE_L,
+   BLUE_R,
+   GREEN_L,
+   GREEN_R,
+   VALVESURFACEPLANESMAX
+};
+
+typedef struct VkIcdSurfaceDisplay2 {
+   VkIcdSurfaceDisplay base;
+   int doscaling;
+   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
+   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
+} VkIcdSurfaceDisplay2;
+
 // KHR_display CAC "extension"
 #define VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE 1000002099
 typedef struct VkDisplaySurfaceCreateCACInfoVALVE {
-    VkStructureType                   sType;
-    const void*                       pNext;
-    // TODO: use 16.16 fixed point for these
-    // TODO: want offsets for each channel instead of just scaling?
-    VkOffset2D red_scale;
-    VkOffset2D blue_scale;
+   VkStructureType                   sType;
+   const void*                       pNext;
+   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
+   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
 } VkDisplaySurfaceCreateCACInfoVALVE;
 
 #if 0
@@ -934,12 +949,6 @@ wsi_GetDisplayPlaneCapabilities2KHR(VkPhysicalDevice physicalDevice,
    return result;
 }
 
-typedef struct VkIcdSurfaceDisplay2 {
-   VkIcdSurfaceDisplay base;
-   VkOffset2D red_scale;
-   VkOffset2D blue_scale;
-} VkIcdSurfaceDisplay2;
-
 VKAPI_ATTR VkResult VKAPI_CALL
 wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
                                  const VkDisplaySurfaceCreateInfoKHR *pCreateInfo,
@@ -973,8 +982,14 @@ wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
    surface->imageExtent = pCreateInfo->imageExtent;
 
    if (cac_info) {
-      surface2->red_scale = cac_info->red_scale;
-      surface2->blue_scale = cac_info->blue_scale;
+      surface2->doscaling = 1;
+      for(int i=0; i < VALVESURFACEPLANESMAX; i++) 
+      {
+         surface2->src_rgb[i] = cac_info->src_rgb[i];
+         surface2->dst_rgb[i] = cac_info->dst_rgb[i];
+      }
+   } else {
+      surface2->doscaling = 0;
    }
 
    *pSurface = VkIcdSurfaceBase_to_handle(&surface->base);
@@ -1980,39 +1995,112 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       uint32_t plane_id = connector->plane_id[i];
       const uint32_t *prop = connector->plane_property[i];
 
-      VkOffset2D offset = {};
-      if (i/2 == 0) { // red
-         offset = surface->red_scale;
-      } else if (i/2 == 1) { // blue
-         offset = surface->blue_scale;
-      }
+      unsigned dst_x, dst_y, dst_w, dst_h;
+      unsigned src_x, src_y, src_w, src_h;
 
-      unsigned dst_x = 0, dst_w = mode->hdisplay/2;
-      unsigned dst_y = 0, dst_h = mode->vdisplay;
-      unsigned src_x = 0, src_w = mode->hdisplay/2;
-      unsigned src_y = 0, src_h = mode->vdisplay;
+      if(surface->doscaling) {
+         assert(NUM_PLANES <= VALVESURFACEPLANESMAX);
+         VkRect2D src_rect;
+         VkRect2D dst_rect;
 
-      if (offset.x >= 0) {
-         src_x += offset.x;
-         src_w -= offset.x * 2;
+         //planes are ordered in DPU as below, where the first 4 planes can do scaling and the last 2 cannot:
+         //plane0: red left
+         //plane1: red right
+         //plane2: blue left
+         //plane3: blue right
+         //plane4: green left
+         //plane5: green right
+
+         switch(i) {
+            case RED_L: //scaling and offsets possible on this plane
+               src_rect = surface->src_rgb[RED_L];
+               dst_rect = surface->dst_rgb[RED_L];
+               break;
+            case RED_R: //scaling and offsets possible on this plane
+               src_rect = surface->src_rgb[RED_R];
+               dst_rect = surface->dst_rgb[RED_R];
+               break;
+            case BLUE_L: //scaling and offsets possible on this plane
+               src_rect = surface->src_rgb[BLUE_L];
+               dst_rect = surface->dst_rgb[BLUE_L];
+               break;
+            case BLUE_R: //scaling and offsets possible on this plane
+               src_rect = surface->src_rgb[BLUE_R];
+               dst_rect = surface->dst_rgb[BLUE_R];
+               break;
+            case GREEN_L: //only offsets possible on this plane
+               src_rect = surface->src_rgb[GREEN_L];
+               dst_rect = surface->dst_rgb[GREEN_L];
+               break;
+            case GREEN_R: //only offsets possible on this plane
+               src_rect = surface->src_rgb[GREEN_R];
+               dst_rect = surface->dst_rgb[GREEN_R];
+               break;
+            default:
+               break;
+         }
+
+         src_x = src_rect.offset.x;
+         src_y = src_rect.offset.y;
+         src_w = src_rect.extent.width;
+         src_h = src_rect.extent.height;
+         
+         dst_x = dst_rect.offset.x;
+         dst_y = dst_rect.offset.y;
+         dst_w = dst_rect.extent.width;
+         dst_h = dst_rect.extent.height;
+   
+         //printf("[%d] src_x=%d src_y=%d src_w=%d src_h=%d | dst_x=%d src_y=%d src_w=%d src_h=%d\n",i, src_x,src_y,src_w,src_h, dst_x,dst_y,dst_w,dst_h);
+         assert(src_w > 0);
+         assert(dst_w > 0);
+         assert(src_h > 0);
+         assert(dst_h > 0);
+         assert(src_y >= 0);
+         assert(dst_y >= 0);
+         assert((src_y < mode->vdisplay) && (src_y >= 0));
+         assert((dst_y < mode->vdisplay) && (dst_y >= 0));
+         assert(src_y+src_h <= mode->vdisplay);
+         assert(dst_y+dst_h <= mode->vdisplay);
+
+         if((i == GREEN_L) || (i == GREEN_R)) { //no scaling allowed on green planes
+            assert(src_w == dst_w);
+            assert(src_h == dst_h);
+         }
+
+         if (i&1) // right side 
+         {
+            assert(src_x >= mode->hdisplay/2);
+            assert(dst_x >= mode->hdisplay/2);
+            assert(src_x <  mode->hdisplay);
+            assert(dst_x <  mode->hdisplay);
+            assert(src_x + src_w <= mode->hdisplay);
+            assert(dst_x + dst_w <= mode->hdisplay);
+         } 
+         else //left side
+         {
+            assert(src_x >= 0);
+            assert(dst_x >= 0);
+            assert(src_x <  mode->hdisplay/2);
+            assert(dst_x <  mode->hdisplay/2);
+            assert(src_x + src_w <= mode->hdisplay/2);
+            assert(dst_x + dst_w <= mode->hdisplay/2);
+         }
       } else {
-         dst_x += -offset.x;
-         dst_w -= -offset.x * 2;
+         dst_x = 0;
+         dst_w = mode->hdisplay/2;
+         dst_y = 0;
+         dst_h = mode->vdisplay;
+         src_x = 0;
+         src_w = mode->hdisplay/2;
+         src_y = 0;
+         src_h = mode->vdisplay;
+         if (i&1) // right side 
+         {
+            src_x += mode->hdisplay/2;
+            dst_x += mode->hdisplay/2;
+         }
       }
-
-      if (offset.y >= 0) {
-         src_y += offset.y;
-         src_h -= offset.y * 2;
-      } else {
-         dst_y += -offset.y;
-         dst_h -= -offset.y * 2;
-      }
-
-      if (i&1) { // right side
-         src_x += mode->hdisplay/2;
-         dst_x += mode->hdisplay/2;
-      }
-
+   
       drmModeAtomicAddProperty(req, plane_id, prop[FB_ID], image->fb_id);
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_ID], crtc_id);
       drmModeAtomicAddProperty(req, plane_id, prop[SRC_X], src_x << 16);
