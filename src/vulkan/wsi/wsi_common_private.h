@@ -112,6 +112,18 @@ struct wsi_swapchain {
    VkResult (*queue_present)(struct wsi_swapchain *swap_chain,
                              uint32_t image_index,
                              const VkPresentRegionKHR *damage);
+   VkResult (*cac_plane_adjust)(struct wsi_swapchain *swap_chain,
+                             uint32_t image_index,
+                             uint32_t plane_index,
+                             uint32_t src_x,
+                             uint32_t src_y,
+                             uint32_t src_width,
+                             uint32_t src_height,
+                             uint32_t dst_x,
+                             uint32_t dst_y,
+                             uint32_t dst_width,
+                             uint32_t dst_height
+                             );
 };
 
 bool
