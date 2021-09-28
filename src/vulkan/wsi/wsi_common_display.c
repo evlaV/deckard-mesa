@@ -57,31 +57,6 @@
 #include "wsi_common_display.h"
 #include "wsi_common_queue.h"
 
-enum VALVESURFACEPLANES { //ordered as they are in DPU plane ordering -- R, B, G
-   RED_L = 0,
-   RED_R,
-   BLUE_L,
-   BLUE_R,
-   GREEN_L,
-   GREEN_R,
-   VALVESURFACEPLANESMAX
-};
-
-typedef struct VkIcdSurfaceDisplay2 {
-   VkIcdSurfaceDisplay base;
-   int doscaling;
-   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
-   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
-} VkIcdSurfaceDisplay2;
-
-// KHR_display CAC "extension"
-#define VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE 1000002099
-typedef struct VkDisplaySurfaceCreateCACInfoVALVE {
-   VkStructureType                   sType;
-   const void*                       pNext;
-   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
-   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
-} VkDisplaySurfaceCreateCACInfoVALVE;
 
 #if 0
 #define wsi_display_debug(...) fprintf(stderr, __VA_ARGS__)
@@ -2257,6 +2232,34 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
 }
 
 static VkResult
+wsi_display_cac_plane_adjust(struct wsi_swapchain *drv_chain,
+                                 uint32_t image_index,
+                                 uint32_t plane_index,
+                                 uint32_t src_x,
+                                 uint32_t src_y,
+                                 uint32_t src_width,
+                                 uint32_t src_height,
+                                 uint32_t dst_x,
+                                 uint32_t dst_y,
+                                 uint32_t dst_width,
+                                 uint32_t dst_height)
+{
+   struct wsi_display_swapchain *chain =
+      (struct wsi_display_swapchain *) drv_chain;
+   VkIcdSurfaceDisplay2 *surface2 = (VkIcdSurfaceDisplay2 *) chain->surface;
+   //printf("wid=%d\n",surface2->dst_rgb[RED_L].extent.width);
+   surface2->src_rgb[plane_index].offset.x = src_x;
+   surface2->src_rgb[plane_index].offset.y = src_y;
+   surface2->src_rgb[plane_index].extent.height = src_height;
+   surface2->src_rgb[plane_index].extent.width = src_width;
+   surface2->dst_rgb[plane_index].offset.x = dst_x;
+   surface2->dst_rgb[plane_index].offset.y = dst_y;
+   surface2->dst_rgb[plane_index].extent.height = dst_height;
+   surface2->dst_rgb[plane_index].extent.width = dst_width;
+   return VK_SUCCESS;
+}
+
+static VkResult
 wsi_display_queue_present(struct wsi_swapchain *drv_chain,
                           uint32_t image_index,
                           const VkPresentRegionKHR *damage)
@@ -2397,6 +2400,7 @@ wsi_display_surface_create_swapchain(
    chain->base.destroy = wsi_display_swapchain_destroy;
    chain->base.get_wsi_image = wsi_display_get_wsi_image;
    chain->base.acquire_next_image = wsi_display_acquire_next_image;
+   chain->base.cac_plane_adjust = wsi_display_cac_plane_adjust;
    chain->base.queue_present = wsi_display_queue_present;
    chain->base.present_mode = wsi_swapchain_get_present_mode(wsi_device, create_info);
    chain->base.get_refresh_cycle_duration =
