@@ -104,6 +104,7 @@ enum plane_property {
    SRC_W,
    SRC_H,
    FB_ID,
+   rotation,
    PLANE_PROPERTY_MAX,
 };
 
@@ -211,6 +212,7 @@ find_properties(struct wsi_display_connector *connector, uint32_t type, uint32_t
          PROPERTY(SRC_Y);
          PROPERTY(SRC_W);
          PROPERTY(SRC_H);
+         PROPERTY(rotation);
          break;
       }
 #undef PROPERTY
@@ -1972,6 +1974,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
 
       unsigned dst_x, dst_y, dst_w, dst_h;
       unsigned src_x, src_y, src_w, src_h;
+      unsigned rotation_value = DRM_MODE_ROTATE_0;
 
       if(surface->doscaling) {
          assert(NUM_PLANES <= VALVESURFACEPLANESMAX);
@@ -2019,6 +2022,16 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
          src_y = src_rect.offset.y;
          src_w = src_rect.extent.width;
          src_h = src_rect.extent.height;
+
+         if ((int) src_w < 0) {
+            src_w = -src_w;
+            rotation_value |= DRM_MODE_REFLECT_X;
+         }
+
+         if ((int) src_h < 0) {
+            src_h = -src_h;
+            rotation_value |= DRM_MODE_REFLECT_Y;
+         }
          
          dst_x = dst_rect.offset.x;
          dst_y = dst_rect.offset.y;
@@ -2086,6 +2099,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_Y], dst_y);
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], dst_w);
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], dst_h);
+      drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
    }
 
    ret = drmModeAtomicCommit(fd, req, flags, image);
