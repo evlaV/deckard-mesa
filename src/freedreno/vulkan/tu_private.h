@@ -405,6 +405,12 @@ struct tu6_global
 /* extra space in vsc draw/prim streams */
 #define VSC_PAD 0x40
 
+
+struct tu_bo_idx {
+   uint32_t idx;
+   uint32_t refcount;
+};
+
 struct tu_device
 {
    struct vk_device vk;
@@ -452,7 +458,7 @@ struct tu_device
    /* bo list for submits: */
    struct drm_msm_gem_submit_bo *bo_list;
    /* map bo handles to bo list index: */
-   uint32_t *bo_idx;
+   struct tu_bo_idx *bo_idx;
    uint32_t bo_count, bo_list_size, bo_idx_size;
    mtx_t bo_mutex;
 
