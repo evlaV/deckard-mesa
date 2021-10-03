@@ -254,6 +254,14 @@ tu_bo_init(struct tu_device *dev,
    };
 
    mtx_lock(&dev->bo_mutex);
+
+   if (gem_handle < dev->bo_idx_size && dev->bo_idx[gem_handle].refcount) {
+      printf("BO already in list!\n");
+      dev->bo_idx[gem_handle].refcount++;
+      mtx_unlock(&dev->bo_mutex);
+      return VK_SUCCESS;
+   }
+
    uint32_t idx = dev->bo_count++;
 
    /* grow the bo list if needed */
@@ -272,17 +280,20 @@ tu_bo_init(struct tu_device *dev,
    /* grow the "bo idx" list (maps gem handles to index in the bo list) */
    if (bo->gem_handle >= dev->bo_idx_size) {
       uint32_t new_len = bo->gem_handle + 256;
-      uint32_t *new_ptr =
+      struct tu_bo_idx *new_ptr =
          vk_realloc(&dev->vk.alloc, dev->bo_idx, new_len * sizeof(*dev->bo_idx),
                     8, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
       if (!new_ptr)
          goto fail_bo_idx;
 
       dev->bo_idx = new_ptr;
+      /* memset to make sure refcount is 0 for any new entries */
+      memset(&dev->bo_idx[dev->bo_idx_size], 0, (new_len - dev->bo_idx_size) * sizeof(*dev->bo_idx));
       dev->bo_idx_size = new_len;
    }
 
-   dev->bo_idx[bo->gem_handle] = idx;
+   dev->bo_idx[bo->gem_handle].idx = idx;
+   dev->bo_idx[bo->gem_handle].refcount = 1;
    dev->bo_list[idx] = (struct drm_msm_gem_submit_bo) {
       .flags = MSM_SUBMIT_BO_READ | MSM_SUBMIT_BO_WRITE |
                COND(dump, MSM_SUBMIT_BO_DUMP),
@@ -383,10 +394,12 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo)
       munmap(bo->map, bo->size);
 
    mtx_lock(&dev->bo_mutex);
-   uint32_t idx = dev->bo_idx[bo->gem_handle];
-   dev->bo_count--;
-   dev->bo_list[idx] = dev->bo_list[dev->bo_count];
-   dev->bo_idx[dev->bo_list[idx].handle] = idx;
+   if (--dev->bo_idx[bo->gem_handle].refcount == 0) {
+      uint32_t idx = dev->bo_idx[bo->gem_handle].idx;
+      dev->bo_count--;
+      dev->bo_list[idx] = dev->bo_list[dev->bo_count];
+      dev->bo_idx[dev->bo_list[idx].handle].idx = idx;
+   }
    mtx_unlock(&dev->bo_mutex);
 
    tu_gem_close(dev, bo->gem_handle);
@@ -1093,7 +1106,7 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
 
          cmds[entry_idx].type = MSM_SUBMIT_CMD_BUF;
          cmds[entry_idx].submit_idx =
-            dev->bo_idx[perf_cs_entry->bo->gem_handle];
+            dev->bo_idx[perf_cs_entry->bo->gem_handle].idx;
          cmds[entry_idx].submit_offset = perf_cs_entry->offset;
          cmds[entry_idx].size = perf_cs_entry->size;
          cmds[entry_idx].pad = 0;
@@ -1104,7 +1117,7 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
       for (unsigned i = 0; i < cs->entry_count; ++i, ++entry_idx) {
          cmds[entry_idx].type = MSM_SUBMIT_CMD_BUF;
          cmds[entry_idx].submit_idx =
-            dev->bo_idx[cs->entries[i].bo->gem_handle];
+            dev->bo_idx[cs->entries[i].bo->gem_handle].idx;
          cmds[entry_idx].submit_offset = cs->entries[i].offset;
          cmds[entry_idx].size = cs->entries[i].size;
          cmds[entry_idx].pad = 0;
@@ -1117,7 +1130,7 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
          if (ts_cs) {
             cmds[entry_idx].type = MSM_SUBMIT_CMD_BUF;
             cmds[entry_idx].submit_idx =
-               queue->device->bo_idx[ts_cs->entries[0].bo->gem_handle];
+               queue->device->bo_idx[ts_cs->entries[0].bo->gem_handle].idx;
 
             assert(cmds[entry_idx].submit_idx < queue->device->bo_count);
 
