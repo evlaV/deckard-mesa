@@ -29,6 +29,8 @@
 #include "wsi_common.h"
 #include "drm-uapi/drm_fourcc.h"
 
+#include "util/perf/perftools.h"
+
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 tu_wsi_proc_addr(VkPhysicalDevice physicalDevice, const char *pName)
 {
@@ -228,6 +230,7 @@ tu_AcquireNextImage2KHR(VkDevice _device,
                         const VkAcquireNextImageInfoKHR *pAcquireInfo,
                         uint32_t *pImageIndex)
 {
+   EventDurationStart(ctx1,"[MESA] tu_AcquireNextImage2KHR");
    TU_FROM_HANDLE(tu_device, device, _device);
    TU_FROM_HANDLE(tu_syncobj, fence, pAcquireInfo->fence);
    TU_FROM_HANDLE(tu_syncobj, semaphore, pAcquireInfo->semaphore);
@@ -239,7 +242,7 @@ tu_AcquireNextImage2KHR(VkDevice _device,
 
    /* signal fence/semaphore - image is available immediately */
    tu_signal_fences(device, fence, semaphore);
-
+   EventDurationStop(ctx1);
    return result;
 }
 

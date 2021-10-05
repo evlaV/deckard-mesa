@@ -40,6 +40,8 @@
 
 #include "tu_cs.h"
 
+#include "util/perf/perftools.h"
+
 struct tu_binary_syncobj {
    uint32_t permanent, temporary;
 };
@@ -1403,6 +1405,7 @@ tu_QueueSubmit(VkQueue _queue,
                const VkSubmitInfo *pSubmits,
                VkFence _fence)
 {
+   EventWriteString("[MESA] drm tu_QueueSubmit");
    TU_FROM_HANDLE(tu_queue, queue, _queue);
    TU_FROM_HANDLE(tu_syncobj, fence, _fence);
 

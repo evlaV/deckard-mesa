@@ -46,6 +46,7 @@
 #include "wsi_common_display.h"
 #include "wsi_common_queue.h"
 
+#include "util/perf/perftools.h"
 
 #if 0
 #define wsi_display_debug(...) fprintf(stderr, __VA_ARGS__)
@@ -1275,6 +1276,7 @@ static struct wsi_image *
 wsi_display_get_wsi_image(struct wsi_swapchain *drv_chain,
                           uint32_t image_index)
 {
+   EventWriteString("[MESA] wsi_display_get_wsi_image");
    struct wsi_display_swapchain *chain =
       (struct wsi_display_swapchain *) drv_chain;
 

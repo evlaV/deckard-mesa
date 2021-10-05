@@ -46,6 +46,8 @@
 #include <util/u_vector.h>
 #include <util/anon_file.h>
 
+#include "util/perf/perftools.h"
+
 struct wsi_wayland;
 
 struct wsi_wl_format {
@@ -831,6 +833,7 @@ static struct wsi_image *
 wsi_wl_swapchain_get_wsi_image(struct wsi_swapchain *wsi_chain,
                                uint32_t image_index)
 {
+   EventWriteString("[MESA] wsi_wl_swapchain_get_wsi_image");
    struct wsi_wl_swapchain *chain = (struct wsi_wl_swapchain *)wsi_chain;
    return &chain->images[image_index].base;
 }
@@ -932,6 +935,8 @@ wsi_wl_swapchain_queue_present(struct wsi_swapchain *wsi_chain,
 {
    struct wsi_wl_swapchain *chain = (struct wsi_wl_swapchain *)wsi_chain;
 
+   EventDurationStart(ctx1,"[MESA] wsi_wl_swapchain_queue_present");
+
    if (chain->display->sw) {
       struct wsi_wl_image *image = &chain->images[image_index];
       void *dptr = image->data_ptr;
@@ -949,14 +954,20 @@ wsi_wl_swapchain_queue_present(struct wsi_swapchain *wsi_chain,
                                    image->base.memory);
 
    }
+   EventWriteString("[MESA] wsi_wl_swapchain_queue_present mark x1");
+   int loopcounter = 0;
    if (chain->base.present_mode == VK_PRESENT_MODE_FIFO_KHR) {
       while (!chain->fifo_ready) {
+         EventDurationStart(ctx2,"[MESA] calling wl_display_dispatch_queue()");
+         loopcounter++;
          int ret = wl_display_dispatch_queue(chain->display->wl_display,
                                              chain->display->queue);
+         EventDurationStop(ctx2);
          if (ret < 0)
             return VK_ERROR_OUT_OF_DATE_KHR;
       }
    }
+   EventWriteStringF("[MESA] wl_display_dispatch_queue loopcount = %d\n",loopcounter);
 
    assert(image_index < chain->base.image_count);
    wl_surface_attach(chain->surface, chain->images[image_index].buffer, 0, 0);
@@ -979,10 +990,11 @@ wsi_wl_swapchain_queue_present(struct wsi_swapchain *wsi_chain,
       wl_callback_add_listener(chain->frame, &frame_listener, chain);
       chain->fifo_ready = false;
    }
-
    chain->images[image_index].busy = true;
    wl_surface_commit(chain->surface);
    wl_display_flush(chain->display->wl_display);
+
+   EventDurationStop(ctx1);
 
    return VK_SUCCESS;
 }

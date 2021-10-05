@@ -35,6 +35,8 @@
 #include <errno.h>
 #include <math.h>
 
+#include "util/perf/perftools.h"
+
 VkResult
 wsi_device_init(struct wsi_device *wsi,
                 VkPhysicalDevice pdevice,
@@ -823,6 +825,8 @@ wsi_common_queue_present(const struct wsi_device *wsi,
                          int queue_family_index,
                          const VkPresentInfoKHR *pPresentInfo)
 {
+   EventDurationStart(ctx1,"[MESA] wsi_common_queue_present");
+   
    VkResult final_result = VK_SUCCESS;
 
    const VkPresentRegionsKHR *regions =
@@ -1003,7 +1007,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       if (final_result == VK_SUCCESS)
          final_result = result;
    }
-
+   EventDurationStop(ctx1);
    return final_result;
 }
 
