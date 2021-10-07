@@ -155,14 +155,11 @@ ir3_delayslots_with_repeat(struct ir3_instruction *assigner,
    if (assigner->opc == OPC_MOVMSK)
       return delay;
 
-   bool mismatched_half =
-      (src->flags & IR3_REG_HALF) != (dst->flags & IR3_REG_HALF);
-
    /* TODO: Handle the combination of (rpt) and different component sizes
     * better like below. This complicates things significantly because the
     * components don't line up.
     */
-   if (mismatched_half)
+   if ((src->flags & IR3_REG_HALF) != (dst->flags & IR3_REG_HALF))
       return delay;
 
    /* If an instruction has a (rpt), then it acts as a sequence of
@@ -217,19 +214,15 @@ delay_calc_srcn(struct ir3_instruction *assigner,
 {
    struct ir3_register *src = consumer->srcs[consumer_n];
    struct ir3_register *dst = assigner->dsts[assigner_n];
-   bool mismatched_half =
-      (src->flags & IR3_REG_HALF) != (dst->flags & IR3_REG_HALF);
 
-   /* In the mergedregs case or when the register is a special register,
-    * half-registers do not alias with full registers.
-    */
-   if ((!mergedregs || is_reg_special(src) || is_reg_special(dst)) &&
-       mismatched_half)
+   enum ir3_reg_file src_file, dst_file;
+   unsigned src_num = post_ra_reg_num(src), dst_num = post_ra_reg_num(dst);
+   unsigned src_start = ir3_reg_file_offset(src, src_num, mergedregs, &src_file);
+   unsigned dst_start = ir3_reg_file_offset(dst, dst_num, mergedregs, &dst_file);
+   if (src_file != dst_file)
       return 0;
 
-   unsigned src_start = post_ra_reg_num(src) * reg_elem_size(src);
    unsigned src_end = src_start + post_ra_reg_elems(src) * reg_elem_size(src);
-   unsigned dst_start = post_ra_reg_num(dst) * reg_elem_size(dst);
    unsigned dst_end = dst_start + post_ra_reg_elems(dst) * reg_elem_size(dst);
 
    if (dst_start >= src_end || src_start >= dst_end)
