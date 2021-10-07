@@ -134,12 +134,16 @@ validate_error(struct ra_val_ctx *ctx, const char *condstr)
 static unsigned
 get_file_size(struct ra_val_ctx *ctx, struct ir3_register *reg)
 {
-   if (reg->flags & IR3_REG_SHARED)
-      return RA_SHARED_SIZE;
-   else if (ctx->merged_regs || !(reg->flags & IR3_REG_HALF))
+   if (reg->flags & IR3_REG_SHARED) {
+      if (reg->flags & IR3_REG_HALF)
+         return RA_SHARED_HALF_SIZE;
+      else
+         return RA_SHARED_SIZE;
+   } else if (ctx->merged_regs || !(reg->flags & IR3_REG_HALF)) {
       return ctx->full_size;
-   else
+   } else {
       return ctx->half_size;
+   }
 }
 
 static struct reg_state *
