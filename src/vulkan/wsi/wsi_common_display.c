@@ -1616,8 +1616,10 @@ wsi_display_select_planes(struct wsi_display_connector *connector,
    if (!plane_res)
       return;
 
-   assert(plane_res->count_planes >= NUM_PLANES);
-   for (unsigned i = 0; i < 6; i++)
+   printf("mesa: plane_res->count_planes=%d\n",plane_res->count_planes);
+   assert( (plane_res->count_planes >= 2) && (plane_res->count_planes <= 8) );
+   int max_planes = plane_res->count_planes <= NUM_PLANES ? plane_res->count_planes : NUM_PLANES;
+   for (unsigned i = 0; i < max_planes; i++)
       connector->plane_id[i] = plane_res->planes[i];
 
    drmModeFreePlaneResources(plane_res);
@@ -1654,6 +1656,15 @@ wsi_display_setup_connector(wsi_display_connector *connector,
       goto bail_mode_res;
    }
 
+   drmModePlaneRes *plane_res = drmModeGetPlaneResources(wsi->fd);
+   if (!plane_res)
+      goto bail;
+   printf("mesa: plane_res->count_planes=%d\n",plane_res->count_planes);
+   assert( (plane_res->count_planes >= 2) && (plane_res->count_planes <= 8) );
+   int max_planes = plane_res->count_planes <= NUM_PLANES ? plane_res->count_planes : NUM_PLANES;
+
+   drmModeFreePlaneResources(plane_res);
+
    /* Pick a CRTC if we don't have one */
    if (!connector->crtc_id) {
       connector->crtc_id = wsi_display_select_crtc(connector, mode_res,
@@ -1667,7 +1678,7 @@ wsi_display_setup_connector(wsi_display_connector *connector,
       /* Select the primary plane of that CRTC, and populate the
        * format/modifier lists for that plane */
       wsi_display_select_planes(connector, mode_res);
-      for (int i = 0; i < NUM_PLANES; i++) {
+      for (int i = 0; i < max_planes; i++) {
          if (!connector->plane_id[i] ||
             !find_properties(connector, DRM_MODE_OBJECT_PLANE, i)) {
             result = VK_ERROR_SURFACE_LOST_KHR;
