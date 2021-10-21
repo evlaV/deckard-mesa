@@ -148,6 +148,12 @@ tu_physical_device_get_format_properties(
       goto end;
    }
 
+   /* TODO test if writing to MRT other than 0 works with these media formats
+    */
+   if (format == PIPE_FORMAT_X6R10_UNORM ||
+       format == PIPE_FORMAT_X6R10X6G10_UNORM)
+      supported_color = false;
+
    /* We don't support BufferToImage/ImageToBuffer for npot formats */
    if (!is_npot)
       buffer |= VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT;
