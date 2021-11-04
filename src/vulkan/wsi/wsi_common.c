@@ -920,6 +920,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             image->prime.blit_cmd_buffers[queue_family_index];
       }
 
+	  EventWriteStringF("[mesa] wsi_common_queue_present QueueSubmit image_index=%i",image_index);
       uint64_t present_id = 0;
       if (present_ids && present_ids->pPresentIds)
          present_id = present_ids->pPresentIds[i];
@@ -969,10 +970,11 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       if (result != VK_SUCCESS)
          goto fail_present;
 
+      EventDurationStart(ctx2,"[MESA] wsi_common_queue_present WaitForFences");
       if (wsi->sw)
 	      wsi->WaitForFences(device, 1, &swapchain->fences[image_index],
 				 true, ~0ull);
-
+      EventDurationStop(ctx2);
       const VkPresentRegionKHR *region = NULL;
       if (regions && regions->pRegions)
          region = &regions->pRegions[i];

@@ -232,6 +232,17 @@ enum wsi_image_state {
    WSI_IMAGE_DISPLAYING
 };
 
+char str_idle[]="IDLE"; //WSI_IMAGE_IDLE
+char str_drawing[]="DRAWING"; //WSI_IMAGE_DRAWING
+char str_queued[]="QUEUED"; //WSI_IMAGE_QUEUED
+char str_waiting[]="WAITING"; //WSI_IMAGE_WAITING
+char str_flipping[]="FLIPPING"; //WSI_IMAGE_FLIPPING
+char str_displaying[]="DISPLAYING"; //WSI_IMAGE_DISPLAYING
+char str_other[]="OTHER"; //WSI_IMAGE_OTHER
+
+#define IMAGE_STATES (WSI_IMAGE_DISPLAYING+1)
+char *image_states[IMAGE_STATES+1]; //add extra state for OTHER
+
 struct wsi_display_image {
    struct wsi_image             base;
    struct wsi_display_swapchain *chain;
@@ -264,6 +275,53 @@ static uint64_t fence_sequence;
 
 ICD_DEFINE_NONDISP_HANDLE_CASTS(wsi_display_mode, VkDisplayModeKHR)
 ICD_DEFINE_NONDISP_HANDLE_CASTS(wsi_display_connector, VkDisplayKHR)
+
+enum perftools_context_start_end {
+   PERFTOOLS_BEGIN,
+   PERFTOOLS_END
+};
+
+void perftools_swapchain_strings_init(void);
+void perftools_image_context_change(char *infostr, enum wsi_image_state prev_image_state, enum wsi_image_state next_image_state, int image_idx);
+int get_swapchain_index_from_image(struct wsi_swapchain *drv_chain, struct wsi_display_image *in_image);
+int print_swapchain_image_states(struct wsi_swapchain *drv_chain);
+uint64_t perftools_image_ctx[5] = {0x0}; //max possible swapchain images
+
+//the OTHER image goes is just the max array size
+#define SWAPCHAIN_IMAGE_OTHER (IMAGE_STATES) 
+int swapchain_debug_strings_init_done=0;
+void perftools_swapchain_strings_init(void) {
+   image_states[WSI_IMAGE_IDLE]=str_idle;
+   image_states[WSI_IMAGE_DRAWING]=str_drawing;
+   image_states[WSI_IMAGE_WAITING]=str_waiting;
+   image_states[WSI_IMAGE_QUEUED]=str_queued;
+   image_states[WSI_IMAGE_FLIPPING]=str_flipping;
+   image_states[WSI_IMAGE_DISPLAYING]=str_displaying;
+   image_states[SWAPCHAIN_IMAGE_OTHER]=str_other;
+   swapchain_debug_strings_init_done=1;
+}
+
+/*Place this func when an image state changes so we can track the beginning / end of the swapchain image states with perftools*/
+void perftools_image_context_change(char *infostr, enum wsi_image_state prev_image_state, enum wsi_image_state next_image_state, int image_idx) {
+   if(!swapchain_debug_strings_init_done) perftools_swapchain_strings_init();
+
+   //truncate the image values to ensure they are within range
+   if( (prev_image_state < 0) || (prev_image_state >= IMAGE_STATES) ) prev_image_state = SWAPCHAIN_IMAGE_OTHER;
+   if( (next_image_state < 0) || (next_image_state >= IMAGE_STATES) ) next_image_state = SWAPCHAIN_IMAGE_OTHER;
+
+   EventWriteStringF("[MESA] (%s) SWAPCHAIN[%d]: %s->%s",infostr,image_idx,image_states[prev_image_state], image_states[next_image_state]);
+   
+   char buff1[64];
+   snprintf(buff1,64,"[MESA] [%d] %s",image_idx, image_states[prev_image_state] );
+   EventWriteStringEnd(buff1, perftools_image_ctx[image_idx] );  
+
+
+   perftools_image_ctx[image_idx] = CScopedEventDurationGetContextID();
+   char buff2[64];
+   snprintf(buff2,64,"[MESA] [%d] %s",image_idx, image_states[next_image_state] );
+   EventWriteStringBegin(buff2, perftools_image_ctx[image_idx] );  
+
+}
 
 static bool
 wsi_display_mode_matches_drm(wsi_display_mode *wsi,
@@ -1200,6 +1258,7 @@ wsi_display_image_init(VkDevice device_h,
       modifiers[i] = i < image->base.num_planes ? image->base.drm_modifier : 0;
 
    image->chain = chain;
+   perftools_image_context_change("wsi_display_image_init",image->state,WSI_IMAGE_IDLE,get_swapchain_index_from_image(drv_chain,image));
    image->state = WSI_IMAGE_IDLE;
    image->fence = NULL;
    image->fb_id = 0;
@@ -1295,6 +1354,7 @@ wsi_display_idle_old_displaying(struct wsi_display_image *active_image)
           &chain->images[i] != active_image)
       {
          wsi_display_debug("idle %d\n", i);
+         perftools_image_context_change("wsi_display_idle_old_displaying",chain->images[i].state,WSI_IMAGE_IDLE,i);
          chain->images[i].state = WSI_IMAGE_IDLE;
       }
 }
@@ -1332,6 +1392,7 @@ wsi_display_page_flip_handler2(int fd,
    if (nsec < connector->last_nsec)
       nsec = connector->last_nsec;
 
+   perftools_image_context_change("wsi_display_page_flip_handler2",image->state,WSI_IMAGE_DISPLAYING,get_swapchain_index_from_image(&(chain->base),image));
    image->state = WSI_IMAGE_DISPLAYING;
 
    uint64_t frame64 = widen_32_to_64(frame, connector->last_frame);
@@ -1405,6 +1466,8 @@ wsi_display_wait_thread(void *data)
       .events = POLLIN
    };
 
+   uint64_t ctx = CScopedEventDurationGetContextID();
+   EventWriteStringBegin("[MESA] wait_thread", ctx);
    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
    for (;;) {
       int ret = poll(&pollfd, 1, -1);
@@ -1415,6 +1478,7 @@ wsi_display_wait_thread(void *data)
          pthread_mutex_unlock(&wsi->wait_mutex);
       }
    }
+   EventWriteStringEnd("[MESA] wait_thread", ctx);
    return NULL;
 }
 
@@ -1494,6 +1558,7 @@ wsi_display_acquire_next_image(struct wsi_swapchain *drv_chain,
          if (chain->images[i].state == WSI_IMAGE_IDLE) {
             *image_index = i;
             wsi_display_debug("image %d available\n", i);
+            perftools_image_context_change("wsi_display_acquire_next_image",chain->images[i].state,WSI_IMAGE_DRAWING,i);
             chain->images[i].state = WSI_IMAGE_DRAWING;
             result = VK_SUCCESS;
             goto done;
@@ -1516,6 +1581,22 @@ wsi_display_acquire_next_image(struct wsi_swapchain *drv_chain,
 done:
    pthread_mutex_unlock(&wsi->wait_mutex);
 
+   #define SWAPCHAINIMAGEHACK
+   #ifdef SWAPCHAINIMAGEHACK
+   typedef struct VkAcquireNextImageDebugDataKHR {
+					VkStructureType    sType;
+					const void*        pNext;
+					int debugData[3];
+	} sVkAcquireNextImageDebugDataKHR;
+	#define VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_DEBUG_DATA_KHR 1004107337 /*this must match on calling side also*/
+   sVkAcquireNextImageDebugDataKHR * swapchainimgdebugdata = NULL;
+   if(info->pNext != VK_NULL_HANDLE) swapchainimgdebugdata = (void *) info->pNext;
+   if(swapchainimgdebugdata) {
+      if(swapchainimgdebugdata->sType == VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_DEBUG_DATA_KHR) {
+         for (uint32_t i = 0; i < chain->base.image_count; i++) { swapchainimgdebugdata->debugData[i] = chain->images[i].state; }
+      }
+   }
+   #endif
    if (result != VK_SUCCESS)
       return result;
 
@@ -1802,6 +1883,7 @@ static void wsi_display_fence_event_handler(struct wsi_display_fence *fence,
    wsi_display_fence_check_free(fence);
    if (image) {
       image->flip_sequence = ++image->chain->flip_sequence;
+      perftools_image_context_change("wsi_display_fence_event_handler",image->state,WSI_IMAGE_QUEUED,get_swapchain_index_from_image(&(image->chain->base),image));
       image->state = WSI_IMAGE_QUEUED;
       VkResult result = _wsi_display_queue_next(&image->chain->base);
       if (result != VK_SUCCESS)
@@ -2083,6 +2165,22 @@ out:
    return ret;
 }
 
+int get_swapchain_index_from_image(struct wsi_swapchain *drv_chain, struct wsi_display_image *in_image)
+{
+   if(in_image == NULL) {
+      return -2;
+   }
+   
+   struct wsi_display_swapchain *chain =
+      (struct wsi_display_swapchain *) drv_chain;
+   for (uint32_t i = 0; i < chain->base.image_count; i++) {
+      struct wsi_display_image *tmp_image = &chain->images[i];
+      if(in_image==tmp_image) {
+         return i;
+      }
+   }
+   return -1;
+}
 /*
  * Check to see if the kernel has no flip queued and if there's an image
  * waiting to be displayed.
@@ -2117,9 +2215,11 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
          switch (tmp_image->state) {
          case WSI_IMAGE_FLIPPING:
             /* already flipping, don't send another to the kernel yet */
+			   EventWriteStringF("[MESA] _wsi_display_queue_next ALREADY FLIPPING [%d] return VK_SUCCESS without doing anything!",i);
             return VK_SUCCESS;
          case WSI_IMAGE_QUEUED:
             /* find the oldest queued */
+			   //EventWriteStringF("[MESA] _wsi_display_queue_next found image to move from QUEUED to FLIPPING [%d]",i);
             if (!image || tmp_image->flip_sequence < image->flip_sequence)
                image = tmp_image;
             break;
@@ -2139,6 +2239,7 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
 
       int ret = drm_atomic_commit(connector, image, (VkIcdSurfaceDisplay2*) surface);
       if (ret == 0) {
+         perftools_image_context_change("_wsi_display_queue_next",image->state,WSI_IMAGE_FLIPPING,get_swapchain_index_from_image(drv_chain,image));
          image->state = WSI_IMAGE_FLIPPING;
          connector->active = true;
          return VK_SUCCESS;
@@ -2146,6 +2247,7 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
 
       if (ret != -EACCES) {
          connector->active = false;
+         perftools_image_context_change("_wsi_display_queue_next",image->state,WSI_IMAGE_IDLE,get_swapchain_index_from_image(drv_chain,image));
          image->state = WSI_IMAGE_IDLE;
          return VK_ERROR_SURFACE_LOST_KHR;
       }
@@ -2203,6 +2305,7 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
 
    assert(image->state == WSI_IMAGE_DRAWING);
    wsi_display_debug("present %d\n", image_index);
+   EventWriteStringF("[MESA] SWAPCHAIN[%d] PRESENT\n", image_index);
 
    pthread_mutex_lock(&wsi->wait_mutex);
 
@@ -2250,6 +2353,7 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
           * just go queue an image
           */
          if (frame_queued <= image->base.timing->target_msc - 1) {
+            perftools_image_context_change("wsi_display_queue_present",image->state,WSI_IMAGE_WAITING,image_index);
             image->state = WSI_IMAGE_WAITING;
 
             /*
@@ -2268,6 +2372,7 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
    }
 
    image->flip_sequence = ++chain->flip_sequence;
+   perftools_image_context_change("wsi_display_queue_present",image->state,WSI_IMAGE_QUEUED,get_swapchain_index_from_image(drv_chain,image));
    image->state = WSI_IMAGE_QUEUED;
 
    result = _wsi_display_queue_next(drv_chain);
