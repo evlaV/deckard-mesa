@@ -36,7 +36,7 @@ static inline enum a3xx_msaa_samples
 tu_msaa_samples(uint32_t samples)
 {
    assert(__builtin_popcount(samples) == 1);
-   return util_logbase2(samples);
+   return (enum a3xx_msaa_samples) util_logbase2(samples);
 }
 
 static inline uint32_t
@@ -50,13 +50,13 @@ tu6_stage2opcode(gl_shader_stage stage)
 static inline enum a6xx_state_block
 tu6_stage2texsb(gl_shader_stage stage)
 {
-   return SB6_VS_TEX + stage;
+   return (enum a6xx_state_block) (SB6_VS_TEX + stage);
 }
 
 static inline enum a6xx_state_block
 tu6_stage2shadersb(gl_shader_stage stage)
 {
-   return SB6_VS_SHADER + stage;
+   return (enum a6xx_state_block) (SB6_VS_SHADER + stage);
 }
 
 static inline enum a3xx_rop_code
@@ -82,7 +82,7 @@ tu6_rop(VkLogicOp op)
       [VK_LOGIC_OP_SET]             = ROP_SET,
    };
    assert(op < ARRAY_SIZE(lookup));
-   return lookup[op];
+   return (enum a3xx_rop_code) lookup[op];
 }
 
 static inline bool
@@ -117,7 +117,7 @@ tu6_primtype(VkPrimitiveTopology topology)
       [VK_PRIMITIVE_TOPOLOGY_PATCH_LIST]                    = DI_PT_PATCHES0,
    };
    assert(topology < ARRAY_SIZE(lookup));
-   return lookup[topology];
+   return (enum pc_di_primtype) lookup[topology];
 }
 
 static inline enum adreno_compare_func
@@ -157,7 +157,7 @@ tu6_blend_factor(VkBlendFactor factor)
       [VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA]    = FACTOR_ONE_MINUS_SRC1_ALPHA,
    };
    assert(factor < ARRAY_SIZE(lookup));
-   return lookup[factor];
+   return (enum adreno_rb_blend_factor) lookup[factor];
 }
 
 static inline enum a3xx_rb_blend_opcode
@@ -196,7 +196,7 @@ tu6_tex_wrap(VkSamplerAddressMode address_mode)
       [VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE]  = A6XX_TEX_MIRROR_CLAMP,
    };
    assert(address_mode < ARRAY_SIZE(lookup));
-   return lookup[address_mode];
+   return (enum a6xx_tex_clamp) lookup[address_mode];
 }
 
 static inline enum a6xx_tex_filter
@@ -235,7 +235,7 @@ tu6_pipe2depth(VkFormat format)
    case VK_FORMAT_S8_UINT:
       return DEPTH6_32;
    default:
-      return ~0;
+      return (enum a6xx_depth_format) ~0;
    }
 }
 
