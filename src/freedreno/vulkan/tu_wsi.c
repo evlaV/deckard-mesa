@@ -251,8 +251,6 @@ tu_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
 {
    TU_FROM_HANDLE(tu_queue, queue, _queue);
 
-   u_trace_context_process(&queue->device->trace_context, true);
-
    return wsi_common_queue_present(
       &queue->device->physical_device->wsi_device,
       tu_device_to_handle(queue->device), _queue, queue->queue_family_index,

@@ -1488,6 +1488,8 @@ tu_QueueSubmit(VkQueue _queue,
       });
    }
 
+   u_trace_context_process(&queue->device->trace_context, true);
+
    return VK_SUCCESS;
 }
 
