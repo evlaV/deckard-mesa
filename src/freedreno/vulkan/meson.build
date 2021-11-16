@@ -122,7 +122,7 @@ tu_tracepoints = custom_target(
 )
 
 if with_perfetto
-  libtu_files += ['tu_perfetto.cc', 'tu_perfetto_util.c']
+  libtu_files += ['tu_perfetto.cc', 'tu_perfetto_util.c', 'perftools.cpp']
   tu_deps += dep_perfetto
 endif
 

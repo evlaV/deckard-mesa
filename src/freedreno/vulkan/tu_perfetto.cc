@@ -27,6 +27,7 @@
 
 #include "util/u_perfetto.h"
 #include "util/hash_table.h"
+#include "perftools.h" /*in the same dir as perftools.cpp*/
 
 #include "tu_tracepoints.h"
 #include "tu_tracepoints_perfetto.h"
@@ -155,6 +156,90 @@ stage_end(struct tu_device *dev, uint64_t ts_ns, enum tu_stage_id stage,
       }
 
       auto packet = tctx.NewTracePacket();
+
+      uint64_t gpu_ts = 0;
+      tu_device_get_timestamp(dev, &gpu_ts);
+      gpu_ts = tu_device_ticks_to_ns(dev, gpu_ts);
+
+#define PERFTOOLS_OUTPUT
+#ifdef PERFTOOLS_OUTPUT
+
+//#define DEBUGGING_PERFETTO_TIMESTAMPS
+#ifdef DEBUGGING_PERFETTO_TIMESTAMPS
+       //a perfetto "now" cpu timestamp
+       uint64_t cpu_ts = perfetto::base::GetBootTimeNs().count();
+       uint64_t ctx=GetNextEventId();
+       char buff[128];
+       snprintf(buff,128,"[P] pt_ts=%ld gpu_ts=%ld pft_now_ts=%ld pft_st_ts=%ld pft_end_ts=%ld ",
+                        EventGetSystemTimeInTicks(), gpu_ts, cpu_ts, p->start_ts[stage], ts_ns);
+       EventWriteStringBegin(buff,ctx); //use dtime to shift event
+       EventWriteStringEnd(buff,ctx);
+#endif
+       uint64_t evtduration = ts_ns - p->start_ts[stage];
+       uint64_t evtstart_dt = gpu_ts - p->start_ts[stage];
+
+      struct trace_end_render_pass * ssidpl;
+      struct trace_end_gmem_store * gmspl;
+      const char *stage_str;
+
+      switch(stage) {
+         case SURFACE_STAGE_ID:
+            stage_str = "SURFACE_STAGE_ID";
+            if (payload) {
+               ssidpl = (struct trace_end_render_pass *) payload;
+               EventWriteStringF("[PD] bins[#%d,%dx%d] [%dx%d] dtime=%ld", 
+                              ssidpl->numberOfBins, ssidpl->binWidth, ssidpl->binHeight, 
+                              ssidpl->width, ssidpl->height,
+                              0 - evtstart_dt);
+            }
+            break;
+         case BINNING_STAGE_ID:
+            stage_str = "BINNING_STAGE_ID";
+            break;
+         case GMEM_STAGE_ID:
+            stage_str = "GMEM_STAGE_ID";
+            break;
+         case BYPASS_STAGE_ID:
+            stage_str = "BYPASS_STAGE_ID";
+            break;
+         case BLIT_STAGE_ID:
+            stage_str = "BLIT_STAGE_ID";
+            break;
+         case COMPUTE_STAGE_ID:
+            stage_str = "COMPUTE_STAGE_ID";
+            break;
+         case CLEAR_SYSMEM_STAGE_ID:
+            stage_str = "CLEAR_SYSMEM_STAGE_ID";
+            break;
+         case CLEAR_GMEM_STAGE_ID:
+            stage_str = "CLEAR_GMEM_STAGE_ID";
+            break;
+         case GMEM_LOAD_STAGE_ID:
+            stage_str = "GMEM_LOAD_STAGE_ID";
+            break;   
+         case GMEM_STORE_STAGE_ID:
+            stage_str = "GMEM_STORE_STAGE_ID";
+            if (payload) {
+               gmspl = (struct trace_end_gmem_store *) payload;
+               //EventWriteStringF("[PD] gms fp=%d al=%d dtime=%ld", 
+               //               gmspl->fast_path, gmspl->unaligned,
+               //               0 - evtstart_dt);
+            }
+            break;
+         case SYSMEM_RESOLVE_STAGE_ID:
+            stage_str = "SYSMEM_RESOLVE_STAGE_ID";
+            break;           
+         default:
+            stage_str = "X";
+            break;
+      }
+      char buff2[128];
+      uint64_t ctx2=GetNextEventId();
+      snprintf(buff2,128,"[PD] %s dtime=%ld", stage_str, 0 - evtstart_dt );
+      EventWriteStringBegin(buff2,ctx2); //use dtime to shift event
+      snprintf(buff2,128,"[PD] %s dtime=%ld", stage_str, evtduration - evtstart_dt );
+      EventWriteStringEnd(buff2,ctx2);
+#endif
 
       packet->set_timestamp(p->start_ts[stage]);
       packet->set_timestamp_clock_id(gpu_clock_id);

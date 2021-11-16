@@ -341,6 +341,7 @@ fd_start_render_pass(struct pipe_context *pctx, uint64_t ts_ns,
    p->binh = payload->binh;
 }
 
+
 void
 fd_end_render_pass(struct pipe_context *pctx, uint64_t ts_ns,
                    const void *flush_data,
