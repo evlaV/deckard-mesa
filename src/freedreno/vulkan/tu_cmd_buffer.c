@@ -264,10 +264,18 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
    }
 }
 
+#define VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO_VALVE 1000109099
+typedef struct VkSubpassBeginInfoVALVE {
+   VkStructureType                   sType;
+   const void*                       pNext;
+   uint32_t srgb_cntl;
+} VkSubpassBeginInfoVALVE;
+
 static void
 tu6_emit_mrt(struct tu_cmd_buffer *cmd,
              const struct tu_subpass *subpass,
-             struct tu_cs *cs)
+             struct tu_cs *cs,
+             const VkSubpassBeginInfoVALVE *info)
 {
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
 
@@ -298,9 +306,9 @@ tu6_emit_mrt(struct tu_cmd_buffer *cmd,
    tu_cs_emit_regs(cs, A6XX_GRAS_LRZ_MRT_BUF_INFO_0(.color_format = mrt0_format));
 
    tu_cs_emit_regs(cs,
-                   A6XX_RB_SRGB_CNTL(.dword = subpass->srgb_cntl));
+                   A6XX_RB_SRGB_CNTL(.dword = info ? info->srgb_cntl : subpass->srgb_cntl));
    tu_cs_emit_regs(cs,
-                   A6XX_SP_SRGB_CNTL(.dword = subpass->srgb_cntl));
+                   A6XX_SP_SRGB_CNTL(.dword = info ? info->srgb_cntl : subpass->srgb_cntl));
 
    unsigned layers = MAX2(fb->layers, util_logbase2(subpass->multiview_mask) + 1);
    tu_cs_emit_regs(cs, A6XX_GRAS_MAX_LAYER_INDEX(layers - 1));
@@ -3369,7 +3377,8 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
    tu_emit_renderpass_begin(cmd, pRenderPassBegin);
 
    tu6_emit_zs(cmd, cmd->state.subpass, &cmd->draw_cs);
-   tu6_emit_mrt(cmd, cmd->state.subpass, &cmd->draw_cs);
+   tu6_emit_mrt(cmd, cmd->state.subpass, &cmd->draw_cs,
+                vk_find_struct_const(pSubpassBeginInfo->pNext, SUBPASS_BEGIN_INFO_VALVE));
    if (cmd->state.subpass->samples)
       tu6_emit_msaa(&cmd->draw_cs, cmd->state.subpass->samples, cmd->state.line_mode);
    tu6_emit_render_cntl(cmd, cmd->state.subpass, &cmd->draw_cs, false);
@@ -3438,7 +3447,8 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
 
    /* emit mrt/zs/msaa/ubwc state for the subpass that is starting */
    tu6_emit_zs(cmd, cmd->state.subpass, cs);
-   tu6_emit_mrt(cmd, cmd->state.subpass, cs);
+   tu6_emit_mrt(cmd, cmd->state.subpass, cs,
+                vk_find_struct_const(pSubpassBeginInfo->pNext, SUBPASS_BEGIN_INFO_VALVE));
    if (cmd->state.subpass->samples)
       tu6_emit_msaa(cs, cmd->state.subpass->samples, cmd->state.line_mode);
    tu6_emit_render_cntl(cmd, cmd->state.subpass, cs, false);
