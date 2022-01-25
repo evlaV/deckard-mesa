@@ -3059,6 +3059,35 @@ tu_CmdClearAttachments(VkCommandBuffer commandBuffer,
    tu_cond_exec_end(cs);
 }
 
+static bool
+fast_clearable(const VkClearValue *value, VkFormat format, uint8_t *fast_clear_val)
+{
+   const struct util_format_description *desc = vk_format_description(format);
+   bool all_zero = true;
+   bool all_float_one = true;
+
+   for (unsigned i = 0; i < desc->nr_channels; i++) {
+      if (value->color.uint32[i])
+         all_zero = false;
+
+      if (value->color.float32[i] != 1.0f)
+         all_float_one = false;
+   }
+
+   if (all_zero) {
+      *fast_clear_val = 0;
+      return true;
+   }
+
+   /* also support clear to 1.0f for unorm: */
+   if (vk_format_is_unorm(format) && all_float_one) {
+      *fast_clear_val = 0xc;
+      return true;
+   }
+
+   return false;
+}
+
 static void
 clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
                         struct tu_cs *cs,
@@ -3073,11 +3102,44 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
    const struct tu_image_view *iview = cmd->state.attachments[a];
    const uint32_t clear_views = cmd->state.pass->attachments[a].clear_views;
    const struct blit_ops *ops = &r2d_ops;
+   uint8_t fast_clear_val;
+
    if (cmd->state.pass->attachments[a].samples > 1)
       ops = &r3d_ops;
 
    trace_start_sysmem_clear(&cmd->trace, cs, vk_format, ops == &r3d_ops,
                             cmd->state.pass->attachments[a].samples);
+
+   /* fast UBWC clear: */
+   if (iview->view.ubwc_enabled &&
+       clear_mask == VK_IMAGE_ASPECT_COLOR_BIT &&
+       cmd->state.render_area.offset.x == 0 &&
+       cmd->state.render_area.offset.y == 0 &&
+       cmd->state.render_area.extent.width == iview->view.width &&
+       cmd->state.render_area.extent.height == iview->view.height &&
+       fast_clearable(value, vk_format, &fast_clear_val)) {
+      VkClearValue clear_val = { .color.uint32[0] = fast_clear_val };
+      VkExtent2D extent;
+
+      extent.width = (iview->view.FLAG_BUFFER_PITCH&0x7ff)<<6;
+      extent.height = iview->view.ubwc_layer_size / extent.width; // XXX (real value may be lower)
+
+      assert(!separate_ds || vk_format == VK_FORMAT_D32_SFLOAT); /* separate stencil never has UBWC enabled */
+
+      r2d_setup(cmd, cs, PIPE_FORMAT_R8_UINT, PIPE_FORMAT_R8_UINT, VK_IMAGE_ASPECT_COLOR_BIT, 0, true, false, 1);
+      r2d_coords(cs, &cmd->state.render_area.offset, NULL, &extent);
+      r2d_clear_value(cs, PIPE_FORMAT_R8_UINT, &clear_val);
+
+      for_each_layer(i, clear_views, fb->layers) {
+         tu_cs_emit_pkt4(cs, REG_A6XX_RB_2D_DST_INFO, 4);
+         tu_cs_emit(cs, A6XX_RB_2D_DST_INFO(.color_format = FMT6_8_UINT).value);
+         tu_cs_emit_qw(cs, iview->view.ubwc_addr + iview->view.ubwc_layer_size * i);
+         tu_cs_emit(cs, extent.width>>6);
+
+         r2d_run(cmd, cs);
+      }
+      goto end;
+   }
 
    ops->setup(cmd, cs, format, format, clear_mask, 0, true, iview->view.ubwc_enabled,
               cmd->state.pass->attachments[a].samples);
@@ -3100,6 +3162,7 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
 
    ops->teardown(cmd, cs);
 
+end:
    trace_end_sysmem_clear(&cmd->trace, cs);
 }
 
