@@ -30,7 +30,7 @@
 #include "pipe/p_context.h"
 #include "util/u_queue.h"
 
-#include "drm/freedreno_ringbuffer.h"
+#include "drm2/freedreno_ringbuffer.h"
 
 struct pipe_fence_handle {
    struct pipe_reference reference;

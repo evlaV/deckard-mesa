@@ -35,8 +35,8 @@
 #include <time.h>
 #include <xf86drm.h>
 
-#include "drm/freedreno_drmif.h"
-#include "drm/freedreno_ringbuffer.h"
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
 
 #include "util/os_file.h"
 

@@ -30,7 +30,7 @@
 #include "util/u_memory.h"
 #include "util/u_string.h"
 
-#include "drm/freedreno_drmif.h"
+#include "drm2/freedreno_drmif.h"
 
 #include "ir3_assembler.h"
 #include "ir3_compiler.h"

@@ -25,6 +25,8 @@
  */
 
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "pipe/p_context.h"
 #include "pipe/p_state.h"
@@ -68,8 +70,8 @@ fd_drm_screen_destroy(struct pipe_screen *pscreen)
 	}
 }
 
-struct pipe_screen *
-fd_drm_screen_create(int fd, struct renderonly *ro,
+static struct pipe_screen *
+_fd_drm_screen_create(int fd, struct renderonly *ro,
 		const struct pipe_screen_config *config)
 {
 	struct pipe_screen *pscreen = NULL;
@@ -107,4 +109,44 @@ fd_drm_screen_create(int fd, struct renderonly *ro,
 unlock:
 	mtx_unlock(&fd_screen_mutex);
 	return pscreen;
+}
+
+static void kmsro_ro_destroy(struct renderonly *ro)
+{
+   if (ro->gpu_fd >= 0)
+      close(ro->gpu_fd);
+
+   FREE(ro);
+}
+
+struct pipe_screen *fd_drm_screen_create(int fd, struct renderonly *ro, const struct pipe_screen_config *config)
+{
+   struct pipe_screen *screen = NULL;
+   ro = CALLOC_STRUCT(renderonly);
+
+   if (!ro)
+      return NULL;
+
+   ro->kms_fd = fd;
+   ro->gpu_fd = -1;
+   ro->destroy = kmsro_ro_destroy;
+
+   ro->gpu_fd = open("/dev/gpu", O_RDWR | O_CLOEXEC);
+   if (ro->gpu_fd >= 0) {
+      ro->create_for_resource = renderonly_create_kms_dumb_buffer_for_resource;
+      screen = _fd_drm_screen_create(ro->gpu_fd, ro, config);
+      if (!screen)
+         goto out_free;
+
+      return screen;
+   }
+
+   return screen;
+
+out_free:
+   if (ro->gpu_fd >= 0)
+      close(ro->gpu_fd);
+   FREE(ro);
+
+   return NULL;
 }

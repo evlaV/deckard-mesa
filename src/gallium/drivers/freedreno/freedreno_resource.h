@@ -123,7 +123,7 @@ struct fd_resource {
    /* buffer range that has been initialized */
    struct util_range valid_buffer_range;
    bool valid;
-   struct renderonly_scanout *scanout;
+   uint32_t scanout_handle;
 
    /* reference to the resource holding stencil data for a z32_s8 texture */
    /* TODO rename to secondary or auxiliary? */

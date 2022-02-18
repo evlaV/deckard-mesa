@@ -106,8 +106,10 @@ fd_fence_destroy(struct pipe_fence_handle *fence)
    tc_unflushed_batch_token_reference(&fence->tc_token, NULL);
    if (fence->submit_fence.use_fence_fd)
       close(fence->submit_fence.fence_fd);
-   if (fence->syncobj)
-      drmSyncobjDestroy(fd_device_fd(fence->screen->dev), fence->syncobj);
+   if (fence->syncobj) {
+      // TODO
+      //drmSyncobjDestroy(fd_device_fd(fence->screen->dev), fence->syncobj);
+   }
    fd_pipe_del(fence->pipe);
 
    /* TODO might be worth trying harder to avoid a potential stall here,
@@ -195,11 +197,12 @@ fd_create_fence_fd(struct pipe_context *pctx, struct pipe_fence_handle **pfence,
       break;
    case PIPE_FD_TYPE_SYNCOBJ: {
       int ret;
-      uint32_t syncobj;
+      uint32_t syncobj = 1;
 
       assert(ctx->screen->has_syncobj);
-      ret = drmSyncobjFDToHandle(fd_device_fd(ctx->screen->dev), fd, &syncobj);
-      if (!ret)
+      // TODO
+      //ret = drmSyncobjFDToHandle(fd_device_fd(ctx->screen->dev), fd, &syncobj);
+      //if (!ret)
          close(fd);
 
       *pfence = fence_create(fd_context(pctx), NULL, -1, syncobj);
@@ -241,7 +244,8 @@ fd_fence_server_signal(struct pipe_context *pctx,
    struct fd_context *ctx = fd_context(pctx);
 
    if (fence->syncobj) {
-      drmSyncobjSignal(fd_device_fd(ctx->screen->dev), &fence->syncobj, 1);
+      // TODO
+      //drmSyncobjSignal(fd_device_fd(ctx->screen->dev), &fence->syncobj, 1);
    }
 }
 

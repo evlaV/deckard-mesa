@@ -28,8 +28,8 @@
 #define FREEDRENO_SCREEN_H_
 
 #include "common/freedreno_dev_info.h"
-#include "drm/freedreno_drmif.h"
-#include "drm/freedreno_ringbuffer.h"
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
 #include "perfcntrs/freedreno_perfcntr.h"
 
 #include "pipe/p_screen.h"
@@ -186,7 +186,7 @@ fd_screen_assert_locked(struct fd_screen *screen)
 }
 
 bool fd_screen_bo_get_handle(struct pipe_screen *pscreen, struct fd_bo *bo,
-                             struct renderonly_scanout *scanout,
+                             uint32_t *scanout_handle,
                              unsigned stride, struct winsys_handle *whandle);
 struct fd_bo *fd_screen_bo_from_handle(struct pipe_screen *pscreen,
                                        struct winsys_handle *whandle);

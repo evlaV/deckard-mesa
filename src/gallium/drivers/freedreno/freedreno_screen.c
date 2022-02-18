@@ -803,9 +803,11 @@ fd_get_disk_shader_cache(struct pipe_screen *pscreen)
    return NULL;
 }
 
+#include <xf86drm.h>
+
 bool
 fd_screen_bo_get_handle(struct pipe_screen *pscreen, struct fd_bo *bo,
-                        struct renderonly_scanout *scanout, unsigned stride,
+                        uint32_t *scanout_handle, unsigned stride,
                         struct winsys_handle *whandle)
 {
    struct fd_screen *screen = fd_screen(pscreen);
@@ -815,12 +817,14 @@ fd_screen_bo_get_handle(struct pipe_screen *pscreen, struct fd_bo *bo,
    if (whandle->type == WINSYS_HANDLE_TYPE_SHARED) {
       return fd_bo_get_name(bo, &whandle->handle) == 0;
    } else if (whandle->type == WINSYS_HANDLE_TYPE_KMS) {
-      if (screen->ro) {
-         return renderonly_get_handle(scanout, whandle);
-      } else {
-         whandle->handle = fd_bo_handle(bo);
-         return true;
+      if (*scanout_handle == 0) {
+         int dma_fd = fd_bo_dmabuf(bo);
+         assert(dma_fd >= 0);
+         int err = drmPrimeFDToHandle(screen->ro->kms_fd, dma_fd, scanout_handle);
+         assert(!err);
       }
+      whandle->handle = *scanout_handle;
+      return true;
    } else if (whandle->type == WINSYS_HANDLE_TYPE_FD) {
       whandle->handle = fd_bo_dmabuf(bo);
       return true;

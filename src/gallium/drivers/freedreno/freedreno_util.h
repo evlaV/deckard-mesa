@@ -27,8 +27,8 @@
 #ifndef FREEDRENO_UTIL_H_
 #define FREEDRENO_UTIL_H_
 
-#include "drm/freedreno_drmif.h"
-#include "drm/freedreno_ringbuffer.h"
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
 
 #include "pipe/p_format.h"
 #include "pipe/p_state.h"

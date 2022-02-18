@@ -43,7 +43,7 @@ install_fd_decode_tools = dep_libxml2.found() and prog_gzip.found() and \
 subdir('common')
 subdir('registers')
 subdir('isa')
-subdir('drm')
+subdir('drm2')
 subdir('ir2')
 subdir('ir3')
 subdir('fdl')

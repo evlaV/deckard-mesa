@@ -989,6 +989,8 @@ fd_resource_transfer_map(struct pipe_context *pctx, struct pipe_resource *prsc,
    return ret;
 }
 
+#include <xf86drm.h>
+
 static void
 fd_resource_destroy(struct pipe_screen *pscreen, struct pipe_resource *prsc)
 {
@@ -1001,8 +1003,13 @@ fd_resource_destroy(struct pipe_screen *pscreen, struct pipe_resource *prsc)
       fd_bo_del(rsc->bo);
    if (rsc->lrz)
       fd_bo_del(rsc->lrz);
-   if (rsc->scanout)
-      renderonly_scanout_destroy(rsc->scanout, fd_screen(pscreen)->ro);
+   if (rsc->scanout_handle) {
+      struct drm_gem_close req = { .handle = rsc->scanout_handle };
+      //printf("may be leaking scanout_handle %d\n", rsc->scanout_handle);
+      // can't just close - missing deduplication?
+      int ret = 0;//drmIoctl(screen->ro->kms_fd, DRM_IOCTL_GEM_CLOSE, &req);
+      assert(!ret);
+   }
 
    if (prsc->target == PIPE_BUFFER)
       util_idalloc_mt_free(&screen->buffer_ids, rsc->b.buffer_id_unique);
@@ -1042,7 +1049,7 @@ fd_resource_get_handle(struct pipe_screen *pscreen, struct pipe_context *pctx,
 
    DBG("%" PRSC_FMT ", modifier=%" PRIx64, PRSC_ARGS(prsc), handle->modifier);
 
-   return fd_screen_bo_get_handle(pscreen, rsc->bo, rsc->scanout,
+   return fd_screen_bo_get_handle(pscreen, rsc->bo, &rsc->scanout_handle,
                                   fd_resource_pitch(rsc, 0), handle);
 }
 
@@ -1244,37 +1251,6 @@ fd_resource_create_with_modifiers(struct pipe_screen *pscreen,
    struct pipe_resource *prsc;
    uint32_t size;
 
-   /* when using kmsro, scanout buffers are allocated on the display device
-    * create_with_modifiers() doesn't give us usage flags, so we have to
-    * assume that all calls with modifiers are scanout-possible
-    */
-   if (screen->ro &&
-       ((tmpl->bind & PIPE_BIND_SCANOUT) ||
-        !(count == 1 && modifiers[0] == DRM_FORMAT_MOD_INVALID))) {
-      struct pipe_resource scanout_templat = *tmpl;
-      struct renderonly_scanout *scanout;
-      struct winsys_handle handle;
-
-      /* note: alignment is wrong for a6xx */
-      scanout_templat.width0 = align(tmpl->width0, screen->info->gmem_align_w);
-
-      scanout =
-         renderonly_scanout_for_resource(&scanout_templat, screen->ro, &handle);
-      if (!scanout)
-         return NULL;
-
-      renderonly_scanout_destroy(scanout, screen->ro);
-
-      assert(handle.type == WINSYS_HANDLE_TYPE_FD);
-      rsc = fd_resource(pscreen->resource_from_handle(
-         pscreen, tmpl, &handle, PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE));
-      close(handle.handle);
-      if (!rsc)
-         return NULL;
-
-      return &rsc->b.b;
-   }
-
    prsc =
       fd_resource_allocate_and_resolve(pscreen, tmpl, modifiers, count, &size);
    if (!prsc)
@@ -1359,12 +1335,6 @@ fd_resource_from_handle(struct pipe_screen *pscreen,
 
    if (screen->layout_resource_for_modifier(rsc, handle->modifier) < 0)
       goto fail;
-
-   if (screen->ro) {
-      rsc->scanout =
-         renderonly_create_gpu_import_for_resource(prsc, screen->ro, NULL);
-      /* failure is expected in some cases.. */
-   }
 
    rsc->valid = true;
 
