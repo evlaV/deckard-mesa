@@ -99,9 +99,10 @@ if with_xlib_lease
   tu_flags += '-DVK_USE_PLATFORM_XLIB_XRANDR_EXT'
 endif
 
-if with_freedreno_kgsl
+if true
   tu_flags += '-DTU_USE_KGSL'
-  libtu_files += files('tu_kgsl.c')
+  libtu_files += files('tu_gpu.c')
+  tu_deps += dep_libdrm
 else
   libtu_files += files('tu_drm.c')
   tu_deps += dep_libdrm

@@ -223,6 +223,8 @@ struct tu_physical_device
    struct disk_cache *disk_cache;
 
    struct tu_memory_heap heap;
+
+   void *map;
 };
 
 enum tu_debug_flags
@@ -238,6 +240,7 @@ enum tu_debug_flags
    TU_DEBUG_PERFC = 1 << 9,
    TU_DEBUG_FLUSHALL = 1 << 10,
    TU_DEBUG_SYNCDRAW = 1 << 11,
+   TU_DEBUG_PREEMPT = 1 << 14,
 };
 
 struct tu_instance
@@ -305,10 +308,11 @@ struct tu_queue
    VkDeviceQueueCreateFlags flags;
 
    uint32_t msm_queue_id;
-   int fence;
 
    /* Queue containing deferred submits */
    struct list_head queued_submits;
+
+   uint64_t rptr;
 };
 
 struct tu_bo
@@ -1731,7 +1735,7 @@ void
 tu_drm_submitqueue_close(const struct tu_device *dev, uint32_t queue_id);
 
 int
-tu_signal_fences(struct tu_device *device, struct tu_syncobj *fence1, struct tu_syncobj *fence2);
+tu_signal_fences(struct tu_device *device, VkFence fence, VkSemaphore semaphore);
 
 int
 tu_syncobj_to_fd(struct tu_device *device, struct tu_syncobj *sync);
