@@ -507,6 +507,10 @@ wsi_create_native_image_mem(const struct wsi_swapchain *chain,
    if (result != VK_SUCCESS)
       return result;
 
+   result = wsi_image_init_timestamp(chain, image);
+   if (result != VK_SUCCESS)
+       return result;
+
    if (info->drm_mod_list.drmFormatModifierCount > 0) {
       VkImageDrmFormatModifierPropertiesEXT image_mod_props = {
          .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT,
@@ -571,6 +575,10 @@ wsi_create_prime_image_mem(const struct wsi_swapchain *chain,
                                   true);
    if (result != VK_SUCCESS)
       return result;
+
+   result = wsi_image_init_timestamp(chain, image);
+   if (result != VK_SUCCESS)
+       return result;
 
    const VkMemoryGetFdInfoKHR linear_memory_get_fd_info = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
