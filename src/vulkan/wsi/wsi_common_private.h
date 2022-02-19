@@ -196,6 +196,9 @@ struct wsi_swapchain {
 bool
 wsi_device_matches_drm_fd(const struct wsi_device *wsi, int drm_fd);
 
+bool
+wsi_init_pthread_cond_monotonic(pthread_cond_t *cond);
+
 void
 wsi_wl_surface_destroy(VkIcdSurfaceBase *icd_surface, VkInstance _instance,
                        const VkAllocationCallbacks *pAllocator);
