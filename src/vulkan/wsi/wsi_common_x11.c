@@ -913,6 +913,8 @@ struct x11_swapchain {
    uint64_t                                     last_present_msc;
    uint32_t                                     stamp;
    int                                          sent_image_count;
+   uint64_t                                     last_present_nsec;
+   uint64_t                                     refresh_period;
 
    bool                                         has_present_queue;
    bool                                         has_acquire_queue;
@@ -1023,13 +1025,39 @@ x11_handle_dri3_present_event(struct x11_swapchain *chain,
    case XCB_PRESENT_EVENT_COMPLETE_NOTIFY: {
       xcb_present_complete_notify_event_t *complete = (void *) event;
       if (complete->kind == XCB_PRESENT_COMPLETE_KIND_PIXMAP) {
+         uint64_t frames = complete->msc - chain->last_present_msc;
+         uint64_t present_nsec = complete->ust * 1000;
+
+         /*
+          * Well, this is about as good as we can do -- measure the refresh
+          * instead of asking for the current mode and using that. Turns out,
+          * for eDP panels, this works better anyways as they use the builtin
+          * fixed mode for everything
+          */
+         if (0 < frames && frames < 10 &&
+             present_nsec > chain->last_present_nsec)
+         {
+            uint64_t refresh_period =
+               (present_nsec - chain->last_present_nsec + frames / 2) / frames;
+
+            if (chain->refresh_period)
+               refresh_period =
+                  (3 * chain->refresh_period + refresh_period) >> 2;
+
+            chain->refresh_period = refresh_period;
+         }
+
          unsigned i;
          for (i = 0; i < chain->base.image_count; i++) {
             struct x11_image *image = &chain->images[i];
-            if (image->present_queued && image->serial == complete->serial)
+            if (image->present_queued && image->serial == complete->serial) {
+               wsi_present_complete(&chain->base, &chain->images[i].base,
+                                    present_nsec, complete->msc);
                image->present_queued = false;
+            }
          }
          chain->last_present_msc = complete->msc;
+         chain->last_present_nsec = present_nsec;
       }
 
       VkResult result = VK_SUCCESS;
@@ -1386,6 +1414,27 @@ x11_needs_wait_for_fences(const struct wsi_device *wsi_device,
    }
 }
 
+static uint64_t
+x11_refresh_duration(struct x11_swapchain *chain)
+{
+   /* Pick 60Hz if we don't know what it actually is yet */
+   if (!chain->refresh_period)
+      return (uint64_t) (1e9 / 59.98 + 0.5);
+
+   return chain->refresh_period;
+}
+
+static VkResult
+x11_get_refresh(struct wsi_swapchain *wsi_chain,
+                VkRefreshCycleDurationGOOGLE *timings)
+{
+   struct x11_swapchain *chain = (struct x11_swapchain *)wsi_chain;
+
+   timings->refreshDuration = x11_refresh_duration(chain);
+   return VK_SUCCESS;
+}
+
+
 /**
  * Our queue manager. Albeit called x11_manage_fifo_queues only directly
  * manages the present-queue and does this in general in fifo and mailbox presentation
@@ -1419,6 +1468,7 @@ x11_manage_fifo_queues(void *state)
        * acquirable by the consumer or wait there on such an event.
        */
       uint32_t image_index = 0;
+      struct x11_image *image;
       result = wsi_queue_pull(&chain->present_queue, &image_index, INT64_MAX);
       assert(result != VK_TIMEOUT);
 
@@ -1448,6 +1498,12 @@ x11_manage_fifo_queues(void *state)
       uint64_t target_msc = 0;
       if (chain->has_acquire_queue)
          target_msc = chain->last_present_msc + 1;
+
+      image = &chain->images[image_index];
+
+      struct wsi_timing *timing = image->base.timing;
+      if (timing && timing->target_msc != 0 && timing->target_msc > target_msc)
+         target_msc = timing->target_msc;
 
       result = x11_present_to_x11(chain, image_index, target_msc);
       if (result < 0)
@@ -1873,6 +1929,7 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    chain->base.acquire_next_image = x11_acquire_next_image;
    chain->base.queue_present = x11_queue_present;
    chain->base.present_mode = present_mode;
+   chain->base.get_refresh_cycle_duration = x11_get_refresh;
    chain->base.image_count = num_images;
    chain->conn = conn;
    chain->window = window;
@@ -1883,6 +1940,8 @@ x11_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    chain->last_present_msc = 0;
    chain->has_acquire_queue = false;
    chain->has_present_queue = false;
+   chain->last_present_nsec = 0;
+   chain->refresh_period = 0;
    chain->status = VK_SUCCESS;
    chain->has_dri3_modifiers = wsi_conn->has_dri3_modifiers;
    chain->has_mit_shm = wsi_conn->has_mit_shm;

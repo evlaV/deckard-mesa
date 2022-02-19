@@ -425,6 +425,8 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .KHR_pipeline_executable_properties = true,
       .KHR_pipeline_library =
          (device->instance->perftest_flags & RADV_PERFTEST_RT) && !device->use_llvm,
+      .KHR_present_id = true,
+      .KHR_present_wait = true,
       .KHR_push_descriptor = true,
       .KHR_ray_tracing_pipeline =
          (device->instance->perftest_flags & RADV_PERFTEST_RT) && !device->use_llvm,
@@ -542,6 +544,7 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .ANDROID_native_buffer = true,
 #endif
       .GOOGLE_decorate_string = true,
+      .GOOGLE_display_timing = true,
       .GOOGLE_hlsl_functionality1 = true,
       .GOOGLE_user_type = true,
       .NV_compute_shader_derivatives = true,
