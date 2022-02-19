@@ -229,6 +229,8 @@ get_device_extensions(const struct anv_physical_device *device,
          device->use_call_secondary,
       .KHR_pipeline_executable_properties    = true,
       .KHR_pipeline_library                  = true,
+      .KHR_present_id                        = true,
+      .KHR_present_wait                      = true,
       .KHR_push_descriptor                   = true,
       .KHR_ray_query                         =
          ANV_SUPPORT_RT && device->info.has_ray_tracing,
@@ -337,6 +339,7 @@ get_device_extensions(const struct anv_physical_device *device,
       .ANDROID_native_buffer                 = true,
 #endif
       .GOOGLE_decorate_string                = true,
+      .GOOGLE_display_timing                 = true,
       .GOOGLE_hlsl_functionality1            = true,
       .GOOGLE_user_type                      = true,
       .INTEL_performance_query               = device->perf &&
