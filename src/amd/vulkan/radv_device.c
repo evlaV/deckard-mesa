@@ -488,6 +488,8 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .KHR_performance_query = radv_perf_query_supported(device),
       .KHR_pipeline_executable_properties = true,
       .KHR_pipeline_library = !device->use_llvm,
+      .KHR_present_id = true,
+      .KHR_present_wait = true,
       .KHR_push_descriptor = true,
       .KHR_ray_query = radv_enable_rt(device, false),
       .KHR_ray_tracing_maintenance1 = radv_enable_rt(device, false),
@@ -614,6 +616,7 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .ANDROID_native_buffer = true,
 #endif
       .GOOGLE_decorate_string = true,
+      .GOOGLE_display_timing = true,
       .GOOGLE_hlsl_functionality1 = true,
       .GOOGLE_user_type = true,
       .INTEL_shader_integer_functions2 = true,

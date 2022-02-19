@@ -41,6 +41,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -82,6 +83,7 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(GetPhysicalDeviceProperties2);
    WSI_GET_CB(GetPhysicalDeviceMemoryProperties);
    WSI_GET_CB(GetPhysicalDeviceQueueFamilyProperties);
+   WSI_GET_CB(GetPhysicalDeviceProperties);
 #undef WSI_GET_CB
 
    wsi->pci_bus_info.sType =
@@ -100,6 +102,10 @@ wsi_device_init(struct wsi_device *wsi,
 
    GetPhysicalDeviceMemoryProperties(pdevice, &wsi->memory_props);
    GetPhysicalDeviceQueueFamilyProperties(pdevice, &wsi->queue_family_count, NULL);
+
+   VkPhysicalDeviceProperties properties;
+   GetPhysicalDeviceProperties(pdevice, &properties);
+   wsi->timestamp_period = properties.limits.timestampPeriod;
 
    for (VkExternalSemaphoreHandleTypeFlags handle_type = 1;
         handle_type <= VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
@@ -134,15 +140,19 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(BeginCommandBuffer);
    WSI_GET_CB(CmdPipelineBarrier);
    WSI_GET_CB(CmdCopyImageToBuffer);
+   WSI_GET_CB(CmdResetQueryPool);
+   WSI_GET_CB(CmdWriteTimestamp);
    WSI_GET_CB(CreateBuffer);
    WSI_GET_CB(CreateCommandPool);
    WSI_GET_CB(CreateFence);
    WSI_GET_CB(CreateImage);
+   WSI_GET_CB(CreateQueryPool);
    WSI_GET_CB(CreateSemaphore);
    WSI_GET_CB(DestroyBuffer);
    WSI_GET_CB(DestroyCommandPool);
    WSI_GET_CB(DestroyFence);
    WSI_GET_CB(DestroyImage);
+   WSI_GET_CB(DestroyQueryPool);
    WSI_GET_CB(DestroySemaphore);
    WSI_GET_CB(EndCommandBuffer);
    WSI_GET_CB(FreeMemory);
@@ -153,12 +163,16 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(GetImageSubresourceLayout);
    if (!wsi->sw)
       WSI_GET_CB(GetMemoryFdKHR);
+   WSI_GET_CB(GetPhysicalDeviceProperties);      
    WSI_GET_CB(GetPhysicalDeviceFormatProperties);
    WSI_GET_CB(GetPhysicalDeviceFormatProperties2KHR);
    WSI_GET_CB(GetPhysicalDeviceImageFormatProperties2);
+   WSI_GET_CB(GetPhysicalDeviceQueueFamilyProperties);
+   WSI_GET_CB(GetQueryPoolResults);
    WSI_GET_CB(GetSemaphoreFdKHR);
    WSI_GET_CB(ResetFences);
    WSI_GET_CB(QueueSubmit);
+   WSI_GET_CB(GetCalibratedTimestampsEXT);
    WSI_GET_CB(WaitForFences);
    WSI_GET_CB(MapMemory);
    WSI_GET_CB(UnmapMemory);
@@ -284,6 +298,8 @@ wsi_swapchain_init(const struct wsi_device *wsi,
    chain->wsi = wsi;
    chain->device = _device;
    chain->alloc = *pAllocator;
+   chain->timing_insert = 0;
+   chain->timing_count = 0;
 
    chain->use_buffer_blit = use_buffer_blit || (WSI_DEBUG & WSI_DEBUG_BUFFER);
    if (wsi->sw && !wsi->wants_linear)
@@ -408,6 +424,64 @@ wsi_swapchain_finish(struct wsi_swapchain *chain)
 
    vk_object_base_finish(&chain->base);
 }
+
+VkResult
+wsi_image_init_timestamp(const struct wsi_swapchain *chain,
+                         struct wsi_image *image)
+{
+   const struct wsi_device *wsi = chain->wsi;
+   VkResult result;
+   /* Set up command buffer to get timestamp info */
+
+   result = wsi->CreateQueryPool(
+      chain->device,
+      &(const VkQueryPoolCreateInfo) {
+         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType = VK_QUERY_TYPE_TIMESTAMP,
+            .queryCount = 1,
+            },
+      NULL,
+      &image->query_pool);
+
+   if (result != VK_SUCCESS)
+      goto fail;
+
+   result = wsi->AllocateCommandBuffers(
+      chain->device,
+      &(const VkCommandBufferAllocateInfo) {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = NULL,
+            .commandPool = chain->cmd_pools[0],
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+            },
+      &image->timestamp_buffer);
+   if (result != VK_SUCCESS)
+      goto fail;
+
+   wsi->BeginCommandBuffer(
+      image->timestamp_buffer,
+      &(VkCommandBufferBeginInfo) {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = 0
+            });
+
+   wsi->CmdResetQueryPool(image->timestamp_buffer,
+                          image->query_pool,
+                          0, 1);
+
+   wsi->CmdWriteTimestamp(image->timestamp_buffer,
+                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                          image->query_pool,
+                          0);
+
+   wsi->EndCommandBuffer(image->timestamp_buffer);
+
+   return VK_SUCCESS;
+fail:
+   return result;
+}
+
 
 VkResult
 wsi_configure_image(const struct wsi_swapchain *chain,
@@ -985,6 +1059,128 @@ wsi_common_acquire_next_image2(const struct wsi_device *wsi,
    return result;
 }
 
+static struct wsi_timing *
+wsi_get_timing(struct wsi_swapchain *chain, uint32_t i)
+{
+   uint32_t j = WSI_TIMING_HISTORY + chain->timing_insert -
+      chain->timing_count + i;
+
+   if (j >= WSI_TIMING_HISTORY)
+      j -= WSI_TIMING_HISTORY;
+   return &chain->timing[j];
+}
+
+static struct wsi_timing *
+wsi_next_timing(struct wsi_swapchain *chain, int image_index)
+{
+   uint32_t j = chain->timing_insert;
+   ++chain->timing_insert;
+   if (chain->timing_insert >= WSI_TIMING_HISTORY)
+      chain->timing_insert = 0;
+   if (chain->timing_count < WSI_TIMING_HISTORY)
+      ++chain->timing_count;
+   struct wsi_timing *timing = &chain->timing[j];
+   memset(timing, '\0', sizeof (*timing));
+   return timing;
+}
+
+void
+wsi_present_complete(struct wsi_swapchain *swapchain,
+                     struct wsi_image *image,
+                     uint64_t ust,
+                     uint64_t msc)
+{
+   const struct wsi_device *wsi = swapchain->wsi;
+   struct wsi_timing *timing = image->timing;
+
+   if (!timing)
+      return;
+
+   uint64_t render_timestamp;
+
+   VkResult result = wsi->GetQueryPoolResults(
+      swapchain->device, image->query_pool,
+      0, 1, sizeof(render_timestamp), &render_timestamp,
+      sizeof (uint64_t),
+      VK_QUERY_RESULT_64_BIT|VK_QUERY_RESULT_WAIT_BIT);
+   if (result != VK_SUCCESS)
+      return;
+
+   static const VkCalibratedTimestampInfoEXT    timestampInfo[2] = {
+      {
+         .sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT,
+         .pNext = NULL,
+         .timeDomain = VK_TIME_DOMAIN_DEVICE_EXT,
+      },
+      {
+         .sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT,
+         .pNext = NULL,
+         .timeDomain = VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT,
+      },
+   };
+
+   uint64_t     timestamps[2];
+   uint64_t     maxDeviation;
+
+   result = wsi->GetCalibratedTimestampsEXT(swapchain->device,
+                                            2,
+                                            timestampInfo,
+                                            timestamps,
+                                            &maxDeviation);
+   if (result != VK_SUCCESS)
+      return;
+
+   uint64_t current_gpu_timestamp = timestamps[0];
+   uint64_t current_time = timestamps[1];
+
+   VkRefreshCycleDurationGOOGLE display_timings;
+   swapchain->get_refresh_cycle_duration(swapchain, &display_timings);
+
+   uint64_t refresh_duration = display_timings.refreshDuration;
+
+   /* When did drawing complete (in nsec) */
+
+   int64_t since_render = (int64_t) floor ((double) (current_gpu_timestamp - render_timestamp) *
+                                           (double) wsi->timestamp_period + 0.5);
+   uint64_t render_time = current_time - since_render;
+
+   if (render_time > ust)
+      render_time = ust;
+
+   uint64_t render_frames = (ust - render_time) / refresh_duration;
+
+   uint64_t earliest_time = ust - render_frames * refresh_duration;
+
+   /* Use the presentation mode to figure out when the image could have been
+    * displayed. It couldn't have been displayed before the previous image, so
+    * use that as a lower bound. If we're in FIFO mode, then it couldn't have
+    * been displayed before one frame *after* the previous image
+    */
+   uint64_t possible_frame = swapchain->frame_ust;
+
+   switch (swapchain->present_mode) {
+   case VK_PRESENT_MODE_FIFO_KHR:
+   case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+      possible_frame += refresh_duration;
+      break;
+   default:
+      break;
+   }
+   if (earliest_time < possible_frame)
+      earliest_time = possible_frame;
+
+   if (earliest_time > ust)
+      earliest_time = ust;
+
+   timing->timing.actualPresentTime = ust;
+   timing->timing.earliestPresentTime = earliest_time;
+   timing->timing.presentMargin = earliest_time - render_time;
+   timing->complete = true;
+
+   swapchain->frame_msc = msc;
+   swapchain->frame_ust = ust;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 wsi_AcquireNextImage2KHR(VkDevice _device,
                          const VkAcquireNextImageInfoKHR *pAcquireInfo,
@@ -1013,10 +1209,14 @@ wsi_common_queue_present(const struct wsi_device *wsi,
    const VkPresentRegionsKHR *regions =
       vk_find_struct_const(pPresentInfo->pNext, PRESENT_REGIONS_KHR);
 
+   const VkPresentTimesInfoGOOGLE *present_times_info =
+      vk_find_struct_const(pPresentInfo->pNext, PRESENT_TIMES_INFO_GOOGLE);
+
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
       VK_FROM_HANDLE(wsi_swapchain, swapchain, pPresentInfo->pSwapchains[i]);
       uint32_t image_index = pPresentInfo->pImageIndices[i];
       VkResult result;
+      struct wsi_timing *timing = NULL;
 
       if (swapchain->fences[image_index] == VK_NULL_HANDLE) {
          const VkFenceCreateInfo fence_info = {
@@ -1054,8 +1254,11 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       if (result != VK_SUCCESS)
          goto fail_present;
 
+      VkCommandBuffer submit_buffers[2];
       VkSubmitInfo submit_info = {
          .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+         .pCommandBuffers = submit_buffers,
+         .commandBufferCount = 0
       };
 
       if (i == 0) {
@@ -1073,9 +1276,8 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       VkQueue submit_queue = queue;
       if (swapchain->use_buffer_blit) {
          if (swapchain->buffer_blit_queue == VK_NULL_HANDLE) {
-            submit_info.commandBufferCount = 1;
-            submit_info.pCommandBuffers =
-               &image->buffer.blit_cmd_buffers[queue_family_index];
+            submit_buffers[submit_info.commandBufferCount++] =
+               image->buffer.blit_cmd_buffers[queue_family_index];
          } else {
             /* If we are using a blit using the driver's private queue, then
              * do an empty submit signalling a semaphore, and then submit the
@@ -1098,10 +1300,47 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             submit_info.pWaitSemaphores = submit_info.pSignalSemaphores;
             submit_info.signalSemaphoreCount = 0;
             submit_info.pSignalSemaphores = NULL;
-            submit_info.commandBufferCount = 1;
-            submit_info.pCommandBuffers = &image->buffer.blit_cmd_buffers[0];
+            submit_buffers[submit_info.commandBufferCount++] = image->buffer.blit_cmd_buffers[0];
             submit_info.pWaitDstStageMask = stage_flags;
          }
+      }
+
+      /* Set up GOOGLE_display_timing bits */
+      if (present_times_info &&
+          present_times_info->pTimes != NULL &&
+          i < present_times_info->swapchainCount)
+      {
+         const VkPresentTimeGOOGLE *present_time =
+            &present_times_info->pTimes[i];
+
+         timing = wsi_next_timing(swapchain, pPresentInfo->pImageIndices[i]);
+         timing->timing.presentID = present_time->presentID;
+         timing->timing.desiredPresentTime = present_time->desiredPresentTime;
+         timing->target_msc = 0;
+         image->timing = timing;
+
+         if (present_time->desiredPresentTime != 0)
+         {
+            int64_t delta_nsec = (int64_t) (present_time->desiredPresentTime -
+                                            swapchain->frame_ust);
+
+            /* Set the target msc only if it's no more than two seconds from
+             * now, and not stale
+             */
+            if (0 <= delta_nsec && delta_nsec <= 2000000000ul) {
+               VkRefreshCycleDurationGOOGLE refresh_timing;
+
+               swapchain->get_refresh_cycle_duration(swapchain,
+                                                     &refresh_timing);
+
+               int64_t refresh = (int64_t) refresh_timing.refreshDuration;
+               int64_t frames = (delta_nsec + refresh - 1) / refresh;
+               timing->target_msc = swapchain->frame_msc + frames;
+            }
+         }
+
+         submit_buffers[submit_info.commandBufferCount++] =
+            image->timestamp_buffer;
       }
 
       VkFence fence = swapchain->fences[image_index];
@@ -1179,6 +1418,55 @@ wsi_common_queue_present(const struct wsi_device *wsi,
    STACK_ARRAY_FINISH(stage_flags);
 
    return final_result;
+}
+
+VkResult
+wsi_common_get_refresh_cycle_duration(
+   const struct wsi_device *wsi,
+   VkDevice device_h,
+   VkSwapchainKHR _swapchain,
+   VkRefreshCycleDurationGOOGLE *pDisplayTimingProperties)
+{
+   VK_FROM_HANDLE(wsi_swapchain, swapchain, _swapchain);
+
+   if (!swapchain->get_refresh_cycle_duration)
+      return VK_ERROR_EXTENSION_NOT_PRESENT;
+   return swapchain->get_refresh_cycle_duration(swapchain,
+                                                pDisplayTimingProperties);
+}
+
+
+VkResult
+wsi_common_get_past_presentation_timing(
+   const struct wsi_device *wsi,
+   VkDevice device_h,
+   VkSwapchainKHR _swapchain,
+   uint32_t *count,
+   VkPastPresentationTimingGOOGLE *timings)
+{
+   VK_FROM_HANDLE(wsi_swapchain, swapchain, _swapchain);
+   uint32_t timing_count_requested = *count;
+   uint32_t timing_count_available = 0;
+
+   /* Count the number of completed entries, copy */
+   for (uint32_t t = 0; t < swapchain->timing_count; t++) {
+      struct wsi_timing *timing = wsi_get_timing(swapchain, t);
+
+      if (timing->complete && !timing->consumed) {
+         if (timings && timing_count_available < timing_count_requested) {
+            timings[timing_count_available] = timing->timing;
+            timing->consumed = true;
+         }
+         timing_count_available++;
+      }
+   }
+
+   *count = timing_count_available;
+
+   if (timing_count_available > timing_count_requested && timings != NULL)
+      return VK_INCOMPLETE;
+
+   return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL

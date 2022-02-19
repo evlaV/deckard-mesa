@@ -27,6 +27,13 @@
 #include "vulkan/runtime/vk_object.h"
 #include "vulkan/runtime/vk_sync.h"
 
+struct wsi_timing {
+   bool complete;
+   bool consumed;
+   uint64_t target_msc;
+   VkPastPresentationTimingGOOGLE timing;
+};
+
 struct wsi_image;
 struct wsi_swapchain;
 
@@ -95,7 +102,15 @@ struct wsi_image {
    int dma_buf_fd;
 #endif
    void *cpu_map;
+
+   VkQueryPool query_pool;
+
+   VkCommandBuffer timestamp_buffer;
+
+   struct wsi_timing *timing;
 };
+
+#define WSI_TIMING_HISTORY      16
 
 struct wsi_swapchain {
    struct vk_object_base base;
@@ -123,6 +138,16 @@ struct wsi_swapchain {
     */
    VkQueue buffer_blit_queue;
 
+   uint32_t timing_insert;
+   uint32_t timing_count;
+
+   struct wsi_timing timing[WSI_TIMING_HISTORY];
+
+   uint64_t frame_msc;
+   uint64_t frame_ust;
+
+   float timestamp_period;
+
    /* Command pools, one per queue family */
    VkCommandPool *cmd_pools;
 
@@ -136,6 +161,9 @@ struct wsi_swapchain {
    VkResult (*queue_present)(struct wsi_swapchain *swap_chain,
                              uint32_t image_index,
                              const VkPresentRegionKHR *damage);
+   VkResult (*get_refresh_cycle_duration)(struct wsi_swapchain *swap_chain,
+                                          VkRefreshCycleDurationGOOGLE
+                                          *pDisplayTimingProperties);
 };
 
 bool
@@ -215,6 +243,10 @@ VkResult
 wsi_create_image(const struct wsi_swapchain *chain,
                  const struct wsi_image_info *info,
                  struct wsi_image *image);
+VkResult
+wsi_image_init_timestamp(const struct wsi_swapchain *chain,
+                         struct wsi_image *image);
+
 void
 wsi_image_init(struct wsi_image *image);
 
@@ -235,6 +267,12 @@ wsi_create_sync_for_dma_buf_wait(const struct wsi_swapchain *chain,
                                  enum vk_sync_features sync_features,
                                  struct vk_sync **sync_out);
 #endif
+
+void
+wsi_present_complete(struct wsi_swapchain *swapchain,
+                     struct wsi_image *image,
+                     uint64_t ust,
+                     uint64_t msc);
 
 struct wsi_interface {
    VkResult (*get_support)(VkIcdSurfaceBase *surface,
