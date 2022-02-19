@@ -86,6 +86,8 @@ struct wsi_image {
    VkCommandBuffer timestamp_buffer;
 
    struct wsi_timing *timing;
+   
+   uint64_t present_id;
 };
 
 #define WSI_TIMING_HISTORY      16

@@ -1102,6 +1102,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
    const VkPresentTimesInfoGOOGLE *present_times_info =
       vk_find_struct_const(pPresentInfo->pNext, PRESENT_TIMES_INFO_GOOGLE);
 
+   const VkPresentIdKHR *present_ids =
+      vk_find_struct_const(pPresentInfo->pNext, PRESENT_ID_KHR);
+
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
       VK_FROM_HANDLE(wsi_swapchain, swapchain, pPresentInfo->pSwapchains[i]);
       uint32_t image_index = pPresentInfo->pImageIndices[i];
@@ -1205,6 +1208,12 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             submit_info.pSignalSemaphores = &swapchain->prime_blit_semaphores[image_index];
          }
       }
+
+      uint64_t present_id = 0;
+      if (present_ids && present_ids->pPresentIds)
+         present_id = present_ids->pPresentIds[i];
+
+      image->present_id = present_id;
 
       /* Set up GOOGLE_display_timing bits */
       if (present_times_info &&
