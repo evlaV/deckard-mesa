@@ -109,3 +109,18 @@ tu_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
       tu_device_to_handle(queue->device), _queue, queue->vk.queue_family_index,
       pPresentInfo);
 }
+
+VkResult
+tu_WaitForPresentKHR(VkDevice _device,
+                       VkSwapchainKHR swapchain,
+                       uint64_t waitValue,
+                       uint64_t timeout)
+{
+   TU_FROM_HANDLE(tu_device, device, _device);
+   struct tu_physical_device *pdevice = device->physical_device;
+
+   return wsi_common_wait_for_present(&pdevice->wsi_device,
+                                      swapchain,
+                                      waitValue,
+                                      timeout);
+}
