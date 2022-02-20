@@ -26,6 +26,7 @@
 #include "util/macros.h"
 #include "util/os_file.h"
 #include "util/xmlconfig.h"
+#include "util/os_time.h"
 #include "vk_device.h"
 #include "vk_fence.h"
 #include "vk_instance.h"
@@ -37,6 +38,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 #include <math.h>
 
 VkResult
@@ -308,8 +310,22 @@ wsi_swapchain_init(const struct wsi_device *wsi,
          goto fail;
    }
 
+   int ret = pthread_mutex_init(&chain->present_id_mutex, NULL);
+   if (ret != 0) {
+      result = VK_ERROR_OUT_OF_HOST_MEMORY;
+      goto fail;
+   }
+
+   bool bret = wsi_init_pthread_cond_monotonic(&chain->present_id_cond);
+   if (!bret) {
+      result = VK_ERROR_OUT_OF_HOST_MEMORY;
+      goto fail_cond;
+   }
+
    return VK_SUCCESS;
 
+fail_cond:
+   pthread_mutex_destroy(&chain->present_id_mutex);
 fail:
    wsi_swapchain_finish(chain);
    return result;
@@ -391,6 +407,8 @@ wsi_swapchain_finish(struct wsi_swapchain *chain)
                                      &chain->alloc);
    }
    vk_free(&chain->alloc, chain->cmd_pools);
+   pthread_cond_destroy(&chain->present_id_cond);
+   pthread_mutex_destroy(&chain->present_id_mutex);
 
    vk_object_base_finish(&chain->base);
 }
@@ -986,6 +1004,16 @@ wsi_present_complete(struct wsi_swapchain *swapchain,
                      uint64_t msc)
 {
    const struct wsi_device *wsi = swapchain->wsi;
+
+   if (image->present_id) {
+      pthread_mutex_lock(&swapchain->present_id_mutex);
+      if (image->present_id > swapchain->present_id) {
+         swapchain->present_id = image->present_id;
+         pthread_cond_broadcast(&swapchain->present_id_cond);
+      }
+      pthread_mutex_unlock(&swapchain->present_id_mutex);
+   }
+
    struct wsi_timing *timing = image->timing;
 
    if (!timing)
@@ -1085,6 +1113,16 @@ wsi_AcquireNextImage2KHR(VkDevice _device,
 
    return wsi_common_acquire_next_image2(device->physical->wsi_device,
                                          _device, pAcquireInfo, pImageIndex);
+}
+
+void
+wsi_swapchain_out_of_date(struct wsi_swapchain *swapchain)
+{
+      pthread_mutex_lock(&swapchain->present_id_mutex);
+      swapchain->present_id = UINT64_MAX;
+      swapchain->out_of_date = True;
+      pthread_cond_broadcast(&swapchain->present_id_cond);
+      pthread_mutex_unlock(&swapchain->present_id_mutex);
 }
 
 VkResult
@@ -1352,6 +1390,44 @@ wsi_common_get_past_presentation_timing(
       return VK_INCOMPLETE;
 
    return VK_SUCCESS;
+}
+
+VkResult
+wsi_common_wait_for_present(const struct wsi_device *wsi,
+                            VkSwapchainKHR _swapchain,
+                            uint64_t waitValue,
+                            uint64_t timeout)
+{
+   VK_FROM_HANDLE(wsi_swapchain, swapchain, _swapchain);
+   int64_t abs_timeout = 0;
+   VkResult result = VK_SUCCESS;
+
+   if (timeout != 0)
+      abs_timeout = os_time_get_absolute_timeout(timeout);
+
+   struct timespec abs_timespec = {
+      .tv_sec = abs_timeout / 1000000000ULL,
+      .tv_nsec = abs_timeout % 1000000000ULL,
+   };
+
+   pthread_mutex_lock(&swapchain->present_id_mutex);
+   while (swapchain->present_id < waitValue) {
+      int ret = pthread_cond_timedwait(&swapchain->present_id_cond,
+                                       &swapchain->present_id_mutex,
+                                       &abs_timespec);
+      if (ret == ETIMEDOUT) {
+         result = VK_TIMEOUT;
+         break;
+      }
+      if (ret) {
+         result = VK_ERROR_DEVICE_LOST;
+         break;
+      }
+   }
+   if (result == VK_SUCCESS && swapchain->out_of_date)
+      result = VK_ERROR_OUT_OF_DATE_KHR;
+   pthread_mutex_unlock(&swapchain->present_id_mutex);
+   return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL

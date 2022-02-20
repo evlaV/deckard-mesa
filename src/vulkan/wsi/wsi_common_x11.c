@@ -942,6 +942,9 @@ static VkResult
 _x11_swapchain_result(struct x11_swapchain *chain, VkResult result,
                       const char *file, int line)
 {
+   if (result == VK_ERROR_OUT_OF_DATE_KHR)
+      wsi_swapchain_out_of_date(&chain->base);
+
    /* Prioritise returning existing errors for consistency. */
    if (chain->status < 0)
       return chain->status;

@@ -311,6 +311,12 @@ wsi_common_get_past_presentation_timing(const struct wsi_device *wsi,
                                         *pPresentationTimings);
 
 VkResult
+wsi_common_wait_for_present(const struct wsi_device *wsi,
+                            VkSwapchainKHR swapchain,
+                            uint64_t waitValue,
+                            uint64_t timeout);
+
+VkResult
 wsi_common_create_swapchain_image(const struct wsi_device *wsi,
                                   const VkImageCreateInfo *pCreateInfo,
                                   VkSwapchainKHR _swapchain,
