@@ -185,6 +185,8 @@ get_device_extensions(const struct tu_physical_device *device,
 #endif
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
       .EXT_display_control = true,
+      .KHR_present_id = true,
+      .KHR_present_wait = true,
 #endif
       .EXT_external_memory_dma_buf = true,
       .EXT_image_drm_format_modifier = true,
