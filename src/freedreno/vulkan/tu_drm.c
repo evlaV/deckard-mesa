@@ -405,7 +405,7 @@ tu_bo_init_new_explicit_iova(struct tu_device *dev,
     */
    struct drm_msm_gem_new req = {
       .size = size,
-      .flags = MSM_BO_WC
+      .flags = MSM_BO_CACHED_COHERENT
    };
 
    if (flags & TU_BO_ALLOC_GPU_READ_ONLY)

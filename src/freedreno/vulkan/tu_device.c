@@ -1626,7 +1626,8 @@ tu_GetPhysicalDeviceMemoryProperties2(VkPhysicalDevice pdev,
    props->memoryTypes[0].propertyFlags =
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|
+      VK_MEMORY_PROPERTY_HOST_CACHED_BIT; //HACK: this matches with tu_drm.c:tu_bo_init_new() using MSM_BO_CACHED_COHERENT flag
    props->memoryTypes[0].heapIndex = 0;
 
    vk_foreach_struct(ext, props2->pNext)
