@@ -1283,8 +1283,8 @@ tu_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
    pProperties->properties = (VkPhysicalDeviceProperties) {
       .apiVersion = TU_API_VERSION,
       .driverVersion = vk_get_driver_version(),
-      .vendorID = 0x5143,
-      .deviceID = pdevice->dev_id.chip_id,
+      .vendorID = 0, //set back to 0 until we whitelist the vendorID in CEF
+      .deviceID = 0, //set back to 0 until we whitelist the vendorID in CEF
       .deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
       .limits = limits,
       .sparseProperties = { 0 },
