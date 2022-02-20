@@ -258,7 +258,7 @@ tu_bo_init_new(struct tu_device *dev, struct tu_bo *bo, uint64_t size,
     */
    struct drm_msm_gem_new req = {
       .size = size,
-      .flags = MSM_BO_WC
+      .flags = MSM_BO_CACHED_COHERENT
    };
 
    if (flags & TU_BO_ALLOC_GPU_READ_ONLY)
