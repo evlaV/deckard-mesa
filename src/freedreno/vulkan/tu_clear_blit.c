@@ -2599,7 +2599,6 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
 
    trace_start_sysmem_clear(&cmd->trace, cs);
 
-   ops->setup(cmd, cs, format, clear_mask, 0, true, iview->view.ubwc_enabled,
    /* fast UBWC clear: */
    if (iview->ubwc_enabled &&
        clear_mask == VK_IMAGE_ASPECT_COLOR_BIT &&
