@@ -2615,9 +2615,9 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
 
       assert(!separate_stencil); /* separate stencil never has UBWC enabled */
 
-      r2d_setup(cmd, cs, VK_FORMAT_R8_UINT, VK_IMAGE_ASPECT_COLOR_BIT, 0, true, false, 1);
+      r2d_setup(cmd, cs, PIPE_FORMAT_R8_UINT, VK_IMAGE_ASPECT_COLOR_BIT, 0, true, false, 1);
       r2d_coords(cs, &info->renderArea.offset, NULL, &extent);
-      r2d_clear_value(cs, VK_FORMAT_R8_UINT, &clear_val);
+      r2d_clear_value(cs, PIPE_FORMAT_R8_UINT, &clear_val);
 
       for_each_layer(i, clear_views, fb->layers) {
          tu_cs_emit_pkt4(cs, REG_A6XX_RB_2D_DST_INFO, 4);
