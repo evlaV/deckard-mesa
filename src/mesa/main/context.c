@@ -1648,7 +1648,7 @@ _mesa_flush(struct gl_context *ctx)
    bool async = !ctx->Shared->HasExternallySharedImages;
    FLUSH_VERTICES(ctx, 0, 0);
 
-   st_glFlush(ctx, async ? PIPE_FLUSH_ASYNC : 0);
+   st_glFlush(ctx, 0);
 }
 
 
