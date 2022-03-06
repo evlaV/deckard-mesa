@@ -437,6 +437,28 @@ tu_timeline_sync_reset(struct vk_device *vk_device,
    return VK_SUCCESS;
 }
 
+static uint64_t
+gettime_ns()
+{
+   struct timespec current;
+   clock_gettime(CLOCK_MONOTONIC, &current);
+   return (uint64_t)current.tv_sec * NSEC_PER_SEC + current.tv_nsec;
+}
+
+/* and the kernel converts it right back to relative timeout - very smart UAPI */
+static uint64_t
+absolute_timeout(uint64_t timeout)
+{
+   if (timeout == 0)
+      return 0;
+   uint64_t current_time = gettime_ns();
+   uint64_t max_timeout = (uint64_t) INT64_MAX - current_time;
+
+   timeout = MIN2(max_timeout, timeout);
+
+   return (current_time + timeout);
+}
+
 static VkResult
 drm_syncobj_wait(struct tu_device *device,
                  uint32_t *handles, uint32_t count_handles,
@@ -498,6 +520,7 @@ tu_timeline_sync_wait(struct vk_device *vk_device,
       }
 
       if (submit_count > 0) {
+         abs_timeout_ns = absolute_timeout(abs_timeout_ns); //handle int64_t vs. uint64_t
          do {
             ret = drm_syncobj_wait(dev, handles, submit_count, abs_timeout_ns, wait_all);
          } while (ret == VK_TIMEOUT && os_time_get_nano() < abs_timeout_ns);
