@@ -68,6 +68,7 @@ struct fd_bo *
 fd_bo_from_handle(struct fd_device *dev, uint32_t handle, uint32_t size)
 {
    assert(0);
+   return NULL;
 }
 
 struct fd_bo *
