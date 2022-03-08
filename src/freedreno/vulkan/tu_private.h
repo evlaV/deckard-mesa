@@ -1523,38 +1523,6 @@ struct tu_image_view
 
    struct fdl6_view view;
 
-   uint64_t base_addr;
-   uint64_t ubwc_addr;
-   uint32_t layer_size;
-   uint32_t ubwc_layer_size;
-
-   /* used to determine if fast gmem store path can be used */
-   VkExtent2D extent;
-   bool need_y2_align;
-
-   bool ubwc_enabled;
-
-   uint32_t descriptor[A6XX_TEX_CONST_DWORDS];
-
-   /* Descriptor for use as a storage image as opposed to a sampled image.
-    * This has a few differences for cube maps (e.g. type).
-    */
-   uint32_t storage_descriptor[A6XX_TEX_CONST_DWORDS];
-
-   /* pre-filled register values */
-   uint32_t PITCH;
-   uint32_t FLAG_BUFFER_PITCH;
-
-   uint32_t RB_MRT_BUF_INFO;
-   uint32_t SP_FS_MRT_REG;
-
-   uint32_t SP_PS_2D_SRC_INFO;
-   uint32_t SP_PS_2D_SRC_SIZE;
-
-   uint32_t RB_2D_DST_INFO;
-
-   uint32_t RB_BLIT_DST_INFO;
-
    /* for d32s8 separate stencil */
    uint64_t stencil_base_addr;
    uint32_t stencil_layer_size;

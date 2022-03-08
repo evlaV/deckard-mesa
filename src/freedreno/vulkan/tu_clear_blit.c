@@ -2600,18 +2600,18 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
    trace_start_sysmem_clear(&cmd->trace, cs);
 
    /* fast UBWC clear: */
-   if (iview->ubwc_enabled &&
+   if (iview->view.ubwc_enabled &&
        clear_mask == VK_IMAGE_ASPECT_COLOR_BIT &&
        info->renderArea.offset.x == 0 &&
        info->renderArea.offset.y == 0 &&
-       info->renderArea.extent.width == iview->extent.width &&
-       info->renderArea.extent.height == iview->extent.height &&
+       info->renderArea.extent.width == iview->view.width &&
+       info->renderArea.extent.height == iview->view.height &&
        fast_clearable(&info->pClearValues[a], format, &fast_clear_val)) {
       VkClearValue clear_val = { .color.uint32[0] = fast_clear_val };
       VkExtent2D extent;
 
-      extent.width = (iview->FLAG_BUFFER_PITCH&0x7ff)<<6;
-      extent.height = iview->ubwc_layer_size / extent.width; // XXX (real value may be lower)
+      extent.width = (iview->view.FLAG_BUFFER_PITCH&0x7ff)<<6;
+      extent.height = iview->view.ubwc_layer_size / extent.width; // XXX (real value may be lower)
 
       assert(!separate_stencil); /* separate stencil never has UBWC enabled */
 
@@ -2622,7 +2622,7 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
       for_each_layer(i, clear_views, fb->layers) {
          tu_cs_emit_pkt4(cs, REG_A6XX_RB_2D_DST_INFO, 4);
          tu_cs_emit(cs, A6XX_RB_2D_DST_INFO(.color_format = FMT6_8_UINT).value);
-         tu_cs_emit_qw(cs, iview->ubwc_addr + iview->ubwc_layer_size * i);
+         tu_cs_emit_qw(cs, iview->view.ubwc_addr + iview->view.ubwc_layer_size * i);
          tu_cs_emit(cs, extent.width>>6);
 
          r2d_run(cmd, cs);
@@ -2630,7 +2630,7 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
       goto end;
    }
 
-   ops->setup(cmd, cs, format, clear_mask, 0, true, iview->ubwc_enabled,
+   ops->setup(cmd, cs, format, clear_mask, 0, true, iview->view.ubwc_enabled,
               cmd->state.pass->attachments[a].samples);
    ops->coords(cs, &info->renderArea.offset, NULL, &info->renderArea.extent);
    ops->clear_value(cs, format, &info->pClearValues[a]);
