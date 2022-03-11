@@ -1972,7 +1972,7 @@ tu_AllocateMemory(VkDevice _device,
                                  pAllocateInfo->allocationSize, fd_info->fd);
       if (result == VK_SUCCESS) {
          /* take ownership and close the fd */
-         close(fd_info->fd);
+         //close(fd_info->fd); "gpu" backend keeps fd open as reference
       }
    } else {
       result =
