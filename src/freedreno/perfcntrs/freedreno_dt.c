@@ -184,6 +184,12 @@ find_device(void)
    int ret;
    uint32_t *buf, *b;
 
+   dev.base = 0x03d00000;
+   dev.size = 0x40000;
+   dev.min_freq = 672000000;
+   dev.max_freq = 672000000;
+
+#if 0
    if (dev.dtnode)
       return true;
 
@@ -221,6 +227,7 @@ find_device(void)
    find_freqs();
 
    printf("min_freq=%u, max_freq=%u\n", dev.min_freq, dev.max_freq);
+#endif
 
    return true;
 }
