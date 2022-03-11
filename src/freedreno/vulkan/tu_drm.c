@@ -870,7 +870,7 @@ tu_fill_msm_gem_submit(struct tu_device *dev,
 {
    cmd->type = MSM_SUBMIT_CMD_BUF;
    cmd->submit_idx =
-      dev->bo_idx[cs_entry->bo->gem_handle];
+      dev->bo_idx[cs_entry->bo->gem_handle].idx;
    cmd->submit_offset = cs_entry->offset;
    cmd->size = cs_entry->size;
    cmd->pad = 0;
