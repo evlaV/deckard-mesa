@@ -210,7 +210,7 @@ fd_ringbuffer_emit_reloc_ring_full(struct fd_ringbuffer *ring,
 
    fd_ringbuffer_ref_bos(ring, target);
 
-   return ((uint64_t*) target->cur) - ((uint64_t*) target->start);
+   return ((uint8_t*) target->cur) - ((uint8_t*) target->start);
 }
 
 static inline uint32_t
