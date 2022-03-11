@@ -465,6 +465,14 @@ VkResult
 tu_GetFenceFdKHR(VkDevice _device, const VkFenceGetFdInfoKHR *info, int *p_fd)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
+
+   if (info->handleType == VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT) {
+      int fd = ioctl(device->fd, GPU_IOCTL_CREATE_FENCE, info->fence->rptr[0]);
+      assert(fd >= 0);
+      *p_fd = fd;
+      return VK_SUCCESS;
+   }
+
    assert(info->handleType == VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
    *p_fd = dup(info->fence->mem_fd);
    return VK_SUCCESS;
