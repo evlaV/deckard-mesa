@@ -182,7 +182,10 @@ tu_enumerate_devices(struct tu_instance *instance)
       return VK_ERROR_INCOMPATIBLE_DRIVER;
 
    device->instance = instance;
-   device->master_fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+   if (instance->vk.enabled_extensions.KHR_display)
+      device->master_fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+   else
+      device->master_fd = -1;
    device->local_fd = fd;
 
    device->dev_id.gpu_id = 650;
