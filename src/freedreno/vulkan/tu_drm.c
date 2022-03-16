@@ -258,7 +258,7 @@ tu_bo_init(struct tu_device *dev,
    mtx_lock(&dev->bo_mutex);
 
    if (gem_handle < dev->bo_idx_size && dev->bo_idx[gem_handle].refcount) {
-      printf("BO already in list!\n");
+      //printf("BO already in list!\n");
       dev->bo_idx[gem_handle].refcount++;
       mtx_unlock(&dev->bo_mutex);
       return VK_SUCCESS;
@@ -396,15 +396,16 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo)
       munmap(bo->map, bo->size);
 
    mtx_lock(&dev->bo_mutex);
+
    if (--dev->bo_idx[bo->gem_handle].refcount == 0) {
       uint32_t idx = dev->bo_idx[bo->gem_handle].idx;
       dev->bo_count--;
       dev->bo_list[idx] = dev->bo_list[dev->bo_count];
       dev->bo_idx[dev->bo_list[idx].handle].idx = idx;
+
+      tu_gem_close(dev, bo->gem_handle);
    }
    mtx_unlock(&dev->bo_mutex);
-
-   tu_gem_close(dev, bo->gem_handle);
 }
 
 static VkResult
