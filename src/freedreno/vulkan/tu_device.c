@@ -53,6 +53,15 @@
 #define TU_HAS_SURFACE 0
 #endif
 
+#define DISPLAY_WRITE_BACK_DISPLAY_MASTER_FD
+#if defined( DISPLAY_WRITE_BACK_DISPLAY_MASTER_FD ) 
+   #define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DISPLAY_MASTER_FD_INFO_VALVE 1000119007
+	typedef struct VkMasterFdInfoHack {
+		VkStructureType             sType;
+		void*                       pNext;
+		int fd;
+	} VkMasterFdInfoHack;
+#endif
 
 static int
 tu_device_get_cache_uuid(uint16_t family, void *uuid)
@@ -1420,6 +1429,13 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    bool custom_border_colors = false;
    bool perf_query_pools = false;
    bool robust_buffer_access2 = false;
+
+#if defined( DISPLAY_WRITE_BACK_DISPLAY_MASTER_FD ) 
+   // note: returning the fd like this breaks const correctness (cast pNext to void*)
+   VkMasterFdInfoHack *master_fd_info = vk_find_struct((void*) pCreateInfo->pNext, PHYSICAL_DEVICE_DISPLAY_MASTER_FD_INFO_VALVE);
+   if (master_fd_info)
+      master_fd_info->fd = dup(physical_device->master_fd);
+#endif
 
    /* Check enabled features */
    if (pCreateInfo->pEnabledFeatures) {
