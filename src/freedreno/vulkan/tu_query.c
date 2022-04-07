@@ -825,9 +825,9 @@ emit_begin_stat_query(struct tu_cmd_buffer *cmdbuf,
    struct tu_cs *cs = cmdbuf->state.pass ? &cmdbuf->draw_cs : &cmdbuf->cs;
    uint64_t begin_iova = pipeline_stat_query_iova(pool, query, begin);
 
-   tu6_emit_event_write(cmdbuf, cs, START_PRIMITIVE_CTRS);
-   tu6_emit_event_write(cmdbuf, cs, RST_PIX_CNT);
-   tu6_emit_event_write(cmdbuf, cs, TILE_FLUSH);
+   tu6_emit_event_write(cs, START_PRIMITIVE_CTRS);
+   tu6_emit_event_write(cs, RST_PIX_CNT);
+   tu6_emit_event_write(cs, TILE_FLUSH);
 
    tu_cs_emit_wfi(cs);
 
@@ -933,7 +933,7 @@ emit_begin_xfb_query(struct tu_cmd_buffer *cmdbuf,
    uint64_t begin_iova = primitive_query_iova(pool, query, begin[0], 0);
 
    tu_cs_emit_regs(cs, A6XX_VPC_SO_STREAM_COUNTS(.qword = begin_iova));
-   tu6_emit_event_write(cmdbuf, cs, WRITE_PRIMITIVE_COUNTS);
+   tu6_emit_event_write(cs, WRITE_PRIMITIVE_COUNTS);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -1075,9 +1075,9 @@ emit_end_stat_query(struct tu_cmd_buffer *cmdbuf,
    uint64_t stat_start_iova;
    uint64_t stat_stop_iova;
 
-   tu6_emit_event_write(cmdbuf, cs, STOP_PRIMITIVE_CTRS);
-   tu6_emit_event_write(cmdbuf, cs, RST_VTX_CNT);
-   tu6_emit_event_write(cmdbuf, cs, STAT_EVENT);
+   tu6_emit_event_write(cs, STOP_PRIMITIVE_CTRS);
+   tu6_emit_event_write(cs, RST_VTX_CNT);
+   tu6_emit_event_write(cs, STAT_EVENT);
 
    tu_cs_emit_wfi(cs);
 
@@ -1211,10 +1211,10 @@ emit_end_xfb_query(struct tu_cmd_buffer *cmdbuf,
    uint64_t available_iova = query_available_iova(pool, query);
 
    tu_cs_emit_regs(cs, A6XX_VPC_SO_STREAM_COUNTS(.qword = end_iova));
-   tu6_emit_event_write(cmdbuf, cs, WRITE_PRIMITIVE_COUNTS);
+   tu6_emit_event_write(cs, WRITE_PRIMITIVE_COUNTS);
 
    tu_cs_emit_wfi(cs);
-   tu6_emit_event_write(cmdbuf, cs, CACHE_FLUSH_TS);
+   tu6_emit_event_write(cs, CACHE_FLUSH);
 
    /* Set the count of written primitives */
    tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);
@@ -1225,7 +1225,7 @@ emit_end_xfb_query(struct tu_cmd_buffer *cmdbuf,
    tu_cs_emit_qw(cs, end_written_iova);
    tu_cs_emit_qw(cs, begin_written_iova);
 
-   tu6_emit_event_write(cmdbuf, cs, CACHE_FLUSH_TS);
+   tu6_emit_event_write(cs, CACHE_FLUSH);
 
    /* Set the count of generated primitives */
    tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);

@@ -363,6 +363,7 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
    view->RB_MRT_BUF_INFO =
       A6XX_RB_MRT_BUF_INFO_COLOR_TILE_MODE(tile_mode) |
       A6XX_RB_MRT_BUF_INFO_COLOR_FORMAT(color_format) |
+      COND(ubwc_enabled, A6XX_RB_MRT_BUF_INFO_LOSSLESSCOMPEN) |
       A6XX_RB_MRT_BUF_INFO_COLOR_SWAP(color_swap);
 
    view->SP_FS_MRT_REG =

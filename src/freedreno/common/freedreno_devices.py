@@ -349,6 +349,16 @@ add_gpus([
         PC_POWER_CNTL = 2,
     ))
 
+add_gpus([
+        GPUId(730),
+    ], A6xxGPUInfo(
+        a6xx_gen4,
+        num_sp_cores = 4,
+        num_ccu = 4,
+        RB_UNKNOWN_8E04_blit = 0,
+        PC_POWER_CNTL = 2,
+    ))
+
 template = """\
 /* Copyright (C) 2021 Google, Inc.
  *

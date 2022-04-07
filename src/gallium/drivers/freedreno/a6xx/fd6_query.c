@@ -69,7 +69,7 @@ occlusion_resume(struct fd_acc_query *aq, struct fd_batch *batch)
    OUT_PKT4(ring, REG_A6XX_RB_SAMPLE_COUNT_ADDR, 2);
    OUT_RELOC(ring, query_sample(aq, start));
 
-   fd6_event_write(batch, ring, ZPASS_DONE, false);
+   fd6_event_write(batch, ring, ZPASS_DONE);
 
    fd6_context(batch->ctx)->samples_passed_queries++;
 }
@@ -92,7 +92,7 @@ occlusion_pause(struct fd_acc_query *aq, struct fd_batch *batch) assert_dt
    OUT_PKT4(ring, REG_A6XX_RB_SAMPLE_COUNT_ADDR, 2);
    OUT_RELOC(ring, query_sample(aq, stop));
 
-   fd6_event_write(batch, ring, ZPASS_DONE, false);
+   fd6_event_write(batch, ring, ZPASS_DONE);
 
    /* To avoid stalling in the draw buffer, emit code the code to compute the
     * counter delta in the epilogue ring.
@@ -160,6 +160,7 @@ timestamp_resume(struct fd_acc_query *aq, struct fd_batch *batch)
 {
    struct fd_ringbuffer *ring = batch->draw;
 
+   assert(0);
    OUT_PKT7(ring, CP_EVENT_WRITE, 4);
    OUT_RING(ring,
             CP_EVENT_WRITE_0_EVENT(RB_DONE_TS) | CP_EVENT_WRITE_0_TIMESTAMP);
@@ -174,6 +175,7 @@ time_elapsed_pause(struct fd_acc_query *aq, struct fd_batch *batch) assert_dt
 {
    struct fd_ringbuffer *ring = batch->draw;
 
+   assert(0);
    OUT_PKT7(ring, CP_EVENT_WRITE, 4);
    OUT_RING(ring,
             CP_EVENT_WRITE_0_EVENT(RB_DONE_TS) | CP_EVENT_WRITE_0_TIMESTAMP);
@@ -202,6 +204,7 @@ timestamp_pause(struct fd_acc_query *aq, struct fd_batch *batch)
 static void
 record_timestamp(struct fd_ringbuffer *ring, struct fd_bo *bo, unsigned offset)
 {
+   assert(0);
    OUT_PKT7(ring, CP_EVENT_WRITE, 4);
    OUT_RING(ring,
             CP_EVENT_WRITE_0_EVENT(RB_DONE_TS) | CP_EVENT_WRITE_0_TIMESTAMP);
@@ -340,7 +343,7 @@ primitives_generated_resume(struct fd_acc_query *aq,
                      CP_REG_TO_MEM_0_REG(counter_base));
    primitives_relocw(ring, aq, prim_start);
 
-   fd6_event_write(batch, ring, START_PRIMITIVE_CTRS, false);
+   fd6_event_write(batch, ring, START_PRIMITIVE_CTRS);
 }
 
 static void
@@ -357,7 +360,7 @@ primitives_generated_pause(struct fd_acc_query *aq,
                      CP_REG_TO_MEM_0_REG(counter_base));
    primitives_relocw(ring, aq, prim_stop);
 
-   fd6_event_write(batch, ring, STOP_PRIMITIVE_CTRS, false);
+   fd6_event_write(batch, ring, STOP_PRIMITIVE_CTRS);
 
    /* result += stop - start: */
    OUT_PKT7(ring, CP_MEM_TO_MEM, 9);
@@ -399,7 +402,7 @@ primitives_emitted_resume(struct fd_acc_query *aq,
    OUT_PKT4(ring, REG_A6XX_VPC_SO_STREAM_COUNTS, 2);
    primitives_relocw(ring, aq, start[0]);
 
-   fd6_event_write(batch, ring, WRITE_PRIMITIVE_COUNTS, false);
+   fd6_event_write(batch, ring, WRITE_PRIMITIVE_COUNTS);
 }
 
 static void
@@ -412,9 +415,9 @@ primitives_emitted_pause(struct fd_acc_query *aq,
 
    OUT_PKT4(ring, REG_A6XX_VPC_SO_STREAM_COUNTS, 2);
    primitives_relocw(ring, aq, stop[0]);
-   fd6_event_write(batch, ring, WRITE_PRIMITIVE_COUNTS, false);
+   fd6_event_write(batch, ring, WRITE_PRIMITIVE_COUNTS);
 
-   fd6_event_write(batch, batch->draw, CACHE_FLUSH_TS, true);
+   fd6_event_write(batch, batch->draw, CACHE_FLUSH);
 
    /* result += stop - start: */
    OUT_PKT7(ring, CP_MEM_TO_MEM, 9);

@@ -10,7 +10,6 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 	<value name="PS_DONE_TS" value="3"/>
 	<value name="CACHE_FLUSH_TS" value="4"/>
 	<value name="CONTEXT_DONE" value="5"/>
-	<value name="CACHE_FLUSH" value="6"/>
 	<value name="VIZQUERY_START" value="7" varset="chip" variants="A2XX"/>
 	<value name="HLSQ_FLUSH" value="7" varset="chip" variants="A3XX-A4XX"/>
 	<value name="VIZQUERY_END" value="8" varset="chip" variants="A2XX"/>
@@ -53,7 +52,27 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 	<value name="UNK_2D" value="45" varset="chip" variants="A5XX-"/>
 
 	<!-- a6xx events -->
-	<value name="CACHE_INVALIDATE" value="49" varset="chip" variants="A6XX"/>
+
+	<value name="CCU_INVALIDATE_DEPTH" value="24"/>
+	<value name="CCU_INVALIDATE_COLOR" value="25"/>
+	<value name="CCU_RESOLVE_CLEAN" value="26"/>
+	<value name="CCU_FLUSH_DEPTH" value="28"/>
+	<value name="CCU_FLUSH_COLOR" value="29"/>
+	<value name="CCU_RESOLVE" value="30"/>
+	<value name="CCU_END_RESOLVE_GROUP" value="31"/>
+	<value name="CCU_CLEAN_DEPTH" value="32"/>
+	<value name="CCU_CLEAN_COLOR" value="33"/>
+
+	<value name="LRZ_FAST_CLEAR" value="37"/>
+	<value name="LRZ_CACHE_FLUSH" value="38"/>
+	<value name="LRZ_CACHE_CLEAN" value="39"/>
+	<value name="LRZ_CACHE_INVALIDATE" value="40"/>
+	<value name="LRZ_Q_CACHE_INVALIDATE" value="41"/>
+
+	<value name="CACHE_RESET" value="48"/>
+	<value name="CACHE_CLEAN" value="49"/>
+	<value name="CACHE_FLUSH" value="50"/>
+	<value name="CACHE_INVALIDATE" value="51"/>
 </enum>
 
 <enum name="pc_di_primtype">
@@ -493,6 +512,14 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 	</doc>
 	<value name="CP_START_BIN" value="0x50" varset="chip" variants="A6XX"/>
 	<value name="CP_END_BIN" value="0x51" varset="chip" variants="A6XX"/>
+
+	<value name="CP_WAIT_TIMESTAMP" value="0x14"/>
+	<value name="CP_GLOBAL_TIMESTAMP" value="0x15"/>
+	<value name="CP_LOCAL_TIMESTAMP" value="0x16"/>
+	<value name="CP_THREAD_CONTROL" value="0x17"/>
+	<value name="CP_RESOURCE_LIST" value="0x18"/>
+	<value name="CP_BV_BR_COUNT_OPS" value="0x1b"/>
+	<value name="CP_CONTEXT_REG_BUNCH2" value="0x5d"/>
 </enum>
 
 

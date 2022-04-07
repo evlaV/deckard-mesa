@@ -591,11 +591,12 @@ fd_screen_get_shader_param(struct pipe_screen *pscreen,
    case PIPE_SHADER_FRAGMENT:
    case PIPE_SHADER_VERTEX:
       break;
-   case PIPE_SHADER_TESS_CTRL:
-   case PIPE_SHADER_TESS_EVAL:
    case PIPE_SHADER_GEOMETRY:
       if (is_a6xx(screen))
          break;
+      return 0;
+   case PIPE_SHADER_TESS_CTRL:
+   case PIPE_SHADER_TESS_EVAL:
       return 0;
    case PIPE_SHADER_COMPUTE:
       if (has_compute(screen))
@@ -1081,6 +1082,7 @@ fd_screen_create(struct fd_device *dev, struct renderonly *ro,
       fd5_screen_init(pscreen);
       break;
    case 6:
+   case 7:
       fd6_screen_init(pscreen);
       break;
    default:

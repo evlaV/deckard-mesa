@@ -668,37 +668,20 @@ tu6_emit_cs_config(struct tu_cs *cs, const struct tu_shader *shader,
    tu_cs_emit(cs, A6XX_SP_CS_UNKNOWN_A9B1_SHARED_SIZE(shared_size) |
                   A6XX_SP_CS_UNKNOWN_A9B1_UNK6);
 
-   if (cs->device->physical_device->info->a6xx.has_lpac) {
-      tu_cs_emit_pkt4(cs, REG_A6XX_HLSQ_CS_UNKNOWN_B9D0, 1);
-      tu_cs_emit(cs, A6XX_HLSQ_CS_UNKNOWN_B9D0_SHARED_SIZE(shared_size) |
-                     A6XX_HLSQ_CS_UNKNOWN_B9D0_UNK6);
-   }
-
    uint32_t local_invocation_id =
       ir3_find_sysval_regid(v, SYSTEM_VALUE_LOCAL_INVOCATION_ID);
    uint32_t work_group_id =
       ir3_find_sysval_regid(v, SYSTEM_VALUE_WORKGROUP_ID);
 
    enum a6xx_threadsize thrsz = v->info.double_threadsize ? THREAD128 : THREAD64;
-   tu_cs_emit_pkt4(cs, REG_A6XX_HLSQ_CS_CNTL_0, 2);
+   tu_cs_emit_pkt4(cs, REG_A6XX_SP_CS_CNTL_0, 2);
    tu_cs_emit(cs,
-              A6XX_HLSQ_CS_CNTL_0_WGIDCONSTID(work_group_id) |
-              A6XX_HLSQ_CS_CNTL_0_WGSIZECONSTID(regid(63, 0)) |
-              A6XX_HLSQ_CS_CNTL_0_WGOFFSETCONSTID(regid(63, 0)) |
-              A6XX_HLSQ_CS_CNTL_0_LOCALIDREGID(local_invocation_id));
-   tu_cs_emit(cs, A6XX_HLSQ_CS_CNTL_1_LINEARLOCALIDREGID(regid(63, 0)) |
-                  A6XX_HLSQ_CS_CNTL_1_THREADSIZE(thrsz));
-
-   if (cs->device->physical_device->info->a6xx.has_lpac) {
-      tu_cs_emit_pkt4(cs, REG_A6XX_SP_CS_CNTL_0, 2);
-      tu_cs_emit(cs,
-                 A6XX_SP_CS_CNTL_0_WGIDCONSTID(work_group_id) |
-                 A6XX_SP_CS_CNTL_0_WGSIZECONSTID(regid(63, 0)) |
-                 A6XX_SP_CS_CNTL_0_WGOFFSETCONSTID(regid(63, 0)) |
-                 A6XX_SP_CS_CNTL_0_LOCALIDREGID(local_invocation_id));
-      tu_cs_emit(cs, A6XX_SP_CS_CNTL_1_LINEARLOCALIDREGID(regid(63, 0)) |
-                     A6XX_SP_CS_CNTL_1_THREADSIZE(thrsz));
-   }
+               A6XX_SP_CS_CNTL_0_WGIDCONSTID(work_group_id) |
+               A6XX_SP_CS_CNTL_0_WGSIZECONSTID(regid(63, 0)) |
+               A6XX_SP_CS_CNTL_0_WGOFFSETCONSTID(regid(63, 0)) |
+               A6XX_SP_CS_CNTL_0_LOCALIDREGID(local_invocation_id));
+   tu_cs_emit(cs, A6XX_SP_CS_CNTL_1_LINEARLOCALIDREGID(regid(63, 0)) |
+                  A6XX_SP_CS_CNTL_1_THREADSIZE(thrsz));
 }
 
 static void
@@ -1269,8 +1252,8 @@ tu6_emit_vpc(struct tu_cs *cs,
             A6XX_PC_PRIMITIVE_CNTL_5_GS_OUTPUT(output) |
             A6XX_PC_PRIMITIVE_CNTL_5_GS_INVOCATIONS(invocations));
 
-      tu_cs_emit_pkt4(cs, REG_A6XX_VPC_GS_PARAM, 1);
-      tu_cs_emit(cs, 0xff);
+      //tu_cs_emit_pkt4(cs, REG_A6XX_VPC_GS_PARAM, 1);
+      //tu_cs_emit(cs, 0xff);
 
       tu_cs_emit_pkt4(cs, REG_A6XX_PC_PRIMITIVE_CNTL_6, 1);
       tu_cs_emit(cs, A6XX_PC_PRIMITIVE_CNTL_6_STRIDE_IN_VPC(vec4_size));
@@ -1408,27 +1391,26 @@ tu6_emit_fs_inputs(struct tu_cs *cs, const struct ir3_shader_variant *fs)
    }
 
    tu_cs_emit_pkt4(cs, REG_A6XX_SP_FS_PREFETCH_CNTL, 1 + fs->num_sampler_prefetch);
-   tu_cs_emit(cs, A6XX_SP_FS_PREFETCH_CNTL_COUNT(fs->num_sampler_prefetch) |
-         A6XX_SP_FS_PREFETCH_CNTL_UNK4(regid(63, 0)) |
-         0x7000);    // XXX);
+   tu_cs_emit(cs, A6XX_SP_FS_PREFETCH_CNTL_COUNT(fs->num_sampler_prefetch));
    for (int i = 0; i < fs->num_sampler_prefetch; i++) {
       const struct ir3_sampler_prefetch *prefetch = &fs->sampler_prefetch[i];
       tu_cs_emit(cs, A6XX_SP_FS_PREFETCH_CMD_SRC(prefetch->src) |
-                     A6XX_SP_FS_PREFETCH_CMD_SAMP_ID(prefetch->samp_id) |
-                     A6XX_SP_FS_PREFETCH_CMD_TEX_ID(prefetch->tex_id) |
+                     A6XX_SP_FS_PREFETCH_CMD_SAMP_DESC_ID(prefetch->samp_id) |
+                     A6XX_SP_FS_PREFETCH_CMD_TEX_DESC_ID(prefetch->tex_id) |
                      A6XX_SP_FS_PREFETCH_CMD_DST(prefetch->dst) |
                      A6XX_SP_FS_PREFETCH_CMD_WRMASK(prefetch->wrmask) |
                      COND(prefetch->half_precision, A6XX_SP_FS_PREFETCH_CMD_HALF) |
-                     A6XX_SP_FS_PREFETCH_CMD_CMD(prefetch->cmd));
+                     COND(prefetch->cmd & 2, A6XX_SP_FS_PREFETCH_CMD_BINDLESSEN) |
+                     A6XX_SP_FS_PREFETCH_CMD_OPCODE(prefetch->cmd >> 2));
    }
 
    if (fs->num_sampler_prefetch > 0) {
-      tu_cs_emit_pkt4(cs, REG_A6XX_SP_FS_BINDLESS_PREFETCH_CMD(0), fs->num_sampler_prefetch);
+      tu_cs_emit_pkt4(cs, REG_A6XX_SP_FS_PREFETCH_ID_CMD(0), fs->num_sampler_prefetch);
       for (int i = 0; i < fs->num_sampler_prefetch; i++) {
          const struct ir3_sampler_prefetch *prefetch = &fs->sampler_prefetch[i];
          tu_cs_emit(cs,
-                    A6XX_SP_FS_BINDLESS_PREFETCH_CMD_SAMP_ID(prefetch->samp_bindless_id) |
-                    A6XX_SP_FS_BINDLESS_PREFETCH_CMD_TEX_ID(prefetch->tex_bindless_id));
+                    A6XX_SP_FS_PREFETCH_ID_CMD_SAMP_ID(prefetch->samp_bindless_id) |
+                    A6XX_SP_FS_PREFETCH_ID_CMD_TEX_ID(prefetch->tex_bindless_id));
       }
    }
 
@@ -2621,7 +2603,6 @@ tu_pipeline_builder_parse_dynamic(struct tu_pipeline_builder *builder,
    pipeline->rb_depth_cntl_mask = ~0u;
    pipeline->rb_stencil_cntl_mask = ~0u;
    pipeline->pc_raster_cntl_mask = ~0u;
-   pipeline->vpc_unknown_9107_mask = ~0u;
 
    if (!dynamic_info)
       return;
@@ -2701,8 +2682,7 @@ tu_pipeline_builder_parse_dynamic(struct tu_pipeline_builder *builder,
          pipeline->dynamic_state_mask |= BIT(TU_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE);
          break;
       case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
-         pipeline->pc_raster_cntl_mask &= ~A6XX_PC_RASTER_CNTL_DISCARD;
-         pipeline->vpc_unknown_9107_mask &= ~A6XX_VPC_UNKNOWN_9107_RASTER_DISCARD;
+         pipeline->pc_raster_cntl_mask &= ~A6XX_VPC_RASTER_CNTL_DISCARD;
          pipeline->dynamic_state_mask |= BIT(TU_DYNAMIC_STATE_RASTERIZER_DISCARD);
          break;
       default:
@@ -2903,7 +2883,7 @@ tu_pipeline_builder_parse_rasterization(struct tu_pipeline_builder *builder,
    }
 
    struct tu_cs cs;
-   uint32_t cs_size = 9 +
+   uint32_t cs_size = 11 +
       (builder->device->physical_device->info->a6xx.has_shading_rate ? 8 : 0) +
       (builder->emit_msaa_state ? 11 : 0);
    pipeline->rast_state = tu_cs_draw_state(&pipeline->cs, &cs, cs_size);
@@ -2917,11 +2897,9 @@ tu_pipeline_builder_parse_rasterization(struct tu_pipeline_builder *builder,
                      .zero_gb_scale_z = pipeline->z_negative_one_to_one ? 0 : 1,
                      .vp_clip_code_ignore = 1));
 
-   tu_cs_emit_regs(&cs,
-                   A6XX_VPC_POLYGON_MODE(mode));
-
-   tu_cs_emit_regs(&cs,
-                   A6XX_PC_POLYGON_MODE(mode));
+   tu_cs_emit_regs(&cs, A6XX_VPC_POLYGON_MODE(mode));
+   tu_cs_emit_regs(&cs, A6XX_PC_POLYGON_MODE(mode));
+   tu_cs_emit_regs(&cs, A6XX_VPC_POLYGON_MODE2(mode));
 
    /* move to hw ctx init? */
    tu_cs_emit_regs(&cs,
@@ -2946,16 +2924,13 @@ tu_pipeline_builder_parse_rasterization(struct tu_pipeline_builder *builder,
                            PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT);
    unsigned stream = stream_info ? stream_info->rasterizationStream : 0;
 
-   pipeline->pc_raster_cntl = A6XX_PC_RASTER_CNTL_STREAM(stream);
-   pipeline->vpc_unknown_9107 = 0;
+   pipeline->pc_raster_cntl = A6XX_VPC_RASTER_CNTL_STREAM(stream);
    if (rast_info->rasterizerDiscardEnable) {
-      pipeline->pc_raster_cntl |= A6XX_PC_RASTER_CNTL_DISCARD;
-      pipeline->vpc_unknown_9107 |= A6XX_VPC_UNKNOWN_9107_RASTER_DISCARD;
+      pipeline->pc_raster_cntl |= A6XX_VPC_RASTER_CNTL_DISCARD;
    }
 
-   if (tu_pipeline_static_state(pipeline, &cs, TU_DYNAMIC_STATE_RASTERIZER_DISCARD, 4)) {
-      tu_cs_emit_regs(&cs, A6XX_PC_RASTER_CNTL(.dword = pipeline->pc_raster_cntl));
-      tu_cs_emit_regs(&cs, A6XX_VPC_UNKNOWN_9107(.dword = pipeline->vpc_unknown_9107));
+   if (tu_pipeline_static_state(pipeline, &cs, TU_DYNAMIC_STATE_RASTERIZER_DISCARD, 2)) {
+      tu_cs_emit_regs(&cs, A6XX_VPC_RASTER_CNTL(.dword = pipeline->pc_raster_cntl));
    }
 
    pipeline->gras_su_cntl =

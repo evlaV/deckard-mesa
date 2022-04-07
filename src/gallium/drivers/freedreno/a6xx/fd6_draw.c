@@ -325,7 +325,7 @@ fd6_draw_vbo(struct fd_context *ctx, const struct pipe_draw_info *info,
 
       for (unsigned i = 0; i < PIPE_MAX_SO_BUFFERS; i++) {
          if (emit.streamout_mask & (1 << i)) {
-            fd6_event_write(ctx->batch, ring, FLUSH_SO_0 + i, false);
+            fd6_event_write(ctx->batch, ring, FLUSH_SO_0 + i);
          }
       }
    }
@@ -357,7 +357,6 @@ fd6_clear_lrz(struct fd_batch *batch, struct fd_resource *zsbuf, double depth) a
                                     .ds_state = true, .gs_state = true,
                                     .fs_state = true, .cs_state = true,
                                     .gfx_ibo = true, .cs_ibo = true,
-                                    .gfx_shared_const = true,
                                     .gfx_bindless = 0x1f, .cs_bindless = 0x1f));
 
    emit_marker6(ring, 7);
@@ -393,8 +392,7 @@ fd6_clear_lrz(struct fd_batch *batch, struct fd_resource *zsbuf, double depth) a
    OUT_PKT4(ring, REG_A6XX_RB_2D_BLIT_CNTL, 1);
    OUT_RING(ring, A6XX_RB_2D_BLIT_CNTL_COLOR_FORMAT(FMT6_16_UNORM) | 0x4f00080);
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_COLOR, false);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
    fd_wfi(batch, ring);
 
    OUT_PKT4(ring, REG_A6XX_RB_2D_SRC_SOLID_C0, 4);
@@ -423,8 +421,6 @@ fd6_clear_lrz(struct fd_batch *batch, struct fd_resource *zsbuf, double depth) a
    OUT_RING(ring, A6XX_GRAS_2D_DST_BR_X(zsbuf->lrz_width - 1) |
                      A6XX_GRAS_2D_DST_BR_Y(zsbuf->lrz_height - 1));
 
-   fd6_event_write(batch, ring, 0x3f, false);
-
    OUT_WFI5(ring);
 
    OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
@@ -438,9 +434,9 @@ fd6_clear_lrz(struct fd_batch *batch, struct fd_resource *zsbuf, double depth) a
    OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
    OUT_RING(ring, 0x0); /* RB_UNKNOWN_8E04 */
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_DEPTH_TS, true);
-   fd6_event_write(batch, ring, CACHE_FLUSH_TS, true);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
+   fd6_event_write(batch, ring, CCU_FLUSH_DEPTH);
+   fd6_event_write(batch, ring, CACHE_FLUSH);
    fd_wfi(batch, ring);
 
    fd6_cache_inv(batch, ring);

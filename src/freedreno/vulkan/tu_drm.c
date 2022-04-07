@@ -841,7 +841,7 @@ tu_queue_submit_create_locked(struct tu_queue *queue,
       if (perf_pass_index != ~0)
          entry_count++;
 
-      entry_count += cmdbuf->cs.entry_count;
+      entry_count += 1; // cmdbuf->cs.entry_count;
 
       if (u_trace_enabled && u_trace_has_points(&cmdbuf->trace)) {
          if (!(cmdbuf->usage_flags & VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT))
@@ -957,7 +957,7 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
    for (uint32_t j = 0; j < submit->vk_submit->command_buffer_count; ++j) {
       struct tu_device *dev = queue->device;
       struct tu_cmd_buffer *cmdbuf = cmd_buffers[j];
-      struct tu_cs *cs = &cmdbuf->cs;
+      //struct tu_cs *cs = &cmdbuf->cs;
 
       if (submit->perf_pass_index != ~0) {
          struct tu_cs_entry *perf_cs_entry =
@@ -966,9 +966,10 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
          tu_fill_msm_gem_submit(dev, &cmds[entry_idx], perf_cs_entry);
       }
 
-      for (unsigned i = 0; i < cs->entry_count; ++i, ++entry_idx) {
-         tu_fill_msm_gem_submit(dev, &cmds[entry_idx], &cs->entries[i]);
-      }
+      //for (unsigned i = 0; i < cs->entry_count; ++i, ++entry_idx) {
+      tu_fill_msm_gem_submit(dev, &cmds[entry_idx], &cmdbuf->top_cs);
+      entry_idx++;
+      //}
 
       if (submit->u_trace_submission_data) {
          struct tu_cs *ts_cs =

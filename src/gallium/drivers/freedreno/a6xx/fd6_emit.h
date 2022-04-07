@@ -148,37 +148,29 @@ fd6_emit_add_group(struct fd6_emit *emit, struct fd_ringbuffer *stateobj,
                        enable_mask);
 }
 
-static inline unsigned
+static inline void
 fd6_event_write(struct fd_batch *batch, struct fd_ringbuffer *ring,
-                enum vgt_event_type evt, bool timestamp)
+                enum vgt_event_type evt)
 {
-   unsigned seqno = 0;
-
    fd_reset_wfi(batch);
 
-   OUT_PKT7(ring, CP_EVENT_WRITE, timestamp ? 4 : 1);
-   OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(evt));
-   if (timestamp) {
-      struct fd6_context *fd6_ctx = fd6_context(batch->ctx);
-      seqno = ++fd6_ctx->seqno;
-      OUT_RELOC(ring, control_ptr(fd6_ctx, seqno)); /* ADDR_LO/HI */
-      OUT_RING(ring, seqno);
-   }
-
-   return seqno;
+   OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+   OUT_RING(ring, evt);
 }
 
 static inline void
 fd6_cache_inv(struct fd_batch *batch, struct fd_ringbuffer *ring)
 {
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_COLOR, false);
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_DEPTH, false);
-   fd6_event_write(batch, ring, CACHE_INVALIDATE, false);
+   fd6_event_write(batch, ring, CCU_INVALIDATE_COLOR);
+   fd6_event_write(batch, ring, CCU_INVALIDATE_DEPTH);
+   fd6_event_write(batch, ring, CACHE_INVALIDATE);
 }
 
 static inline void
 fd6_cache_flush(struct fd_batch *batch, struct fd_ringbuffer *ring)
 {
+   fd6_event_write(batch, ring, CACHE_FLUSH);
+#if 0
    struct fd6_context *fd6_ctx = fd6_context(batch->ctx);
    unsigned seqno;
 
@@ -198,13 +190,14 @@ fd6_cache_flush(struct fd_batch *batch, struct fd_ringbuffer *ring)
    OUT_RING(ring, CP_WAIT_MEM_GTE_0_RESERVED(0));
    OUT_RELOC(ring, control_ptr(fd6_ctx, seqno));
    OUT_RING(ring, CP_WAIT_MEM_GTE_3_REF(seqno));
+#endif
 }
 
 static inline void
 fd6_emit_blit(struct fd_batch *batch, struct fd_ringbuffer *ring)
 {
    emit_marker6(ring, 7);
-   fd6_event_write(batch, ring, BLIT, false);
+   fd6_event_write(batch, ring, CCU_RESOLVE);
    emit_marker6(ring, 7);
 }
 
@@ -212,7 +205,7 @@ static inline void
 fd6_emit_lrz_flush(struct fd_ringbuffer *ring)
 {
    OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-   OUT_RING(ring, LRZ_FLUSH);
+   OUT_RING(ring, LRZ_CACHE_FLUSH);
 }
 
 static inline bool

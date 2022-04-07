@@ -127,7 +127,8 @@ emit_mrt(struct fd_ringbuffer *ring, struct pipe_framebuffer_state *pfb,
       OUT_REG(
          ring,
          A6XX_RB_MRT_BUF_INFO(i, .color_format = format,
-                              .color_tile_mode = tile_mode, .color_swap = swap),
+                              .color_tile_mode = tile_mode, .color_swap = swap,
+                              .losslesscompen = fd_resource_ubwc_enabled(rsc, psurf->u.tex.level)),
          A6XX_RB_MRT_PITCH(i, .a6xx_rb_mrt_pitch = stride),
          A6XX_RB_MRT_ARRAY_PITCH(i, .a6xx_rb_mrt_array_pitch = array_stride),
          A6XX_RB_MRT_BASE(i, .bo = rsc->bo, .bo_offset = offset),
@@ -168,7 +169,7 @@ emit_zs(struct fd_ringbuffer *ring, struct pipe_surface *zsbuf,
          fd_resource_offset(rsc, zsbuf->u.tex.level, zsbuf->u.tex.first_layer);
 
       OUT_REG(
-         ring, A6XX_RB_DEPTH_BUFFER_INFO(.depth_format = fmt),
+         ring, A6XX_RB_DEPTH_BUFFER_INFO(.depth_format = fmt, .losslesscompen = fd_resource_ubwc_enabled(rsc, zsbuf->u.tex.level), .tilemode = 3),
          A6XX_RB_DEPTH_BUFFER_PITCH(.a6xx_rb_depth_buffer_pitch = stride),
          A6XX_RB_DEPTH_BUFFER_ARRAY_PITCH(.a6xx_rb_depth_buffer_array_pitch =
                                              array_stride),
@@ -195,12 +196,6 @@ emit_zs(struct fd_ringbuffer *ring, struct pipe_surface *zsbuf,
          OUT_RING(ring, 0x00000000); /* GRAS_LRZ_FAST_CLEAR_BUFFER_BASE_LO */
          OUT_RING(ring, 0x00000000);
       }
-
-      /* NOTE: blob emits GRAS_LRZ_CNTL plus GRAZ_LRZ_BUFFER_BASE
-       * plus this CP_EVENT_WRITE at the end in it's own IB..
-       */
-      OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-      OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(UNK_25));
 
       if (rsc->stencil) {
          stride = fd_resource_pitch(rsc->stencil, zsbuf->u.tex.level);
@@ -352,43 +347,13 @@ update_render_cntl(struct fd_batch *batch, struct pipe_framebuffer_state *pfb,
    struct fd_ringbuffer *ring = batch->gmem;
    struct fd_screen *screen = batch->ctx->screen;
    uint32_t cntl = 0;
-   bool depth_ubwc_enable = false;
-   uint32_t mrts_ubwc_enable = 0;
    int i;
 
-   if (pfb->zsbuf) {
-      struct fd_resource *rsc = fd_resource(pfb->zsbuf->texture);
-      depth_ubwc_enable =
-         fd_resource_ubwc_enabled(rsc, pfb->zsbuf->u.tex.level);
-   }
-
-   for (i = 0; i < pfb->nr_cbufs; i++) {
-      if (!pfb->cbufs[i])
-         continue;
-
-      struct pipe_surface *psurf = pfb->cbufs[i];
-      struct fd_resource *rsc = fd_resource(psurf->texture);
-      if (!rsc->bo)
-         continue;
-
-      if (fd_resource_ubwc_enabled(rsc, psurf->u.tex.level))
-         mrts_ubwc_enable |= 1 << i;
-   }
-
-   cntl |= A6XX_RB_RENDER_CNTL_CCUSINGLECACHELINESIZE(2);
    if (binning)
       cntl |= A6XX_RB_RENDER_CNTL_BINNING;
 
-   if (screen->info->a6xx.has_cp_reg_write) {
-      OUT_PKT7(ring, CP_REG_WRITE, 3);
-      OUT_RING(ring, CP_REG_WRITE_0_TRACKER(TRACK_RENDER_CNTL));
-      OUT_RING(ring, REG_A6XX_RB_RENDER_CNTL);
-   } else {
-      OUT_PKT4(ring, REG_A6XX_RB_RENDER_CNTL, 1);
-   }
-   OUT_RING(ring, cntl |
-                     COND(depth_ubwc_enable, A6XX_RB_RENDER_CNTL_FLAG_DEPTH) |
-                     A6XX_RB_RENDER_CNTL_FLAG_MRTS(mrts_ubwc_enable));
+   OUT_PKT4(ring, REG_A6XX_RB_RENDER_CNTL, 1);
+   OUT_RING(ring, cntl);
 }
 
 /* extra size to store VSC_DRAW_STRM_SIZE: */
@@ -587,6 +552,8 @@ emit_common_init(struct fd_batch *batch)
    if (!result)
       return;
 
+   assert(0);
+#if 0
    OUT_PKT4(ring, REG_A6XX_RB_SAMPLE_COUNT_CONTROL, 1);
    OUT_RING(ring, A6XX_RB_SAMPLE_COUNT_CONTROL_COPY);
 
@@ -594,6 +561,7 @@ emit_common_init(struct fd_batch *batch)
    OUT_RELOC(ring, results_ptr(at, result[result->idx].samples_start));
 
    fd6_event_write(batch, ring, ZPASS_DONE, false);
+#endif
 }
 
 static void
@@ -606,6 +574,9 @@ emit_common_fini(struct fd_batch *batch)
    if (!result)
       return;
 
+   assert(0);
+
+#if 0
    OUT_PKT4(ring, REG_A6XX_RB_SAMPLE_COUNT_CONTROL, 1);
    OUT_RING(ring, A6XX_RB_SAMPLE_COUNT_CONTROL_COPY);
 
@@ -619,6 +590,7 @@ emit_common_fini(struct fd_batch *batch)
    OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS));
    OUT_RELOC(ring, results_ptr(at, fence));
    OUT_RING(ring, result->fence);
+#endif
 }
 
 /*
@@ -1484,7 +1456,7 @@ fd6_emit_tile_fini(struct fd_batch *batch)
 
    fd6_emit_lrz_flush(ring);
 
-   fd6_event_write(batch, ring, PC_CCU_RESOLVE_TS, true);
+   fd6_event_write(batch, ring, CCU_RESOLVE_CLEAN);
 
    if (use_hw_binning(batch)) {
       check_vsc_overflow(batch->ctx);
@@ -1546,7 +1518,7 @@ emit_sysmem_clears(struct fd_batch *batch, struct fd_ringbuffer *ring) assert_dt
       }
    }
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
    fd_wfi(batch, ring);
 
    trace_end_clear_restore(&batch->trace, ring);
@@ -1600,7 +1572,7 @@ fd6_emit_sysmem_prep(struct fd_batch *batch) assert_dt
    OUT_PKT7(ring, CP_SKIP_IB2_ENABLE_LOCAL, 1);
    OUT_RING(ring, 0x1);
 
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_COLOR, false);
+   fd6_event_write(batch, ring, CCU_INVALIDATE_COLOR);
    fd6_cache_inv(batch, ring);
 
    fd_wfi(batch, ring);
@@ -1637,8 +1609,8 @@ fd6_emit_sysmem_fini(struct fd_batch *batch) assert_dt
 
    fd6_emit_lrz_flush(ring);
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_DEPTH_TS, true);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
+   fd6_event_write(batch, ring, CCU_FLUSH_DEPTH);
    fd_wfi(batch, ring);
 }
 

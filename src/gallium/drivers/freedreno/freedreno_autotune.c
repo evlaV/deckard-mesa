@@ -173,6 +173,8 @@ fallback_use_bypass(struct fd_batch *batch)
 bool
 fd_autotune_use_bypass(struct fd_autotune *at, struct fd_batch *batch)
 {
+   return true;
+
    struct pipe_framebuffer_state *pfb = &batch->framebuffer;
 
    process_results(at);

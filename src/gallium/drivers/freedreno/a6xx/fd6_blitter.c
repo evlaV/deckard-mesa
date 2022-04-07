@@ -238,10 +238,8 @@ emit_setup(struct fd_batch *batch)
    struct fd_ringbuffer *ring = batch->draw;
    struct fd_screen *screen = batch->ctx->screen;
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_DEPTH_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_COLOR, false);
-   fd6_event_write(batch, ring, PC_CCU_INVALIDATE_DEPTH, false);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
+   fd6_event_write(batch, ring, CCU_FLUSH_DEPTH);
 
    /* normal BLIT_OP_SCALE operation needs bypass RB_CCU_CNTL */
    OUT_WFI5(ring);
@@ -409,8 +407,8 @@ emit_blit_buffer(struct fd_context *ctx, struct fd_ringbuffer *ring,
       OUT_RING(ring, A6XX_GRAS_2D_DST_BR_X(dshift + w - 1) |
                         A6XX_GRAS_2D_DST_BR_Y(0));
 
-      OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-      OUT_RING(ring, 0x3f);
+      //OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+      //OUT_RING(ring, 0x3f);
       OUT_WFI5(ring);
 
       OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
@@ -504,8 +502,8 @@ fd6_clear_ubwc(struct fd_batch *batch, struct fd_resource *rsc) assert_dt
       OUT_RING(ring,
                A6XX_GRAS_2D_DST_BR_X(w - 1) | A6XX_GRAS_2D_DST_BR_Y(h - 1));
 
-      OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-      OUT_RING(ring, 0x3f);
+      //OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+      //OUT_RING(ring, 0x3f);
       OUT_WFI5(ring);
 
       OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
@@ -523,9 +521,9 @@ fd6_clear_ubwc(struct fd_batch *batch, struct fd_resource *rsc) assert_dt
       size -= w * h;
    }
 
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_DEPTH_TS, true);
-   fd6_event_write(batch, ring, CACHE_FLUSH_TS, true);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
+   fd6_event_write(batch, ring, CCU_FLUSH_DEPTH);
+   fd6_event_write(batch, ring, CACHE_FLUSH);
    fd_wfi(batch, ring);
    fd6_cache_inv(batch, ring);
 }
@@ -682,8 +680,8 @@ emit_blit_texture(struct fd_context *ctx, struct fd_ringbuffer *ring,
       /*
        * Blit command:
        */
-      OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-      OUT_RING(ring, 0x3f);
+      //OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+      //OUT_RING(ring, 0x3f);
       OUT_WFI5(ring);
 
       OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
@@ -810,8 +808,8 @@ fd6_clear_surface(struct fd_context *ctx, struct fd_ringbuffer *ring,
       /*
        * Blit command:
        */
-      OUT_PKT7(ring, CP_EVENT_WRITE, 1);
-      OUT_RING(ring, 0x3f);
+      //OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+      //OUT_RING(ring, 0x3f);
       OUT_WFI5(ring);
 
       OUT_PKT4(ring, REG_A6XX_RB_UNKNOWN_8E04, 1);
@@ -895,7 +893,7 @@ fd6_resolve_tile(struct fd_batch *batch, struct fd_ringbuffer *ring,
     * sysmem, and we generally assume that GMEM renderpasses leave their
     * results in sysmem, so we need to flush manually here.
     */
-   fd6_event_write(batch, ring, PC_CCU_FLUSH_COLOR_TS, true);
+   fd6_event_write(batch, ring, CCU_FLUSH_COLOR);
    fd_wfi(batch, ring);
 }
 
@@ -957,9 +955,9 @@ handle_rgba_blit(struct fd_context *ctx,
 
    trace_end_blit(&batch->trace, batch->draw);
 
-   fd6_event_write(batch, batch->draw, PC_CCU_FLUSH_COLOR_TS, true);
-   fd6_event_write(batch, batch->draw, PC_CCU_FLUSH_DEPTH_TS, true);
-   fd6_event_write(batch, batch->draw, CACHE_FLUSH_TS, true);
+   fd6_event_write(batch, batch->draw, CCU_FLUSH_COLOR);
+   fd6_event_write(batch, batch->draw, CCU_FLUSH_DEPTH);
+   fd6_event_write(batch, batch->draw, CACHE_FLUSH);
    fd_wfi(batch, batch->draw);
    fd6_cache_inv(batch, batch->draw);
 

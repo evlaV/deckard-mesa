@@ -243,6 +243,7 @@ tu_physical_device_init(struct tu_physical_device *device,
    }
    switch (fd_dev_gen(&device->dev_id)) {
    case 6:
+   case 7:
       device->info = info;
       device->ccu_offset_bypass = device->info->num_ccu * A6XX_CCU_DEPTH_SIZE;
       device->ccu_offset_gmem = (device->gmem_size -
@@ -409,6 +410,7 @@ tu_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
 
    instance->debug_flags =
       parse_debug_string(os_get_option("TU_DEBUG"), tu_debug_options);
+   instance->debug_flags |= TU_DEBUG_SYSMEM | TU_DEBUG_NOLRZ;
 
 #ifdef DEBUG
    /* Enable startup debugging by default on debug drivers.  You almost always
@@ -618,7 +620,7 @@ tu_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
       .imageCubeArray = true,
       .independentBlend = true,
       .geometryShader = true,
-      .tessellationShader = true,
+      .tessellationShader = false,
       .sampleRateShading = true,
       .dualSrcBlend = true,
       .logicOp = true,

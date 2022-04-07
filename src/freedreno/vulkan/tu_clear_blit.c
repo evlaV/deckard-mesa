@@ -628,7 +628,6 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, bool blit,
          .cs_state = true,
          .gfx_ibo = true,
          .cs_ibo = true,
-         .gfx_shared_const = true,
          .gfx_bindless = 0x1f,
          .cs_bindless = 0x1f));
 
@@ -675,8 +674,7 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, bool blit,
                       .clip_disable = 1));
    tu_cs_emit_regs(cs, A6XX_GRAS_SU_CNTL()); // XXX msaa enable?
 
-   tu_cs_emit_regs(cs, A6XX_PC_RASTER_CNTL());
-   tu_cs_emit_regs(cs, A6XX_VPC_UNKNOWN_9107());
+   tu_cs_emit_regs(cs, A6XX_VPC_RASTER_CNTL());
 
    tu_cs_emit_regs(cs,
                    A6XX_GRAS_SC_VIEWPORT_SCISSOR_TL(0, .x = 0, .y = 0),
@@ -947,7 +945,7 @@ r3d_dst(struct tu_cs *cs, const struct fdl6_view *iview, uint32_t layer)
     */
    tu_cs_emit_regs(cs, A6XX_GRAS_LRZ_MRT_BUF_INFO_0(.color_format = iview->RB_MRT_BUF_INFO & 0xff));
 
-   tu_cs_emit_regs(cs, A6XX_RB_RENDER_CNTL(.flag_mrts = iview->ubwc_enabled));
+   tu_cs_emit_regs(cs, A6XX_RB_RENDER_CNTL());
 }
 
 static void
@@ -1803,8 +1801,8 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
       /* When executed by the user there has to be a pipeline barrier here,
        * but since we're doing it manually we'll have to flush ourselves.
        */
-      tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
-      tu6_emit_event_write(cmd, cs, CACHE_INVALIDATE);
+      tu6_emit_event_write(cs, CCU_FLUSH_COLOR);
+      tu6_emit_event_write(cs, CACHE_INVALIDATE);
       tu_cs_emit_wfi(cs);
 
       fdl6_view_init(&staging, &staging_layout_ptr, &(struct fdl_view_args) {
@@ -2436,7 +2434,7 @@ clear_gmem_attachment(struct tu_cmd_buffer *cmd,
    tu_cs_emit_pkt4(cs, REG_A6XX_RB_BLIT_CLEAR_COLOR_DW0, 4);
    tu_cs_emit_array(cs, clear_vals, 4);
 
-   tu6_emit_event_write(cmd, cs, BLIT);
+   tu6_emit_event_write(cs, BLIT);
 }
 
 static void
@@ -2628,11 +2626,10 @@ tu_clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
     * beforehand as depth should already be flushed.
     */
    if (vk_format_is_depth_or_stencil(attachment->format)) {
-      tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
-      tu6_emit_event_write(cmd, cs, PC_CCU_INVALIDATE_DEPTH);
+      tu6_emit_event_write(cs, CCU_FLUSH_COLOR);
+      tu6_emit_event_write(cs, CCU_INVALIDATE_DEPTH);
    } else {
-      tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
-      tu6_emit_event_write(cmd, cs, PC_CCU_INVALIDATE_COLOR);
+      tu6_emit_event_write(cs, CCU_FLUSH_COLOR);
    }
 
    if (cmd->device->physical_device->info->a6xx.has_ccu_flush_bug)
@@ -2693,7 +2690,7 @@ tu_emit_blit(struct tu_cmd_buffer *cmd,
                       A6XX_RB_BLIT_BASE_GMEM(attachment->gmem_offset));
    }
 
-   tu6_emit_event_write(cmd, cs, BLIT);
+   tu6_emit_event_write(cs, BLIT);
 }
 
 static bool
@@ -2785,7 +2782,7 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
                    A6XX_SP_PS_2D_SRC_PITCH(.pitch = cmd->state.framebuffer->tile0.width * cpp));
 
    /* sync GMEM writes with CACHE. */
-   tu6_emit_event_write(cmd, cs, CACHE_INVALIDATE);
+   tu6_emit_event_write(cs, CACHE_INVALIDATE);
 
    /* Wait for CACHE_INVALIDATE to land */
    tu_cs_emit_wfi(cs);
@@ -2797,7 +2794,7 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
     * sysmem, and we generally assume that GMEM renderpasses leave their
     * results in sysmem, so we need to flush manually here.
     */
-   tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
+   tu6_emit_event_write(cs, CCU_FLUSH_COLOR);
 }
 
 static void
@@ -2824,7 +2821,7 @@ store_3d_blit(struct tu_cmd_buffer *cmd,
    r3d_src_gmem(cmd, cs, iview, format, gmem_offset, cpp);
 
    /* sync GMEM writes with CACHE. */
-   tu6_emit_event_write(cmd, cs, CACHE_INVALIDATE);
+   tu6_emit_event_write(cs, CACHE_INVALIDATE);
 
    r3d_run(cmd, cs);
 
@@ -2833,7 +2830,7 @@ store_3d_blit(struct tu_cmd_buffer *cmd,
     * results in sysmem, so we need to flush manually here. The 3d blit path
     * writes to depth images as a color RT, so there's no need to flush depth.
     */
-   tu6_emit_event_write(cmd, cs, PC_CCU_FLUSH_COLOR_TS);
+   tu6_emit_event_write(cs, CCU_FLUSH_COLOR);
 }
 
 void

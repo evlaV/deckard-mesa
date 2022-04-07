@@ -698,7 +698,7 @@ fd_gmem_render_tiles(struct fd_batch *batch)
       }
    }
 
-   if (FD_DBG(SYSMEM))
+   //if (FD_DBG(SYSMEM))
       sysmem = true;
 
    /* Layered rendering always needs bypass. */

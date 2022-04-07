@@ -242,7 +242,7 @@ is_a5xx(struct fd_screen *screen)
 static inline boolean
 is_a6xx(struct fd_screen *screen)
 {
-   return screen->gen == 6;
+   return screen->gen == 6 || screen->gen == 7;
 }
 
 /* is it using the ir3 compiler (shader isa introduced with a3xx)? */

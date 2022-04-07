@@ -1204,6 +1204,7 @@ struct tu_cmd_buffer
    struct tu_cs tile_store_cs;
    struct tu_cs draw_epilogue_cs;
    struct tu_cs sub_cs;
+   struct tu_cs_entry top_cs;
 
    uint32_t vsc_draw_strm_pitch;
    uint32_t vsc_prim_strm_pitch;
@@ -1231,8 +1232,7 @@ void tu_emit_cache_flush_ccu(struct tu_cmd_buffer *cmd_buffer,
                              enum tu_cmd_ccu_state ccu_state);
 
 void
-tu6_emit_event_write(struct tu_cmd_buffer *cmd,
-                     struct tu_cs *cs,
+tu6_emit_event_write(struct tu_cs *cs,
                      enum vgt_event_type event);
 
 static inline struct tu_descriptor_state *
@@ -1332,7 +1332,6 @@ struct tu_pipeline
    uint32_t rb_depth_cntl, rb_depth_cntl_mask;
    uint32_t rb_stencil_cntl, rb_stencil_cntl_mask;
    uint32_t pc_raster_cntl, pc_raster_cntl_mask;
-   uint32_t vpc_unknown_9107, vpc_unknown_9107_mask;
    uint32_t stencil_wrmask;
 
    bool rb_depth_cntl_disable;

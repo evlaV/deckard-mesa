@@ -529,20 +529,27 @@ setup_stateobj(struct fd_ringbuffer *ring, struct fd_context *ctx,
     * emitted if frag-prog is dirty vs if vert-prog is dirty..
     */
 
+
    OUT_PKT4(ring, REG_A6XX_SP_FS_PREFETCH_CNTL, 1 + fs->num_sampler_prefetch);
-   OUT_RING(ring, A6XX_SP_FS_PREFETCH_CNTL_COUNT(fs->num_sampler_prefetch) |
-                     A6XX_SP_FS_PREFETCH_CNTL_UNK4(regid(63, 0)) |
-                     0x7000); // XXX
+   OUT_RING(ring, A6XX_SP_FS_PREFETCH_CNTL_COUNT(fs->num_sampler_prefetch));
    for (int i = 0; i < fs->num_sampler_prefetch; i++) {
       const struct ir3_sampler_prefetch *prefetch = &fs->sampler_prefetch[i];
       OUT_RING(ring,
                A6XX_SP_FS_PREFETCH_CMD_SRC(prefetch->src) |
-                  A6XX_SP_FS_PREFETCH_CMD_SAMP_ID(prefetch->samp_id) |
-                  A6XX_SP_FS_PREFETCH_CMD_TEX_ID(prefetch->tex_id) |
                   A6XX_SP_FS_PREFETCH_CMD_DST(prefetch->dst) |
                   A6XX_SP_FS_PREFETCH_CMD_WRMASK(prefetch->wrmask) |
                   COND(prefetch->half_precision, A6XX_SP_FS_PREFETCH_CMD_HALF) |
-                  A6XX_SP_FS_PREFETCH_CMD_CMD(prefetch->cmd));
+                  A6XX_SP_FS_PREFETCH_CMD_OPCODE(prefetch->cmd >> 2));
+   }
+
+   if (fs->num_sampler_prefetch) {
+      OUT_PKT4(ring, REG_A6XX_SP_FS_PREFETCH_ID_CMD(0), fs->num_sampler_prefetch);
+      for (int i = 0; i < fs->num_sampler_prefetch; i++) {
+         const struct ir3_sampler_prefetch *prefetch = &fs->sampler_prefetch[i];
+         OUT_RING(ring,
+                    A6XX_SP_FS_PREFETCH_ID_CMD_SAMP_ID(prefetch->samp_id) |
+                    A6XX_SP_FS_PREFETCH_ID_CMD_TEX_ID(prefetch->tex_id));
+      }
    }
 
    OUT_PKT4(ring, REG_A6XX_SP_UNKNOWN_A9A8, 1);
@@ -1031,8 +1038,8 @@ setup_stateobj(struct fd_ringbuffer *ring, struct fd_context *ctx,
       OUT_RING(ring, A6XX_GRAS_GS_CL_CNTL_CLIP_MASK(clip_mask) |
                         A6XX_GRAS_GS_CL_CNTL_CULL_MASK(cull_mask));
 
-      OUT_PKT4(ring, REG_A6XX_VPC_GS_PARAM, 1);
-      OUT_RING(ring, 0xff);
+      //OUT_PKT4(ring, REG_A6XX_VPC_GS_PARAM, 1);
+      //OUT_RING(ring, 0xff);
 
       OUT_PKT4(ring, REG_A6XX_VPC_GS_CLIP_CNTL, 1);
       OUT_RING(ring, A6XX_VPC_GS_CLIP_CNTL_CLIP_MASK(clip_cull_mask) |
@@ -1076,9 +1083,6 @@ setup_stateobj(struct fd_ringbuffer *ring, struct fd_context *ctx,
    OUT_PKT4(ring, REG_A6XX_GRAS_VS_CL_CNTL, 1);
    OUT_RING(ring, A6XX_GRAS_VS_CL_CNTL_CLIP_MASK(clip_mask) |
                      A6XX_GRAS_VS_CL_CNTL_CULL_MASK(cull_mask));
-
-   OUT_PKT4(ring, REG_A6XX_VPC_UNKNOWN_9107, 1);
-   OUT_RING(ring, 0);
 
    if (fs->instrlen)
       fd6_emit_shader(ctx, ring, fs);
