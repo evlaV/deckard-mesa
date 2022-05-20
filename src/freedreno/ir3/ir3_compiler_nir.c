@@ -3589,9 +3589,9 @@ emit_phi(struct ir3_context *ctx, nir_phi_instr *nphi)
    if (exec_list_is_singular(&nphi->srcs)) {
       nir_phi_src *src = list_entry(exec_list_get_head(&nphi->srcs),
                                     nir_phi_src, node);
-      if (nphi->dest.ssa.divergent == src->src.ssa->divergent) {
+      if (nphi->def.divergent == src->src.ssa->divergent) {
          dst[0] = ir3_get_src(ctx, &src->src)[0];
-         ir3_put_dst(ctx, &nphi->dest);
+         ir3_put_def(ctx, &nphi->def);
          return;
       }
    }

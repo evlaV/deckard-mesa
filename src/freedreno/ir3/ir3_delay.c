@@ -26,6 +26,8 @@
 
 #include "ir3.h"
 
+#include "ir3_compiler.h"
+
 /* The maximum number of nop's we may need to insert between two instructions.
  */
 #define MAX_NOPS 6
@@ -43,7 +45,8 @@
  * assigns a value and the one that consumes
  */
 int
-ir3_delayslots(struct ir3_instruction *assigner,
+ir3_delayslots(struct ir3_compiler *compiler,
+               struct ir3_instruction *assigner,
                struct ir3_instruction *consumer, unsigned n, bool soft)
 {
    /* generally don't count false dependencies, since this can just be
@@ -63,12 +66,25 @@ ir3_delayslots(struct ir3_instruction *assigner,
    if (writes_addr0(assigner) || writes_addr1(assigner))
       return 6;
 
-   if (soft && is_ss_producer(assigner))
+   if (soft && needs_ss(compiler->has_scalar_alu, assigner, consumer))
       return soft_ss_delay(assigner);
 
    /* handled via sync flags: */
-   if (is_ss_producer(assigner) || is_sy_producer(assigner))
+   if (needs_ss(compiler->has_scalar_alu, assigner, consumer) ||
+       is_sy_producer(assigner))
       return 0;
+
+   /* Waiting on the scalar ALU usually requires (ss), but on newer gens scalar
+    * -> scalar depdendencies where the source and destination register sizes
+    *  match don't require (ss) and only require 1 nop.
+    */
+   if (is_scalar_alu(assigner)) {
+      assert(is_scalar_alu(consumer));
+      assert(compiler->has_scalar_alu);
+      assert((assigner->dsts[0]->flags & IR3_REG_HALF) ==
+             (consumer->srcs[n]->flags & IR3_REG_HALF));
+      return 1;
+   }
 
    /* As far as we know, shader outputs don't need any delay. */
    if (consumer->opc == OPC_END || consumer->opc == OPC_CHMASK)
@@ -96,14 +112,19 @@ ir3_delayslots(struct ir3_instruction *assigner,
 }
 
 static bool
-count_instruction(struct ir3_instruction *n)
+count_instruction(struct ir3_instruction *assigner,
+                  struct ir3_instruction *consumer)
 {
    /* NOTE: don't count branch/jump since we don't know yet if they will
     * be eliminated later in resolve_jumps().. really should do that
     * earlier so we don't have this constraint.
+    *
+    * There seem to be some rare cases where a nop after a scalar ALU
+    * instruction is executed "concurrently" so ignore scalar ALU instructions
+    * when counting the delay for non-scalar instructions.
     */
-   return is_alu(n) ||
-          (is_flow(n) && (n->opc != OPC_JUMP) && (n->opc != OPC_B));
+   return (is_alu(assigner) && (!is_scalar_alu(assigner) || is_scalar_alu(consumer))) ||
+          (is_flow(assigner) && (assigner->opc != OPC_JUMP) && (assigner->opc != OPC_B));
 }
 
 /* Post-RA, we don't have arrays any more, so we have to be a bit careful here
@@ -127,11 +148,12 @@ post_ra_reg_num(struct ir3_register *reg)
 }
 
 unsigned
-ir3_delayslots_with_repeat(struct ir3_instruction *assigner,
+ir3_delayslots_with_repeat(struct ir3_compiler *compiler,
+                           struct ir3_instruction *assigner,
                            struct ir3_instruction *consumer,
                            unsigned assigner_n, unsigned consumer_n)
 {
-   unsigned delay = ir3_delayslots(assigner, consumer, consumer_n, false);
+   unsigned delay = ir3_delayslots(compiler, assigner, consumer, consumer_n, false);
 
    struct ir3_register *src = consumer->srcs[consumer_n];
    struct ir3_register *dst = assigner->dsts[assigner_n];
@@ -208,7 +230,7 @@ ir3_delayslots_with_repeat(struct ir3_instruction *assigner,
 }
 
 static unsigned
-delay_calc_srcn(struct ir3_instruction *assigner,
+delay_calc_srcn(struct ir3_compiler *compiler, struct ir3_instruction *assigner,
                 struct ir3_instruction *consumer, unsigned assigner_n,
                 unsigned consumer_n, bool mergedregs)
 {
@@ -228,7 +250,7 @@ delay_calc_srcn(struct ir3_instruction *assigner,
    if (dst_start >= src_end || src_start >= dst_end)
       return 0;
 
-   return ir3_delayslots_with_repeat(assigner, consumer, assigner_n, consumer_n);
+   return ir3_delayslots_with_repeat(compiler, assigner, consumer, assigner_n, consumer_n);
 }
 
 static unsigned
@@ -247,7 +269,7 @@ delay_calc(struct ir3_block *block, struct ir3_instruction *start,
       start ? start->node.prev : block->instr_list.prev;
    list_for_each_entry_from_rev (struct ir3_instruction, assigner, start_list,
                                  &block->instr_list, node) {
-      if (count_instruction(assigner))
+      if (count_instruction(assigner, consumer))
          distance += assigner->nop;
 
       if (distance + delay >= MAX_NOPS)
@@ -268,7 +290,7 @@ delay_calc(struct ir3_block *block, struct ir3_instruction *start,
                continue;
 
             unsigned src_delay = delay_calc_srcn(
-               assigner, consumer, dst_n, src_n, mergedregs);
+               block->shader->compiler, assigner, consumer, dst_n, src_n, mergedregs);
             new_delay = MAX2(new_delay, src_delay);
          }
          regmask_clear(&mask, dst);
@@ -277,7 +299,7 @@ delay_calc(struct ir3_block *block, struct ir3_instruction *start,
       new_delay = new_delay > distance ? new_delay - distance : 0;
       delay = MAX2(delay, new_delay);
 
-      if (count_instruction(assigner))
+      if (count_instruction(assigner, consumer))
          distance += 1 + assigner->repeat;
    }
 

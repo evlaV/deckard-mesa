@@ -90,6 +90,7 @@
  */
 
 struct ir3_sched_ctx {
+   struct ir3_compiler *compiler;
    struct ir3_block *block; /* the current block */
    struct dag *dag;
 
@@ -174,7 +175,8 @@ struct ir3_sched_node {
 
 static void sched_node_init(struct ir3_sched_ctx *ctx,
                             struct ir3_instruction *instr);
-static void sched_node_add_dep(struct ir3_instruction *instr,
+static void sched_node_add_dep(struct ir3_sched_ctx *ctx,
+                               struct ir3_instruction *instr,
                                struct ir3_instruction *src, int i);
 
 static bool
@@ -183,10 +185,11 @@ is_scheduled(struct ir3_instruction *instr)
    return !!(instr->flags & IR3_INSTR_MARK);
 }
 
-/* check_src_cond() passing a ir3_sched_ctx. */
+/* check_src_cond() passing the user and ir3_sched_ctx. */
 static bool
 sched_check_src_cond(struct ir3_instruction *instr,
                      bool (*cond)(struct ir3_instruction *,
+                                  struct ir3_instruction *,
                                   struct ir3_sched_ctx *),
                      struct ir3_sched_ctx *ctx)
 {
@@ -198,7 +201,7 @@ sched_check_src_cond(struct ir3_instruction *instr,
          if (sched_check_src_cond(src, cond, ctx))
             return true;
       } else {
-         if (cond(src, ctx))
+         if (cond(src, instr, ctx))
             return true;
       }
    }
@@ -209,7 +212,8 @@ sched_check_src_cond(struct ir3_instruction *instr,
 /* Is this a sy producer that hasn't been waited on yet? */
 
 static bool
-is_outstanding_sy(struct ir3_instruction *instr, struct ir3_sched_ctx *ctx)
+is_outstanding_sy(struct ir3_instruction *instr, struct ir3_instruction *use,
+                  struct ir3_sched_ctx *ctx)
 {
    if (!is_sy_producer(instr))
       return false;
@@ -225,9 +229,10 @@ is_outstanding_sy(struct ir3_instruction *instr, struct ir3_sched_ctx *ctx)
 }
 
 static bool
-is_outstanding_ss(struct ir3_instruction *instr, struct ir3_sched_ctx *ctx)
+is_outstanding_ss(struct ir3_instruction *instr, struct ir3_instruction *use,
+                  struct ir3_sched_ctx *ctx)
 {
-   if (!is_ss_producer(instr))
+   if (!needs_ss(ctx->compiler->has_scalar_alu, instr, use))
       return false;
 
    /* The sched node is only valid within the same block, we cannot
@@ -944,7 +949,7 @@ split_addr(struct ir3_sched_ctx *ctx, struct ir3_instruction **addr,
          /* don't need to remove old dag edge since old addr is
           * already scheduled:
           */
-         sched_node_add_dep(indirect, new_addr, 0);
+         sched_node_add_dep(ctx, indirect, new_addr, 0);
          di(indirect, "new address");
       }
    }
@@ -996,7 +1001,7 @@ split_pred(struct ir3_sched_ctx *ctx)
          /* don't need to remove old dag edge since old pred is
           * already scheduled:
           */
-         sched_node_add_dep(predicated, new_pred, 0);
+         sched_node_add_dep(ctx, predicated, new_pred, 0);
          di(predicated, "new predicate");
       }
    }
@@ -1029,7 +1034,8 @@ sched_node_init(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
 }
 
 static void
-sched_node_add_dep(struct ir3_instruction *instr, struct ir3_instruction *src,
+sched_node_add_dep(struct ir3_sched_ctx *ctx,
+                   struct ir3_instruction *instr, struct ir3_instruction *src,
                    int i)
 {
    /* don't consider dependencies in other blocks: */
@@ -1052,8 +1058,8 @@ sched_node_add_dep(struct ir3_instruction *instr, struct ir3_instruction *src,
    if (instr->opc == OPC_META_COLLECT)
       sn->collect = instr;
 
-   unsigned d_soft = ir3_delayslots(src, instr, i, true);
-   unsigned d = ir3_delayslots(src, instr, i, false);
+   unsigned d_soft = ir3_delayslots(ctx->compiler, src, instr, i, true);
+   unsigned d = ir3_delayslots(ctx->compiler, src, instr, i, false);
 
    /* delays from (ss) and (sy) are considered separately and more accurately in
     * the scheduling heuristic, so ignore it when calculating the ip of
@@ -1110,7 +1116,7 @@ is_output_only(struct ir3_instruction *instr)
 }
 
 static void
-sched_node_add_deps(struct ir3_instruction *instr)
+sched_node_add_deps(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
 {
    /* There's nothing to do for phi nodes, since they always go first. And
     * phi nodes can reference sources later in the same block, so handling
@@ -1123,7 +1129,7 @@ sched_node_add_deps(struct ir3_instruction *instr)
     * the DAG easily in a single pass.
     */
    foreach_ssa_src_n (src, i, instr) {
-      sched_node_add_dep(instr, src, i);
+      sched_node_add_dep(ctx, instr, src, i);
    }
 
    /* NOTE that all inputs must be scheduled before a kill, so
@@ -1172,7 +1178,7 @@ sched_dag_init(struct ir3_sched_ctx *ctx)
    dag_validate(ctx->dag, sched_dag_validate_cb, NULL);
 
    foreach_instr (instr, &ctx->unscheduled_list)
-      sched_node_add_deps(instr);
+      sched_node_add_deps(ctx, instr);
 
    dag_traverse_bottom_up(ctx->dag, sched_dag_max_delay_cb, NULL);
 }
@@ -1301,6 +1307,8 @@ int
 ir3_sched(struct ir3 *ir)
 {
    struct ir3_sched_ctx *ctx = rzalloc(NULL, struct ir3_sched_ctx);
+
+   ctx->compiler = ir->compiler;
 
    foreach_block (block, &ir->block_list) {
       foreach_instr (instr, &block->instr_list) {
