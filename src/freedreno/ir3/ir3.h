@@ -1886,9 +1886,11 @@ struct log_stream;
 void ir3_print_instr_stream(struct log_stream *stream, struct ir3_instruction *instr);
 
 /* delay calculation: */
-int ir3_delayslots(struct ir3_instruction *assigner,
+int ir3_delayslots(struct ir3_compiler *compiler,
+                   struct ir3_instruction *assigner,
                    struct ir3_instruction *consumer, unsigned n, bool soft);
-unsigned ir3_delayslots_with_repeat(struct ir3_instruction *assigner,
+unsigned ir3_delayslots_with_repeat(struct ir3_compiler *compiler,
+                                    struct ir3_instruction *assigner,
                                     struct ir3_instruction *consumer,
                                     unsigned assigner_n, unsigned consumer_n);
 unsigned ir3_delay_calc(struct ir3_block *block,
@@ -1903,7 +1905,31 @@ is_local_mem_load(struct ir3_instruction *instr)
       instr->opc == OPC_LDLW;
 }
 
-/* Does this instruction need (ss) to wait for its result? */
+/* Does this instruction use the scalar ALU?
+ *
+ * Note: scalar->scalar mov instructions (but NOT cov) were supported before the
+ * scalar ALU was supported, but they still required (ss) whereas on GPUs that
+ * have a scalar ALU they are executed on it and do not require (ss), so it's
+ * generally not safe to call this function except guarded behind
+ * has_scalar_alu.
+ */
+static inline bool
+is_scalar_alu(struct ir3_instruction *instr)
+{
+   /* MOVMSK seems to always need (ss) even with other scalar ALU instructions
+    */
+   return instr->opc != OPC_MOVMSK &&
+      instr->opc != OPC_SCAN_CLUSTERS_MACRO &&
+      instr->opc != OPC_SCAN_MACRO &&
+      is_alu(instr) && (instr->dsts[0]->flags & IR3_REG_SHARED) &&
+      /* moves from normal to shared seem to use a separate ALU as before and
+       * require a (ss) on dependent instructions.
+       */
+      ((instr->opc != OPC_MOV && !is_subgroup_cond_mov_macro(instr)) ||
+       (instr->srcs[0]->flags & (IR3_REG_SHARED | IR3_REG_IMMED | IR3_REG_CONST)));
+}
+
+/* Does this instruction sometimes need (ss) to wait for its result? */
 static inline bool
 is_ss_producer(struct ir3_instruction *instr)
 {
@@ -1911,7 +1937,20 @@ is_ss_producer(struct ir3_instruction *instr)
       if (dst->flags & IR3_REG_SHARED)
          return true;
    }
+
    return is_sfu(instr) || is_local_mem_load(instr);
+}
+
+static inline bool
+needs_ss(bool has_scalar_alu, struct ir3_instruction *producer,
+         struct ir3_instruction *consumer)
+{
+   if (has_scalar_alu && is_scalar_alu(producer) && is_scalar_alu(consumer) &&
+       (producer->dsts[0]->flags & IR3_REG_HALF) ==
+       (consumer->srcs[0]->flags & IR3_REG_HALF))
+      return false;
+
+   return is_ss_producer(producer);
 }
 
 /* The soft delay for approximating the cost of (ss). */

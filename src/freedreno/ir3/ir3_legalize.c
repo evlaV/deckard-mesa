@@ -56,7 +56,10 @@ struct ir3_legalize_ctx {
 
 struct ir3_legalize_state {
    regmask_t needs_ss;
+   regmask_t needs_ss_scalar_full; /* full scalar ALU producer -> ALU consumer */
+   regmask_t needs_ss_scalar_half; /* half scalar ALU producer -> ALU consumer */
    regmask_t needs_ss_war; /* write after read */
+   regmask_t needs_ss_scalar_war; /* scalar ALU write -> ALU write */
    regmask_t needs_sy;
    bool needs_ss_for_const;
 };
@@ -74,6 +77,9 @@ apply_ss(struct ir3_instruction *instr,
    instr->flags |= IR3_INSTR_SS;
    regmask_init(&state->needs_ss_war, mergedregs);
    regmask_init(&state->needs_ss, mergedregs);
+   regmask_init(&state->needs_ss_scalar_war, mergedregs);
+   regmask_init(&state->needs_ss_scalar_full, mergedregs);
+   regmask_init(&state->needs_ss_scalar_half, mergedregs);
    state->needs_ss_for_const = false;
 }
 
@@ -142,6 +148,14 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
       struct ir3_legalize_state *pstate = &pbd->state;
 
       regmask_or_shared(&state->needs_ss, &state->needs_ss, &pstate->needs_ss);
+      regmask_or_shared(&state->needs_ss_scalar_full,
+                        &state->needs_ss_scalar_full,
+                        &pstate->needs_ss_scalar_full);
+      regmask_or_shared(&state->needs_ss_scalar_half,
+                        &state->needs_ss_scalar_half,
+                        &pstate->needs_ss_scalar_half);
+      regmask_or_shared(&state->needs_ss_scalar_war, &state->needs_ss_scalar_war,
+                        &pstate->needs_ss_scalar_war);
    }
 
    unsigned input_count = 0;
@@ -217,6 +231,34 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
                last_input_needs_ss = false;
             }
 
+            /* There is a fast feedback path for scalar ALU instructions which
+             * only takes 1 cycle of latency, similar to the normal 3 cycle
+             * latency path for ALU instructions. For this fast path the
+             * producer and consumer must use the same register size (i.e. no
+             * writing a full register and then reading half of it or vice
+             * versa). If we don't hit this path, either because of a mismatched
+             * size or a read via the regular ALU, then the write latency is
+             * variable and we must use (ss) to wait for the scalar ALU. This is
+             * different from the fixed 6 cycle latency for mismatched vector
+             * ALU accesses.
+             */
+            if (is_scalar_alu(n)) {
+               /* Check if we have a mismatched size RaW dependency */
+               if (regmask_get((reg->flags & IR3_REG_HALF) ?
+                               &state->needs_ss_scalar_full :
+                               &state->needs_ss_scalar_half, reg)) {
+                  apply_ss(n, state, mergedregs);
+                  last_input_needs_ss = false;
+               }
+            } else {
+               /* check if we have a scalar -> vector RaW dependency */
+               if (regmask_get(&state->needs_ss_scalar_full, reg) ||
+                   regmask_get(&state->needs_ss_scalar_half, reg)) {
+                  apply_ss(n, state, mergedregs);
+                  last_input_needs_ss = false;
+               }
+            }
+
             if (regmask_get(&state->needs_sy, reg)) {
                apply_sy(n, state, mergedregs);
             }
@@ -229,7 +271,8 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
       }
 
       foreach_dst (reg, n) {
-         if (regmask_get(&state->needs_ss_war, reg)) {
+         if (regmask_get(&state->needs_ss_war, reg) ||
+             (!is_scalar_alu(n) && regmask_get(&state->needs_ss_scalar_war, reg))) {
             apply_ss(n, state, mergedregs);
             last_input_needs_ss = false;
          }
@@ -269,12 +312,20 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
          list_addtail(&n->node, &block->instr_list);
       }
 
-      if (is_sfu(n))
+      if (is_sfu(n) || n->opc == OPC_MOVMSK)
          regmask_set(&state->needs_ss, n->dsts[0]);
 
       foreach_dst (dst, n) {
-         if (dst->flags & IR3_REG_SHARED)
-            regmask_set(&state->needs_ss, dst);
+         if (dst->flags & IR3_REG_SHARED) {
+            if (block->shader->compiler->has_scalar_alu && is_scalar_alu(n)) {
+               if (dst->flags & IR3_REG_HALF)
+                  regmask_set(&state->needs_ss_scalar_half, dst);
+               else
+                  regmask_set(&state->needs_ss_scalar_full, dst);
+            } else {
+               regmask_set(&state->needs_ss, dst);
+            }
+         }
       }
 
       if (is_tex_or_prefetch(n)) {
@@ -311,8 +362,21 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
        * their src register(s):
        */
       if (is_tex(n) || is_mem(n) || is_ss_producer(n)) {
-         foreach_src (reg, n) {
-            regmask_set(&state->needs_ss_war, reg);
+         if (block->shader->compiler->has_scalar_alu && is_scalar_alu(n)) {
+            /* Scalar ALU also does not immediately read its source because it
+             * is not executed right away, but scalar ALU instructions are
+             * executed in-order so subsequent scalar ALU instructions don't
+             * need to wait for previous ones.
+             */
+            foreach_src (reg, n) {
+               if (reg->flags & IR3_REG_SHARED) {
+                  regmask_set(&state->needs_ss_scalar_war, reg);
+               }
+            }
+         } else {
+            foreach_src (reg, n) {
+               regmask_set(&state->needs_ss_war, reg);
+            }
          }
       }
 
