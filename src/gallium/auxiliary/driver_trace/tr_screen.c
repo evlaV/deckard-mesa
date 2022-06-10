@@ -343,21 +343,21 @@ trace_context_create_fence(struct pipe_context *_pipe, struct tc_unflushed_batch
 }
 
 static bool
-trace_context_is_resource_busy(struct pipe_screen *_screen,
+trace_context_is_resource_busy(struct pipe_context *_pipe,
                                struct pipe_resource *resource,
                                unsigned usage)
 {
-   struct trace_screen *tr_scr = trace_screen(_screen);
-   struct pipe_screen *screen = tr_scr->screen;
+   struct trace_context *tr_ctx = trace_context(_pipe);
+   struct pipe_context *pipe = tr_ctx->pipe;
    bool result;
 
-   trace_dump_call_begin("pipe_screen", "is_resource_busy");
+   trace_dump_call_begin("pipe_context", "is_resource_busy");
 
-   trace_dump_arg(ptr, screen);
+   trace_dump_arg(ptr, pipe);
    trace_dump_arg(ptr, resource);
    trace_dump_arg(uint, usage);
 
-   result = tr_scr->is_resource_busy(screen, resource, usage);
+   result = tr_ctx->is_resource_busy(pipe, resource, usage);
 
    trace_dump_ret(bool, result);
 
@@ -389,7 +389,7 @@ trace_context_create_threaded(struct pipe_screen *screen, struct pipe_context *p
    struct trace_context *tr_ctx = trace_context(ctx);
    tr_ctx->replace_buffer_storage = *replace_buffer;
    tr_ctx->create_fence = options->create_fence;
-   tr_scr->is_resource_busy = options->is_resource_busy;
+   tr_ctx->is_resource_busy = options->is_resource_busy;
    tr_ctx->threaded = true;
    *replace_buffer = trace_context_replace_buffer_storage;
    if (options->create_fence)

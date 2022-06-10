@@ -396,7 +396,7 @@ noop_create_fence(struct pipe_context *ctx,
    return (struct pipe_fence_handle*)f;
 }
 
-static bool noop_is_resource_busy(struct pipe_screen *screen,
+static bool noop_is_resource_busy(struct pipe_context *ctx,
                                   struct pipe_resource *resource,
                                   unsigned usage)
 {

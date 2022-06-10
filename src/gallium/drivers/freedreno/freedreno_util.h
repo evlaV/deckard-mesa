@@ -28,10 +28,13 @@
 #define FREEDRENO_UTIL_H_
 
 #include "common/freedreno_common.h"
-
+#ifdef TEST_GPU_DRIVER
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_drmif.h"
 #include "drm/freedreno_ringbuffer.h"
-
+#endif
 #include "util/format/u_formats.h"
 #include "pipe/p_state.h"
 #include "util/compiler.h"

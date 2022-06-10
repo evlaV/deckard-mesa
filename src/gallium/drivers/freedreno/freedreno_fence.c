@@ -33,6 +33,7 @@
 #include "freedreno_util.h"
 /* TODO: Use the interface drm/freedreno_drmif.h instead of calling directly */
 #include <xf86drm.h>
+#include <sys/mman.h>
 
 static bool
 fence_flush(struct pipe_context *pctx, struct pipe_fence_handle *fence,
@@ -112,8 +113,13 @@ fd_fence_destroy(struct pipe_fence_handle *fence)
 
    if (fence->submit_fence.use_fence_fd)
       close(fence->submit_fence.fence_fd);
+#ifndef TEST_GPU_DRIVER	  
    if (fence->syncobj)
       drmSyncobjDestroy(fd_device_fd(fence->screen->dev), fence->syncobj);
+#else
+   if (fence->submit_fence.rptr != &fence->submit_fence.rptr_storage)
+      munmap(fence->submit_fence.rptr, 0x1000);
+#endif
    fd_pipe_del(fence->pipe);
 
    FREE(fence);
@@ -150,7 +156,11 @@ fd_fence_finish(struct pipe_screen *pscreen, struct pipe_context *pctx,
       return ret == 0;
    }
 
+#ifndef TEST_GPU_DRIVER
    if (fd_pipe_wait_timeout(fence->pipe, &fence->submit_fence.fence, timeout))
+#else
+   if (fd_pipe_wait_timeout(fence->pipe, (struct fd_fence*) fence->submit_fence.rptr, timeout))
+#endif
       return false;
 
    return true;
@@ -158,7 +168,11 @@ fd_fence_finish(struct pipe_screen *pscreen, struct pipe_context *pctx,
 
 static struct pipe_fence_handle *
 fence_create(struct fd_context *ctx, struct fd_batch *batch, int fence_fd,
-             int syncobj)
+#ifndef TEST_GPU_DRIVER
+             uint32_t syncobj)
+#else
+             void *syncobj)
+#endif
 {
    struct pipe_fence_handle *fence;
 
@@ -176,8 +190,11 @@ fence_create(struct fd_context *ctx, struct fd_batch *batch, int fence_fd,
    fence->screen = ctx->screen;
    fence->submit_fence.fence_fd = fence_fd;
    fence->submit_fence.use_fence_fd = (fence_fd != -1);
+#ifndef TEST_GPU_DRIVER
    fence->syncobj = syncobj;
-
+#else
+   fence->submit_fence.rptr = syncobj ?: &fence->submit_fence.rptr_storage;
+#endif
    return fence;
 }
 
@@ -194,12 +211,18 @@ fd_create_fence_fd(struct pipe_context *pctx, struct pipe_fence_handle **pfence,
       break;
    case PIPE_FD_TYPE_SYNCOBJ: {
       int ret;
-      uint32_t syncobj;
 
       assert(ctx->screen->has_syncobj);
+#ifndef TEST_GPU_DRIVER
+      uint32_t syncobj;
       ret = drmSyncobjFDToHandle(fd_device_fd(ctx->screen->dev), fd, &syncobj);
       if (!ret)
          close(fd);
+#else
+      void *syncobj = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      assert(syncobj != MAP_FAILED);
+      close(fd);
+#endif
 
       *pfence = fence_create(fd_context(pctx), NULL, -1, syncobj);
       break;
@@ -208,6 +231,9 @@ fd_create_fence_fd(struct pipe_context *pctx, struct pipe_fence_handle **pfence,
       unreachable("Unhandled fence type");
    }
 }
+
+
+#define GPU_IOCTL_CREATE_FENCE _IO('S', 132) /* create fence from rptr value */
 
 void
 fd_fence_server_sync(struct pipe_context *pctx, struct pipe_fence_handle *fence)
@@ -224,6 +250,15 @@ fd_fence_server_sync(struct pipe_context *pctx, struct pipe_fence_handle *fence)
       return;
    }
 
+#ifdef TEST_GPU_DRIVER
+   if (fence->submit_fence.rptr != &fence->submit_fence.rptr_storage) {
+      uint64_t rptr = *(fence->submit_fence.rptr);
+      int fd = ioctl(fd_device_fd(ctx->screen->dev), GPU_IOCTL_CREATE_FENCE, *(fence->submit_fence.rptr));
+      assert(fd >= 0);
+      sync_accumulate("freedreno", &ctx->in_fence_fd, fd);
+   }
+#endif
+
    /* if not an external fence, then nothing more to do without preemption: */
    if (!fence->submit_fence.use_fence_fd)
       return;
@@ -239,9 +274,13 @@ fd_fence_server_signal(struct pipe_context *pctx,
 {
    struct fd_context *ctx = fd_context(pctx);
 
+#ifndef TEST_GPU_DRIVER
    if (fence->syncobj) {
       drmSyncobjSignal(fd_device_fd(ctx->screen->dev), &fence->syncobj, 1);
    }
+#else
+   *(fence->submit_fence.rptr) = 0; // 0 : always signaled
+#endif
 }
 
 int

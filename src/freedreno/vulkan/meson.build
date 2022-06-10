@@ -66,7 +66,12 @@ if with_xlib_lease
   tu_deps += [dep_xlib_xrandr]
 endif
 
-if with_freedreno_kgsl
+if with_testgpudriver
+  tu_flags += '-DTU_USE_KGSL'
+  # Even if libdrm is available we shouldn't use it in KGSL build
+  tu_flags += '-UHAVE_LIBDRM'
+  libtu_files += files('tu_gpu.c')
+elif with_freedreno_kgsl
   tu_flags += '-DTU_USE_KGSL'
   # Even if libdrm is available we shouldn't use it in KGSL build
   tu_flags += '-UHAVE_LIBDRM'

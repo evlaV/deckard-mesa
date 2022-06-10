@@ -28,8 +28,13 @@
 #define FREEDRENO_SCREEN_H_
 
 #include "common/freedreno_dev_info.h"
+#ifdef TEST_GPU_DRIVER
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_drmif.h"
 #include "drm/freedreno_ringbuffer.h"
+#endif
 #include "perfcntrs/freedreno_perfcntr.h"
 
 #include "pipe/p_screen.h"
