@@ -36,8 +36,16 @@
 #include <unistd.h>
 #include <xf86drm.h>
 
+#ifdef TEST_GPU_DRIVER
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_drmif.h"
 #include "drm/freedreno_ringbuffer.h"
+#endif
 
 #include "util/os_file.h"
 
@@ -195,6 +203,9 @@ flush_ring(void)
       return;
 
    struct fd_submit_fence fence = {};
+#ifdef TEST_GPU_DRIVER  
+    fence.rptr = &fence.rptr_storage;
+#endif
    util_queue_fence_init(&fence.ready);
 
    ret = fd_submit_flush(dev.submit, -1, &fence);
@@ -448,10 +459,12 @@ redraw_counter(WINDOW *win, int row, struct counter_group *group, int ctr,
     * units the counter is counting for, ie. if a320 has 2x
     * shader as a306 we might need to scale the result..
     */
+#ifndef TEST_GPU_DRIVER	
    if (strstr(group->label[ctr], "CYCLE") ||
        strstr(group->label[ctr], "BUSY") || strstr(group->label[ctr], "IDLE"))
       redraw_counter_value_cycles(win, group->current[ctr]);
    else
+#endif   
       redraw_counter_value_raw(win, group->current[ctr]);
 }
 

@@ -29,9 +29,11 @@
 #include "util/u_math.h"
 #include "util/u_memory.h"
 #include "util/u_string.h"
-
+#ifdef TEST_GPU_DRIVER
+#include "drm2/freedreno_drmif.h"
+#else
 #include "drm/freedreno_drmif.h"
-
+#endif
 #include "ir3_assembler.h"
 #include "ir3_compiler.h"
 #include "ir3_nir.h"
