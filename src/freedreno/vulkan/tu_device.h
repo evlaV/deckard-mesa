@@ -107,9 +107,13 @@ struct tu_physical_device
    mtx_t                 vma_mutex;
    struct util_vma_heap  vma;
 
+#ifdef TEST_GPU_DRIVER
+   void *map;
+#else
    struct vk_sync_type syncobj_type;
    struct vk_sync_timeline_type timeline_type;
    const struct vk_sync_type *sync_types[3];
+#endif
 };
 VK_DEFINE_HANDLE_CASTS(tu_physical_device, vk.base, VkPhysicalDevice,
                        VK_OBJECT_TYPE_PHYSICAL_DEVICE)
@@ -143,7 +147,11 @@ struct tu_queue
    struct tu_device *device;
 
    uint32_t msm_queue_id;
+#ifdef TEST_GPU_DRIVER
+   uint64_t rptr;
+#else
    int fence;
+#endif
 };
 VK_DEFINE_HANDLE_CASTS(tu_queue, vk.base, VkQueue, VK_OBJECT_TYPE_QUEUE)
 
@@ -230,9 +238,9 @@ struct tu_device
    } fiber_pvtmem_bo, wave_pvtmem_bo;
 
    struct tu_bo *global_bo;
-
+#ifndef TEST_GPU_DRIVER
    uint32_t implicit_sync_bo_count;
-
+#endif
    /* Device-global BO suballocator for reducing BO management overhead for
     * (read-only) pipeline state.  Synchronized by pipeline_mutex.
     */
@@ -261,6 +269,7 @@ struct tu_device
    BITSET_DECLARE(custom_border_color, TU_BORDER_COLOR_COUNT);
    mtx_t mutex;
 
+#ifndef TEST_GPU_DRIVER
    /* bo list for submits: */
    struct drm_msm_gem_submit_bo *bo_list;
    /* map bo handles to bo list index: */
@@ -289,7 +298,7 @@ struct tu_device
     * allocated on the device.
     */
    struct util_sparse_array bo_map;
-
+#endif
    /* Command streams to set pass index to a scratch reg */
    struct tu_cs *perfcntrs_pass_cs;
    struct tu_cs_entry *perfcntrs_pass_cs_entries;
@@ -419,11 +428,13 @@ tu_physical_device_init(struct tu_physical_device *device,
 uint64_t
 tu_device_ticks_to_ns(struct tu_device *dev, uint64_t ts);
 
+#ifndef TEST_GPU_DRIVER
 static inline struct tu_bo *
 tu_device_lookup_bo(struct tu_device *device, uint32_t handle)
 {
    return (struct tu_bo *) util_sparse_array_get(&device->bo_map, handle);
 }
+#endif
 
 struct u_trace_context *
 tu_device_get_u_trace(struct tu_device *device);

@@ -2009,6 +2009,11 @@ else
   pre_args += '-DCUSTOM_SHADER_REPLACEMENT'
 endif
 
+with_testgpudriver = get_option('testgpudriver')
+if with_testgpudriver
+  pre_args += '-DTEST_GPU_DRIVER'
+endif
+
 with_perfetto = get_option('perfetto')
 with_datasources = get_option('datasources')
 with_any_datasource = with_datasources.length() != 0
@@ -2195,6 +2200,10 @@ if with_gallium
   gallium_summary += {'HUD lm-sensors': dep_lmsensors.found()}
 endif
 summary(gallium_summary, section: 'Gallium', bool_yn: true, list_sep: ' ')
+
+testgpu_summary = {'Enabled': with_testgpudriver}
+summary(testgpu_summary, section: 'TESTGPU', bool_yn: true, list_sep: ' ')
+testgpu_summary = {'Enabled': with_perfetto}
 
 perfetto_summary = {'Enabled': with_perfetto}
 if with_perfetto and with_any_datasource

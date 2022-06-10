@@ -1047,12 +1047,21 @@ wsi_AcquireNextImageKHR(VkDevice _device,
                                                       pImageIndex);
 }
 
+#ifdef TEST_GPU_DRIVER
+void tu_gpu_signal_fence(VkFence fence);
+#endif
+
 static VkResult
 wsi_signal_semaphore_for_image(struct vk_device *device,
                                const struct wsi_swapchain *chain,
                                const struct wsi_image *image,
                                VkSemaphore _semaphore)
 {
+#ifdef TEST_GPU_DRIVER
+   tu_gpu_signal_fence((VkFence) _semaphore);
+   return VK_SUCCESS;
+#endif
+
    if (device->physical->supported_sync_types == NULL)
       return VK_SUCCESS;
 
@@ -1085,6 +1094,11 @@ wsi_signal_fence_for_image(struct vk_device *device,
                            const struct wsi_image *image,
                            VkFence _fence)
 {
+#ifdef TEST_GPU_DRIVER
+   tu_gpu_signal_fence((VkFence) _fence);
+   return VK_SUCCESS;
+#endif
+
    if (device->physical->supported_sync_types == NULL)
       return VK_SUCCESS;
 

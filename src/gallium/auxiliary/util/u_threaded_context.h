@@ -309,7 +309,7 @@ typedef void (*tc_replace_buffer_storage_func)(struct pipe_context *ctx,
                                                uint32_t delete_buffer_id);
 typedef struct pipe_fence_handle *(*tc_create_fence_func)(struct pipe_context *ctx,
                                                           struct tc_unflushed_batch_token *token);
-typedef bool (*tc_is_resource_busy)(struct pipe_screen *screen,
+typedef bool (*tc_is_resource_busy)(struct pipe_context *ctx,
                                     struct pipe_resource *resource,
                                     unsigned usage);
 

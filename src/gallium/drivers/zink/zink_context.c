@@ -4838,9 +4838,10 @@ zink_context_replace_buffer_storage(struct pipe_context *pctx, struct pipe_resou
 }
 
 static bool
-zink_context_is_resource_busy(struct pipe_screen *pscreen, struct pipe_resource *pres, unsigned usage)
+zink_context_is_resource_busy(struct pipe_context *pctx, struct pipe_resource *pres, unsigned usage)
 {
-   struct zink_screen *screen = zink_screen(pscreen);
+   struct zink_context *ctx = zink_context(pctx);
+   struct zink_screen *screen = zink_screen(ctx->base.screen);
    struct zink_resource *res = zink_resource(pres);
    uint32_t check_usage = 0;
    if (usage & PIPE_MAP_READ)

@@ -923,7 +923,7 @@ tc_is_buffer_busy(struct threaded_context *tc, struct threaded_resource *tbuf,
 
    /* The buffer isn't referenced by any unflushed batch: we can safely ask to the driver whether
     * this buffer is busy or not. */
-   return tc->options.is_resource_busy(tc->pipe->screen, tbuf->latest, map_usage);
+   return tc->options.is_resource_busy(tc->pipe, tbuf->latest, map_usage);
 }
 
 /**
