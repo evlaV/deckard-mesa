@@ -605,7 +605,8 @@ tu_WaitSemaphores(VkDevice _device, const VkSemaphoreWaitInfo* info, uint64_t ti
 {
    TU_FROM_HANDLE(tu_device, device, _device);
    /* TODO: support wait any */
-   assert(info->semaphoreCount == 1 || !(info->flags & VK_SEMAPHORE_WAIT_ANY_BIT));
+   printf("info->semaphoreCount=%d\n", info->semaphoreCount);
+   //assert(info->semaphoreCount == 1 || !(info->flags & VK_SEMAPHORE_WAIT_ANY_BIT));
 
    uint64_t rptr_max[2] = {};
 
