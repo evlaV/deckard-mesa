@@ -51,12 +51,13 @@ struct tu_bo
    uint64_t iova;
    void *map;
    int32_t refcnt;
-
+#ifndef TEST_GPU_DRIVER
 #ifndef TU_USE_KGSL
    uint32_t bo_list_idx;
 #endif
 
    bool implicit_sync : 1;
+#endif
 };
 
 struct tu_timeline_sync {

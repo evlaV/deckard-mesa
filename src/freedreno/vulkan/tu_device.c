@@ -168,9 +168,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_shader_non_semantic_info = true,
       .KHR_synchronization2 = true,
       .KHR_dynamic_rendering = true,
-#ifndef TU_USE_KGSL
       .KHR_timeline_semaphore = true,
-#endif
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
       .EXT_display_control = true,
       .KHR_present_id = true,
@@ -300,7 +298,9 @@ tu_physical_device_init(struct tu_physical_device *device,
    if (result != VK_SUCCESS)
       goto fail_free_name;
 
+#ifndef TEST_GPU_DRIVER
    device->vk.supported_sync_types = device->sync_types;
+#endif
 
 #if TU_HAS_SURFACE
    result = tu_wsi_init(device);
@@ -327,6 +327,9 @@ fail_free_name:
    return result;
 }
 
+#include <sys/mman.h>
+#define GPU_MEM_SIZE (3ul<<30) // 3GB
+
 static void
 tu_physical_device_finish(struct tu_physical_device *device)
 {
@@ -337,6 +340,14 @@ tu_physical_device_finish(struct tu_physical_device *device)
    close(device->local_fd);
    if (device->master_fd != -1)
       close(device->master_fd);
+
+#ifdef TEST_GPU_DRIVER
+#if __SIZEOF_POINTER__ == 8
+   munmap(device->map, GPU_MEM_SIZE);
+#else
+   munmap(device->map, 0x20000);
+#endif
+#endif
 
    vk_free(&device->instance->vk.alloc, (void *)device->name);
 
@@ -364,6 +375,9 @@ static const struct debug_control tu_debug_options[] = {
    { "unaligned_store", TU_DEBUG_UNALIGNED_STORE },
    { "log_skip_gmem_ops", TU_DEBUG_LOG_SKIP_GMEM_OPS },
    { "dynamic", TU_DEBUG_DYNAMIC },
+#ifdef TEST_GPU_DRIVER
+   { "preempt", TU_DEBUG_PREEMPT },
+#endif
    { NULL, 0 }
 };
 
@@ -1498,7 +1512,11 @@ tu_queue_init(struct tu_device *device,
       return vk_startup_errorf(device->instance, VK_ERROR_INITIALIZATION_FAILED,
                                "submitqueue create failed");
 
+#ifdef TEST_GPU_DRIVER
+   queue->rptr = 0;
+#else
    queue->fence = -1;
+#endif
 
    return VK_SUCCESS;
 }
@@ -1507,8 +1525,10 @@ static void
 tu_queue_finish(struct tu_queue *queue)
 {
    vk_queue_finish(&queue->vk);
+#ifndef TEST_GPU_DRIVER   
    if (queue->fence >= 0)
       close(queue->fence);
+#endif
    tu_drm_submitqueue_close(queue->device, queue->msm_queue_id);
 }
 
@@ -1833,10 +1853,12 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    device->fd = physical_device->local_fd;
    device->vk.check_status = tu_device_check_status;
 
+#ifndef TEST_GPU_DRIVER
    mtx_init(&device->bo_mutex, mtx_plain);
+   u_rwlock_init(&device->dma_bo_lock);
+#endif
    mtx_init(&device->pipeline_mutex, mtx_plain);
    mtx_init(&device->autotune_mutex, mtx_plain);
-   u_rwlock_init(&device->dma_bo_lock);
    pthread_mutex_init(&device->submit_mutex, NULL);
 
 #ifndef TU_USE_KGSL
@@ -1884,8 +1906,10 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       goto fail_queues;
    }
 
+#ifndef TEST_GPU_DRIVER
    /* Initialize sparse array for refcounting imported BOs */
    util_sparse_array_init(&device->bo_map, sizeof(struct tu_bo), 512);
+#endif
 
    /* initial sizes, these will increase if there is overflow */
    device->vsc_draw_strm_pitch = 0x1000 + VSC_PAD;
@@ -1914,6 +1938,7 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    }
 
    struct tu6_global *global = device->global_bo->map;
+   memset(global, 0, global_size);
    tu_init_clear_blit_shaders(device);
    global->predicate = 0;
    global->vtx_stats_query_not_running = 1;
@@ -2053,10 +2078,14 @@ fail_dynamic_rendering:
    tu_destroy_clear_blit_shaders(device);
 fail_global_bo_map:
    tu_bo_finish(device, device->global_bo);
+#ifndef TEST_GPU_DRIVER
    vk_free(&device->vk.alloc, device->bo_list);
+#endif
 fail_global_bo:
    ir3_compiler_destroy(device->compiler);
+#ifndef TEST_GPU_DRIVER
    util_sparse_array_finish(&device->bo_map);
+#endif
 
 fail_queues:
    for (unsigned i = 0; i < TU_MAX_QUEUE_FAMILIES; i++) {
@@ -2066,7 +2095,9 @@ fail_queues:
          vk_free(&device->vk.alloc, device->queues[i]);
    }
 
+#ifndef TEST_GPU_DRIVER
    u_rwlock_destroy(&device->dma_bo_lock);
+#endif
    vk_device_finish(&device->vk);
    vk_free(&device->vk.alloc, device);
    return result;
@@ -2115,11 +2146,13 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
    tu_bo_suballocator_finish(&device->pipeline_suballoc);
    tu_bo_suballocator_finish(&device->autotune_suballoc);
 
+#ifndef TEST_GPU_DRIVER
    util_sparse_array_finish(&device->bo_map);
    u_rwlock_destroy(&device->dma_bo_lock);
+   vk_free(&device->vk.alloc, device->bo_list);
+#endif
 
    pthread_cond_destroy(&device->timeline_cond);
-   vk_free(&device->vk.alloc, device->bo_list);
    vk_device_finish(&device->vk);
    vk_free(&device->vk.alloc, device);
 }
@@ -2179,7 +2212,7 @@ tu_EnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
 }
 
 /* Only used for kgsl since drm started using common implementation */
-#ifdef TU_USE_KGSL
+#if 0
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_QueueWaitIdle(VkQueue _queue)
 {
@@ -2306,7 +2339,9 @@ tu_AllocateMemory(VkDevice _device,
                                  pAllocateInfo->allocationSize, fd_info->fd);
       if (result == VK_SUCCESS) {
          /* take ownership and close the fd */
-         close(fd_info->fd);
+#ifndef TEST_GPU_DRIVER
+         close(fd_info->fd); // "gpu" backend keeps fd open as reference
+#endif
       }
    } else {
       result =
@@ -2330,6 +2365,7 @@ tu_AllocateMemory(VkDevice _device,
       return result;
    }
 
+#ifndef TEST_GPU_DRIVER
    /* Track in the device whether our BO list contains any implicit-sync BOs, so
     * we can suppress implicit sync on non-WSI usage.
     */
@@ -2343,6 +2379,7 @@ tu_AllocateMemory(VkDevice _device,
       }
       mtx_unlock(&device->bo_mutex);
    }
+#endif
 
    *pMem = tu_device_memory_to_handle(mem);
 
