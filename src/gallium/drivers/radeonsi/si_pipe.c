@@ -914,7 +914,7 @@ static struct pipe_context *si_pipe_create_context(struct pipe_screen *screen, v
                               &(struct threaded_context_options){
                                  .create_fence = sscreen->info.is_amdgpu ?
                                        si_create_fence : NULL,
-                                 .is_resource_busy = si_is_resource_busy,
+                                 // .is_resource_busy = si_is_resource_busy, (break radeonsi to keep it compiling)
                                  .driver_calls_flush_notify = true,
                                  .unsynchronized_create_fence_fd = true,
                               },

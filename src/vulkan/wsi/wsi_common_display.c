@@ -2372,6 +2372,17 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
    image->flip_sequence = ++chain->flip_sequence;
    image->state = WSI_IMAGE_QUEUED;
 
+#ifdef TEST_GPU_DRIVER
+   if (image->fence_fd >= 0)
+      close(image->fence_fd);
+   result = chain->base.wsi->GetFenceFdKHR(drv_chain->device, &(VkFenceGetFdInfoKHR) {
+      .sType = VK_STRUCTURE_TYPE_FENCE_GET_FD_INFO_KHR,
+      .fence = drv_chain->fences[image_index],
+      .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+   }, &image->fence_fd);
+   assert(result == VK_SUCCESS);
+#endif
+
    result = _wsi_display_queue_next(drv_chain);
    if (result != VK_SUCCESS)
       chain->status = result;

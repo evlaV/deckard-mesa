@@ -328,15 +328,16 @@ translate_usage(unsigned usage)
 }
 
 bool
-fd_resource_busy(struct pipe_screen *pscreen, struct pipe_resource *prsc,
+fd_resource_busy(struct pipe_context *pctx, struct pipe_resource *prsc,
                  unsigned usage)
 {
+   struct fd_context *ctx = fd_context(pctx);
    struct fd_resource *rsc = fd_resource(prsc);
 
    if (pending(rsc, !!(usage & PIPE_MAP_WRITE)))
       return true;
 
-   if (resource_busy(rsc, translate_usage(usage)))
+   if (resource_busy(rsc, ctx->pipe, translate_usage(usage)))
       return true;
 
    return false;
@@ -743,12 +744,12 @@ fd_resource_transfer_unmap(struct pipe_context *pctx,
 }
 
 static void
-invalidate_resource(struct fd_resource *rsc, unsigned usage) assert_dt
+invalidate_resource(struct fd_resource *rsc, struct fd_pipe *pipe, unsigned usage) assert_dt
 {
    bool needs_flush = pending(rsc, !!(usage & PIPE_MAP_WRITE));
    unsigned op = translate_usage(usage);
 
-   if (needs_flush || resource_busy(rsc, op)) {
+   if (needs_flush || resource_busy(rsc, pipe, op)) {
       rebind_resource(rsc);
       realloc_bo(rsc, fd_bo_size(rsc->bo));
    } else {
@@ -878,7 +879,7 @@ resource_transfer_map(struct pipe_context *pctx, struct pipe_resource *prsc,
    }
 
    if (usage & PIPE_MAP_DISCARD_WHOLE_RESOURCE) {
-      invalidate_resource(rsc, usage);
+      invalidate_resource(rsc, ctx->pipe, usage);
    } else {
       unsigned op = translate_usage(usage);
       bool needs_flush = pending(rsc, !!(usage & PIPE_MAP_WRITE));
@@ -886,7 +887,7 @@ resource_transfer_map(struct pipe_context *pctx, struct pipe_resource *prsc,
       /* If the GPU is writing to the resource, or if it is reading from the
        * resource and we're trying to write to it, flush the renders.
        */
-      bool busy = needs_flush || resource_busy(rsc, op);
+      bool busy = needs_flush || resource_busy(rsc, ctx->pipe, op);
 
       /* if we need to flush/stall, see if we can make a shadow buffer
        * to avoid this:
@@ -1523,7 +1524,7 @@ fd_invalidate_resource(struct pipe_context *pctx,
    if (prsc->target == PIPE_BUFFER) {
       /* Handle the glInvalidateBufferData() case:
        */
-      invalidate_resource(rsc, PIPE_MAP_READ | PIPE_MAP_WRITE);
+      invalidate_resource(rsc, ctx->pipe, PIPE_MAP_READ | PIPE_MAP_WRITE);
    } else if (rsc->track->write_batch) {
       /* Handle the glInvalidateFramebuffer() case, telling us that
        * we can skip resolve.

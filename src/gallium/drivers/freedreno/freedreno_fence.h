@@ -30,7 +30,11 @@
 #include "pipe/p_context.h"
 #include "util/u_queue.h"
 
+#ifdef TEST_GPU_DRIVER
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_ringbuffer.h"
+#endif
 
 struct pipe_fence_handle {
    struct pipe_reference reference;
@@ -74,7 +78,9 @@ struct pipe_fence_handle {
    struct fd_pipe *pipe;
    struct fd_screen *screen;
    struct fd_submit_fence submit_fence;
+#ifndef TEST_GPU_DRIVER
    uint32_t syncobj;
+#endif
 };
 
 void fd_fence_repopulate(struct pipe_fence_handle *fence,
