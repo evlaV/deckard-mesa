@@ -98,7 +98,8 @@ static inline void
 vk_object_base_assert_valid(ASSERTED struct vk_object_base *base,
                             ASSERTED VkObjectType obj_type)
 {
-   assert(base == NULL || base->type == obj_type);
+   assert(base == NULL || base->type == obj_type ||
+      (obj_type == VK_OBJECT_TYPE_FENCE && base->type == VK_OBJECT_TYPE_SEMAPHORE));
 }
 
 static inline struct vk_object_base *
