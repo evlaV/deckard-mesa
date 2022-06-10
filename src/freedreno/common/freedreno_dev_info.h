@@ -25,6 +25,11 @@
 #ifndef FREEDRENO_DEVICE_INFO_H
 #define FREEDRENO_DEVICE_INFO_H
 
+#ifdef TEST_GPU_DRIVER
+//note limited to 4GB for 32bit support, and must match value in kernel
+#define GPU_MEM_SIZE (3ul<<30) // 3GB
+#endif
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
