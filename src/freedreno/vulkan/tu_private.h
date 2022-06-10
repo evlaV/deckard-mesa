@@ -240,9 +240,13 @@ struct tu_physical_device
 
    struct tu_memory_heap heap;
 
+#ifdef TEST_GPU_DRIVER
+   void *map;
+#else
    struct vk_sync_type syncobj_type;
    struct vk_sync_timeline_type timeline_type;
    const struct vk_sync_type *sync_types[3];
+#endif
 };
 
 enum tu_debug_flags
@@ -266,6 +270,9 @@ enum tu_debug_flags
    TU_DEBUG_LOG_SKIP_GMEM_OPS = 1 << 17,
    TU_DEBUG_PERF = 1 << 18,
    TU_DEBUG_NOLRZFC = 1 << 19,
+#ifdef TEST_GPU_DRIVER
+   TU_DEBUG_PREEMPT = 1 << 20,
+#endif
 };
 
 struct tu_instance
@@ -366,7 +373,11 @@ struct tu_queue
    struct tu_device *device;
 
    uint32_t msm_queue_id;
+#ifdef TEST_GPU_DRIVER
+   uint64_t rptr;
+#else
    int fence;
+#endif
 };
 
 struct tu_bo
@@ -376,12 +387,14 @@ struct tu_bo
    uint64_t iova;
    void *map;
    int32_t refcnt;
+#ifndef TEST_GPU_DRIVER
 
 #ifndef TU_USE_KGSL
    uint32_t bo_list_idx;
 #endif
 
    bool implicit_sync : 1;
+#endif
 };
 
 /* externally-synchronized BO suballocator. */
@@ -533,7 +546,9 @@ struct tu_device
 
    struct tu_bo *global_bo;
 
+#ifndef TEST_GPU_DRIVER
    uint32_t implicit_sync_bo_count;
+#endif
 
    /* Device-global BO suballocator for reducing BO management overhead for
     * (read-only) pipeline state.  Synchronized by pipeline_mutex.
@@ -563,6 +578,7 @@ struct tu_device
    BITSET_DECLARE(custom_border_color, TU_BORDER_COLOR_COUNT);
    mtx_t mutex;
 
+#ifndef TEST_GPU_DRIVER
    /* bo list for submits: */
    struct drm_msm_gem_submit_bo *bo_list;
    /* map bo handles to bo list index: */
@@ -588,6 +604,7 @@ struct tu_device
     * allocated on the device.
     */
    struct util_sparse_array bo_map;
+#endif
 
    /* Command streams to set pass index to a scratch reg */
    struct tu_cs *perfcntrs_pass_cs;
@@ -651,11 +668,13 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo);
 VkResult
 tu_bo_map(struct tu_device *dev, struct tu_bo *bo);
 
+#ifndef TEST_GPU_DRIVER
 static inline struct tu_bo *
 tu_device_lookup_bo(struct tu_device *device, uint32_t handle)
 {
    return (struct tu_bo *) util_sparse_array_get(&device->bo_map, handle);
 }
+#endif
 
 static inline struct tu_bo *
 tu_bo_get_ref(struct tu_bo *bo)

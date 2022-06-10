@@ -2166,6 +2166,11 @@ else
   pre_args += '-DCUSTOM_SHADER_REPLACEMENT'
 endif
 
+with_testgpudriver = get_option('testgpudriver')
+if with_testgpudriver
+  pre_args += '-DTEST_GPU_DRIVER'
+endif
+
 with_perfetto = get_option('perfetto')
 with_datasources = get_option('datasources')
 with_any_datasource = with_datasources.length() != 0
@@ -2367,6 +2372,7 @@ if with_any_datasource
   lines += 'Perfetto ds:     ' + ' '.join(with_datasources)
 endif
 
+lines += 'Test GPU Driver:        ' + (with_testgpudriver ? 'yes' : 'no')
 
 indent = '        '
 summary = indent + ('\n' + indent).join(lines)
