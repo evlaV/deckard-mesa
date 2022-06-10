@@ -106,7 +106,8 @@ struct fd_submit_fence {
     */
    struct util_queue_fence ready;
 
-   struct fd_fence fence;
+   uint64_t *rptr;
+   uint64_t rptr_storage;
 
    /**
     * Optional dma_fence fd, returned by submit if use_fence_fd is true

@@ -78,6 +78,8 @@ fd_submit_ref(struct fd_submit *submit)
    return submit;
 }
 
+#include "util/libsync.h"
+
 int
 fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
                 struct fd_submit_fence *out_fence)
@@ -89,7 +91,11 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
       .start = cmds,
    };
 
-   assert(in_fence_fd < 0);
+   // block until its possible to submit (TODO: submit defer mechanism instead)
+   if (in_fence_fd >= 0) {
+      int ret = sync_wait(in_fence_fd, -1);
+      assert(ret == 0);
+   }
 
    assert(submit->rptr == 0);
 
@@ -113,7 +119,7 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
    submit->rptr = ret;
 
    if (out_fence) {
-      out_fence->fence.rptr = ret;
+      *(out_fence->rptr) = ret;
       if (out_fence->use_fence_fd) {
          out_fence->fence_fd = ioctl(submit->pipe->dev->fd, GPU_IOCTL_CREATE_FENCE, ret);
          assert(out_fence->fence_fd >= 0);
