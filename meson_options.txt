@@ -516,3 +516,9 @@ option(
   value : 'auto',
   description : 'Build custom xmlconfig (driconf) support. If disabled, the default driconf file is hardcoded into Mesa. Requires expat.'
 )
+option(
+  'testgpudriver',
+  type : 'boolean',
+  value : false,
+  description : 'Enable using test gpu driver'
+)

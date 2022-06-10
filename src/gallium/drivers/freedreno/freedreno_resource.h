@@ -204,9 +204,9 @@ pending(struct fd_resource *rsc, bool write)
 }
 
 static inline bool
-resource_busy(struct fd_resource *rsc, unsigned op)
+resource_busy(struct fd_resource *rsc, struct fd_pipe *pipe, unsigned op)
 {
-   return fd_bo_cpu_prep(rsc->bo, NULL, op | FD_BO_PREP_NOSYNC) != 0;
+   return fd_bo_cpu_prep(rsc->bo, pipe, op | FD_BO_PREP_NOSYNC) != 0;
 }
 
 int __fd_resource_wait(struct fd_context *ctx, struct fd_resource *rsc,
@@ -342,7 +342,7 @@ void fd_replace_buffer_storage(struct pipe_context *ctx,
                                unsigned num_rebinds,
                                uint32_t rebind_mask,
                                uint32_t delete_buffer_id) in_dt;
-bool fd_resource_busy(struct pipe_screen *pscreen, struct pipe_resource *prsc,
+bool fd_resource_busy(struct pipe_context *pctx, struct pipe_resource *prsc,
                       unsigned usage);
 
 void fd_resource_uncompress(struct fd_context *ctx,
