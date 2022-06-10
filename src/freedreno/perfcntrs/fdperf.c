@@ -35,8 +35,16 @@
 #include <time.h>
 #include <xf86drm.h>
 
+#ifdef TEST_GPU_DRIVER
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "drm2/freedreno_drmif.h"
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_drmif.h"
 #include "drm/freedreno_ringbuffer.h"
+#endif
 
 #include "util/os_file.h"
 
@@ -119,11 +127,15 @@ static void
 find_device(void)
 {
    int ret, fd;
-
+#ifdef TEST_GPU_DRIVER
+   fd = open("/dev/gpu", O_RDWR | O_CLOEXEC);
+   if (fd < 0)
+      err(1, "could not open gpu device");
+#else
    fd = drmOpenWithType("msm", NULL, DRM_NODE_RENDER);
    if (fd < 0)
       err(1, "could not open drm device");
-
+#endif
    dev.dev = fd_device_new(fd);
    dev.pipe = fd_pipe_new(dev.dev, FD_PIPE_3D);
 
@@ -144,7 +156,11 @@ find_device(void)
     * dt bindings vs upstream bindings:
     */
    ret = fd_pipe_get_param(dev.pipe, FD_MAX_FREQ, &val);
+#ifdef TEST_GPU_DRIVER   
+   if (ret || 1) {
+#else
    if (ret) {
+#endif   
       printf("falling back to parsing DT bindings for freq\n");
       if (!fd_dt_find_freqs(&dev.min_freq, &dev.max_freq))
          err(1, "could not find GPU freqs");
@@ -429,10 +445,12 @@ redraw_counter(WINDOW *win, int row, struct counter_group *group, int ctr,
     * units the counter is counting for, ie. if a320 has 2x
     * shader as a306 we might need to scale the result..
     */
+#ifndef TEST_GPU_DRIVER	
    if (strstr(group->label[ctr], "CYCLE") ||
        strstr(group->label[ctr], "BUSY") || strstr(group->label[ctr], "IDLE"))
       redraw_counter_value_cycles(win, group->current[ctr]);
    else
+#endif   
       redraw_counter_value_raw(win, group->current[ctr]);
 }
 

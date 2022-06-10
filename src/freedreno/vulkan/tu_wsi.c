@@ -232,16 +232,21 @@ tu_AcquireNextImage2KHR(VkDevice _device,
 {
    EventDurationStart(ctx1,"[MESA] tu_AcquireNextImage2KHR");
    TU_FROM_HANDLE(tu_device, device, _device);
+#ifndef TEST_GPU_DRIVER   
    TU_FROM_HANDLE(tu_syncobj, fence, pAcquireInfo->fence);
    TU_FROM_HANDLE(tu_syncobj, semaphore, pAcquireInfo->semaphore);
-
+#endif
    struct tu_physical_device *pdevice = device->physical_device;
 
    VkResult result = wsi_common_acquire_next_image2(
       &pdevice->wsi_device, _device, pAcquireInfo, pImageIndex);
 
    /* signal fence/semaphore - image is available immediately */
+#ifdef TEST_GPU_DRIVER
+   tu_signal_fences(device, pAcquireInfo->fence, pAcquireInfo->semaphore);   
+#else
    tu_signal_fences(device, fence, semaphore);
+#endif
    EventDurationStop(ctx1);
    return result;
 }

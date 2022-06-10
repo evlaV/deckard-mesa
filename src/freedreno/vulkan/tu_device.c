@@ -159,9 +159,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_uniform_buffer_standard_layout = true,
       .KHR_variable_pointers = true,
       .KHR_vulkan_memory_model = true,
-#ifndef TU_USE_KGSL
       .KHR_timeline_semaphore = true,
-#endif
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
       .EXT_display_control = true,
       .KHR_present_id = true,
@@ -296,6 +294,9 @@ static const struct debug_control tu_debug_options[] = {
    { "perfc", TU_DEBUG_PERFC },
    { "flushall", TU_DEBUG_FLUSHALL },
    { "syncdraw", TU_DEBUG_SYNCDRAW },
+#ifdef TEST_GPU_DRIVER
+   { "preempt", TU_DEBUG_PREEMPT },
+#endif
    { NULL, 0 }
 };
 
@@ -1242,7 +1243,11 @@ tu_queue_init(struct tu_device *device,
       return vk_startup_errorf(device->instance, VK_ERROR_INITIALIZATION_FAILED,
                                "submitqueue create failed");
 
+#ifdef TEST_GPU_DRIVER
+   queue->rptr = 0;
+#else
    queue->fence = -1;
+#endif
 
    return VK_SUCCESS;
 }
@@ -1251,8 +1256,10 @@ static void
 tu_queue_finish(struct tu_queue *queue)
 {
    vk_object_base_finish(&queue->base);
+#ifndef TEST_GPU_DRIVER   
    if (queue->fence >= 0)
       close(queue->fence);
+#endif
    tu_drm_submitqueue_close(queue->device, queue->msm_queue_id);
 }
 
@@ -1848,6 +1855,7 @@ tu_GetDeviceQueue2(VkDevice _device,
    *pQueue = tu_queue_to_handle(queue);
 }
 
+#ifndef TEST_GPU_DRIVER
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_QueueWaitIdle(VkQueue _queue)
 {
@@ -1886,6 +1894,7 @@ tu_QueueWaitIdle(VkQueue _queue)
    queue->fence = -1;
    return VK_SUCCESS;
 }
+#endif
 
 VKAPI_ATTR VkResult VKAPI_CALL
 tu_DeviceWaitIdle(VkDevice _device)
@@ -1986,7 +1995,9 @@ tu_AllocateMemory(VkDevice _device,
                                  pAllocateInfo->allocationSize, fd_info->fd);
       if (result == VK_SUCCESS) {
          /* take ownership and close the fd */
-         close(fd_info->fd);
+#ifndef TEST_GPU_DRIVER
+         close(fd_info->fd); // "gpu" backend keeps fd open as reference
+#endif
       }
    } else {
       result =

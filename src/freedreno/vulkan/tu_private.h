@@ -223,6 +223,9 @@ struct tu_physical_device
    struct disk_cache *disk_cache;
 
    struct tu_memory_heap heap;
+#ifdef TEST_GPU_DRIVER
+   void *map;
+#endif   
 };
 
 enum tu_debug_flags
@@ -238,6 +241,9 @@ enum tu_debug_flags
    TU_DEBUG_PERFC = 1 << 9,
    TU_DEBUG_FLUSHALL = 1 << 10,
    TU_DEBUG_SYNCDRAW = 1 << 11,
+#ifdef TEST_GPU_DRIVER   
+   TU_DEBUG_PREEMPT = 1 << 14,
+#endif
 };
 
 struct tu_instance
@@ -305,10 +311,17 @@ struct tu_queue
    VkDeviceQueueCreateFlags flags;
 
    uint32_t msm_queue_id;
+#ifdef TEST_GPU_DRIVER   
+   /* Queue containing deferred submits */
+   struct list_head queued_submits;
+
+   uint64_t rptr;
+#else
    int fence;
 
    /* Queue containing deferred submits */
    struct list_head queued_submits;
+#endif
 };
 
 struct tu_bo
@@ -1730,8 +1743,13 @@ tu_drm_submitqueue_new(const struct tu_device *dev,
 void
 tu_drm_submitqueue_close(const struct tu_device *dev, uint32_t queue_id);
 
+#ifdef TEST_GPU_DRIVER
+int
+tu_signal_fences(struct tu_device *device, VkFence fence, VkSemaphore semaphore);
+#else
 int
 tu_signal_fences(struct tu_device *device, struct tu_syncobj *fence1, struct tu_syncobj *fence2);
+#endif
 
 int
 tu_syncobj_to_fd(struct tu_device *device, struct tu_syncobj *sync);
