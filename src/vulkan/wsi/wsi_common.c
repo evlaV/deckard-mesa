@@ -121,6 +121,7 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(WaitForFences);
    WSI_GET_CB(MapMemory);
    WSI_GET_CB(UnmapMemory);
+   WSI_GET_CB(GetFenceFdKHR);
 #undef WSI_GET_CB
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
