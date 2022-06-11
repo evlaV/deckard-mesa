@@ -106,6 +106,7 @@ enum plane_property {
    SRC_H,
    FB_ID,
    rotation,
+   IN_FENCE_FD,
    PLANE_PROPERTY_MAX,
 };
 
@@ -214,6 +215,7 @@ find_properties(struct wsi_display_connector *connector, uint32_t type, uint32_t
          PROPERTY(SRC_W);
          PROPERTY(SRC_H);
          PROPERTY(rotation);
+         PROPERTY(IN_FENCE_FD);
          break;
       }
 #undef PROPERTY
@@ -254,6 +256,7 @@ struct wsi_display_image {
    uint32_t                     buffer[4];
    uint64_t                     flip_sequence;
    uint64_t                     present_id;
+   int fence_fd;
 };
 
 struct wsi_display_swapchain {
@@ -1292,6 +1295,7 @@ wsi_display_image_init(VkDevice device_h,
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
+   image->fence_fd = -1;
 
    int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
@@ -1330,6 +1334,8 @@ wsi_display_image_finish(struct wsi_swapchain *drv_chain,
       (struct wsi_display_swapchain *) drv_chain;
    struct wsi_display *wsi = chain->wsi;
 
+   if (image->fence_fd >= 0)
+      close(image->fence_fd);
    drmModeRmFB(wsi->fd, image->fb_id);
    for (unsigned int i = 0; i < image->base.num_planes; i++)
       wsi_display_destroy_buffer(wsi, image->buffer[i]);
@@ -2209,6 +2215,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], dst_w);
       drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], dst_h);
       drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
+      drmModeAtomicAddProperty(req, plane_id, prop[IN_FENCE_FD], image->fence_fd);
    }
 
    ret = drmModeAtomicCommit(fd, req, flags, image);
@@ -2373,9 +2380,6 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
    image->flip_sequence = ++chain->flip_sequence;
    image->state = WSI_IMAGE_QUEUED;
 
-#ifdef TEST_GPU_DRIVER
-#if 0
-//disable since this doesnt work with latest mesa
    if (image->fence_fd >= 0)
       close(image->fence_fd);
    result = chain->base.wsi->GetFenceFdKHR(drv_chain->device, &(VkFenceGetFdInfoKHR) {
@@ -2384,8 +2388,6 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
       .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
    }, &image->fence_fd);
    assert(result == VK_SUCCESS);
-#endif   
-#endif
 
    result = _wsi_display_queue_next(drv_chain);
    if (result != VK_SUCCESS)
@@ -2541,6 +2543,7 @@ wsi_display_surface_create_swapchain(
       }
    }
 
+   chain->base.fences_reset = 1;
    *swapchain_out = &chain->base;
 
    return VK_SUCCESS;

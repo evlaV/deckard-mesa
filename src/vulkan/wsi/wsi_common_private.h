@@ -150,6 +150,7 @@ struct wsi_swapchain {
    VkDevice device;
    VkAllocationCallbacks alloc;
    VkFence* fences;
+   bool fences_reset;
    VkPresentModeKHR present_mode;
    VkSemaphore present_id_timeline;
 

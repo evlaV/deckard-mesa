@@ -180,6 +180,7 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(UnmapMemory);
    if (wsi->khr_present_wait)
       WSI_GET_CB(WaitSemaphoresKHR);
+   WSI_GET_CB(GetFenceFdKHR);
 #undef WSI_GET_CB
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
@@ -1250,6 +1251,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             if (result != VK_SUCCESS)
                goto fail_present;
          }
+      } else if (swapchain->fences_reset) {
+         // KHR_display waits for and resets fences already
+         goto skip_fence_reset;
       } else {
          MESA_TRACE_SCOPE("throttle");
          result =
@@ -1262,6 +1266,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       result = wsi->ResetFences(device, 1, &swapchain->fences[image_index]);
       if (result != VK_SUCCESS)
          goto fail_present;
+   skip_fence_reset:
 
       VkSubmitInfo submit_info = {
          .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
