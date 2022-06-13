@@ -1839,6 +1839,8 @@ TU_DEFINE_NONDISP_HANDLE_CASTS(tu_query_pool, VkQueryPool)
 TU_DEFINE_NONDISP_HANDLE_CASTS(tu_render_pass, VkRenderPass)
 TU_DEFINE_NONDISP_HANDLE_CASTS(tu_sampler, VkSampler)
 TU_DEFINE_NONDISP_HANDLE_CASTS(tu_sampler_ycbcr_conversion, VkSamplerYcbcrConversion)
+TU_DEFINE_NONDISP_HANDLE_CASTS(VkFence_T, VkFence)
+TU_DEFINE_NONDISP_HANDLE_CASTS(VkSemaphore_T, VkSemaphore)
 
 /* for TU_FROM_HANDLE with both VkFence and VkSemaphore: */
 #define tu_syncobj_from_handle(x) ((struct tu_syncobj*) (uintptr_t) (x))

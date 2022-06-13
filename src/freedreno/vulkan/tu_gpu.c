@@ -260,9 +260,10 @@ simple_cs_emit_qw(struct simple_cs *cs, uint64_t value)
 }
 
 VkResult
-tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence)
+tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFence _fence)
 {
    TU_FROM_HANDLE(tu_queue, queue, _queue);
+   TU_FROM_HANDLE(VkFence_T, fence, _fence);
 
    struct tu_device *device = queue->device;
    uint32_t cmds[32*1024];
@@ -282,7 +283,7 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       cs.cur = cmds;
 
       for (uint32_t i = 0; i < submit->waitSemaphoreCount; i++) {
-         VkSemaphore semaphore = submit->pWaitSemaphores[i];
+         TU_FROM_HANDLE(VkSemaphore_T, semaphore, submit->pWaitSemaphores[i]);
          /* for timeline semaphores, block until its safe to submit
           * TODO: deferred submits instead of blocking
           */
@@ -345,7 +346,7 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       queue->rptr = ret;
 
       for (uint32_t i = 0; i < submit->signalSemaphoreCount; i++) {
-         VkSemaphore semaphore = submit->pSignalSemaphores[i];
+         TU_FROM_HANDLE(VkSemaphore_T, semaphore, submit->pSignalSemaphores[i]);
          if (semaphore->is_timeline) {
             struct timeline *tl = semaphore->timeline;
             uint64_t value = sinfo->pSignalSemaphoreValues[i];
@@ -384,7 +385,7 @@ tu_CreateFence(VkDevice _device,
    const VkSemaphoreTypeCreateInfoKHR *tinfo =
       vk_find_struct_const(info->pNext, SEMAPHORE_TYPE_CREATE_INFO_KHR);
 
-   VkFence fence = vk_object_alloc(&device->vk, alloc, sizeof(*fence),
+   struct VkFence_T *fence = vk_object_alloc(&device->vk, alloc, sizeof(*fence),
             (info->sType == VK_STRUCTURE_TYPE_FENCE_CREATE_INFO) ? VK_OBJECT_TYPE_FENCE : VK_OBJECT_TYPE_SEMAPHORE);
    if (!fence)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -426,14 +427,15 @@ tu_CreateFence(VkDevice _device,
          fence->rptr[0] = ~0ul;
    }
 
-   *p_fence = fence;
+   *p_fence = VkFence_T_to_handle(fence);
    return VK_SUCCESS;
 }
 
 void
-tu_DestroyFence(VkDevice _device, VkFence fence, const VkAllocationCallbacks *alloc)
+tu_DestroyFence(VkDevice _device, VkFence _fence, const VkAllocationCallbacks *alloc)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
+   TU_FROM_HANDLE(VkFence_T, fence, _fence);
 
    if (!fence)
       return;
@@ -448,7 +450,7 @@ VkResult
 tu_ImportFenceFdKHR(VkDevice _device, const VkImportFenceFdInfoKHR *info)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
-   VkFence fence = info->fence;
+   TU_FROM_HANDLE(VkFence_T, fence, info->fence);
 
    assert((info->flags & VK_FENCE_IMPORT_TEMPORARY_BIT) == 0);
    assert(info->handleType == VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
@@ -467,16 +469,17 @@ VkResult
 tu_GetFenceFdKHR(VkDevice _device, const VkFenceGetFdInfoKHR *info, int *p_fd)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
+   TU_FROM_HANDLE(VkFence_T, fence, info->fence);
 
    if (info->handleType == VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT) {
-      int fd = ioctl(device->fd, GPU_IOCTL_CREATE_FENCE, info->fence->rptr[0]);
+      int fd = ioctl(device->fd, GPU_IOCTL_CREATE_FENCE, fence->rptr[0]);
       assert(fd >= 0);
       *p_fd = fd;
       return VK_SUCCESS;
    }
 
    assert(info->handleType == VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT);
-   *p_fd = dup(info->fence->mem_fd);
+   *p_fd = dup(fence->mem_fd);
    return VK_SUCCESS;
 }
 
@@ -539,7 +542,7 @@ tu_WaitForFences(VkDevice _device, uint32_t count, const VkFence *p_fence, VkBoo
    uint64_t rptr[2] = {};
 
    for (uint32_t i = 0; i < count; i++) {
-      VkFence fence = p_fence[i];
+      TU_FROM_HANDLE(VkFence_T, fence, p_fence[i]);
 
       uint64_t ts = fence->rptr[0];
       if (ts == ~0ull) {
@@ -574,25 +577,27 @@ VkResult
 tu_ResetFences(VkDevice _device, uint32_t count, const VkFence *p_fence)
 {
    for (uint32_t i = 0; i < count; i++) {
-      VkFence fence = p_fence[i];
+      TU_FROM_HANDLE(VkFence_T, fence, p_fence[i]);
       fence->rptr[0] = ~0ul;
    }
    return VK_SUCCESS;
 }
 
 VkResult
-tu_GetFenceStatus(VkDevice _device, VkFence fence)
+tu_GetFenceStatus(VkDevice _device, VkFence _fence)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
+   TU_FROM_HANDLE(VkFence_T, fence, _fence);
    return (RPTR_FULL(device, fence->rptr[0] & 1) >= fence->rptr[0]) ? VK_SUCCESS : VK_NOT_READY;
 }
 
 /* TODO: timeline semaphores */
 
 VkResult
-tu_GetSemaphoreCounterValue(VkDevice _device, VkSemaphore semaphore, uint64_t *value)
+tu_GetSemaphoreCounterValue(VkDevice _device, VkSemaphore _semaphore, uint64_t *value)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
+   TU_FROM_HANDLE(VkSemaphore_T, semaphore, _semaphore);
 
    struct timeline *tl = semaphore->timeline;
    pthread_mutex_lock(&tl->lock);
@@ -612,7 +617,8 @@ tu_WaitSemaphores(VkDevice _device, const VkSemaphoreWaitInfo* info, uint64_t ti
    uint64_t rptr_max[2] = {};
 
    for (uint32_t i = 0; i < info->semaphoreCount; i++) {
-      struct timeline *tl  = info->pSemaphores[i]->timeline;
+      TU_FROM_HANDLE(VkSemaphore_T, semaphore, info->pSemaphores[i]);
+      struct timeline *tl  = semaphore->timeline;
       uint64_t value = info->pValues[i];
 
       pthread_mutex_lock(&tl->lock);
@@ -641,7 +647,8 @@ VkResult
 tu_SignalSemaphore(VkDevice _device, const VkSemaphoreSignalInfo *info)
 {
    TU_FROM_HANDLE(tu_device, device, _device);
-   struct timeline *tl = info->semaphore->timeline;
+   TU_FROM_HANDLE(VkSemaphore_T, semaphore, info->semaphore);
+   struct timeline *tl = semaphore->timeline;
 
    pthread_mutex_lock(&tl->lock);
    assert(info->value >= tl->max_value);
@@ -658,8 +665,10 @@ tu_SignalSemaphore(VkDevice _device, const VkSemaphoreSignalInfo *info)
 }
 
 int
-tu_signal_fences(struct tu_device *device, VkFence fence, VkSemaphore semaphore)
+tu_signal_fences(struct tu_device *device, VkFence _fence, VkSemaphore _semaphore)
 {
+   TU_FROM_HANDLE(VkFence_T, fence, _fence);
+   TU_FROM_HANDLE(VkSemaphore_T, semaphore, _semaphore);
    /* this is only so that WaitForFences will behavior correctly on this fence
     * (WaitForFences is the only function that cares about waiting for non-timeline semaphores)
     */
