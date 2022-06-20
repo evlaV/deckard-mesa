@@ -55,6 +55,7 @@ struct trace_context
    struct pipe_context *pipe;
    tc_replace_buffer_storage_func replace_buffer_storage;
    tc_create_fence_func create_fence;
+   tc_is_resource_busy is_resource_busy;
 
    struct pipe_framebuffer_state unwrapped_state;
    bool seen_fb_state;

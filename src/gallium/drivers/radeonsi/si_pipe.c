@@ -836,7 +836,7 @@ static struct pipe_context *si_pipe_create_context(struct pipe_screen *screen, v
       threaded_context_create(ctx, &sscreen->pool_transfers,
                               si_replace_buffer_storage,
                               sscreen->info.is_amdgpu ? si_create_fence : NULL,
-                              si_is_resource_busy,
+                              NULL, //si_is_resource_busy, (break radeonsi to keep it compiling)
                               true,
                               &((struct si_context *)ctx)->tc);
 
