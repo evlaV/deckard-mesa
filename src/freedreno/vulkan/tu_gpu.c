@@ -13,8 +13,9 @@
 #include <sys/poll.h>
 
 #define BO_IOVA_BASE 0x80000000ul
+#define GPU_MEM_SIZE (2ul<<30) // 2GB
 #define BO_IOVA_TO_PTR(dev, x) (dev->physical_device->map + ((x)-BO_IOVA_BASE))
-#define RPTR_FULL(dev, i) (*(volatile uint64_t*) ((dev)->physical_device->map + 0x18000-128 + (i)*8) | 3)
+#define RPTR_FULL(dev, i) (*(volatile uint64_t*) ((dev)->physical_device->map + 0x20000 - 128 + (i)*8) | 3)
 
 #define GPU_IOCTL_SUBMIT _IOC(_IOC_WRITE, 'S', 0, 0) /* arg to raw submit cmds, size/flags encoded in ioctl cmd */
 #define GPU_IOCTL_SUBMIT_PRIORITY BIT(0) /* exclusive high priority submit (cannot have IN_FENCE) */
@@ -171,8 +172,6 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo)
    int ret = ioctl(dev->fd, GPU_IOCTL_FREE, (uint64_t) bo->size << 32 | (bo->iova-BO_IOVA_BASE));
    assert(!ret);
 }
-
-#define GPU_MEM_SIZE (4ul<<30) // 4GB
 
 VkResult
 tu_enumerate_devices(struct tu_instance *instance)

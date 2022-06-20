@@ -29,8 +29,6 @@
 #include "freedreno_drmif.h"
 #include "freedreno_priv.h"
 
-#define BO_IOVA_BASE 0x80000000ul
-
 //static int32_t bo_cnt;
 
 struct fd_bo *
@@ -141,7 +139,11 @@ fd_bo_del(struct fd_bo *bo)
    if (bo->fd >= 0)
       close(bo->fd);
    else
+#ifdef __aarch64__
       ioctl(bo->dev_fd, GPU_IOCTL_FREE, (uint64_t) bo->size << 32 | bo->handle);
+#else
+      ioctl(bo->dev_fd, GPU_IOCTL_FREE | (_IOC_WRITE << _IOC_DIRSHIFT), (uint32_t[]) {bo->handle, bo->size});
+#endif
 
    free(bo);
 }
@@ -159,7 +161,11 @@ _fd_bo_dmabuf(struct fd_bo *bo)
    if (bo->fd >= 0)
       return bo->fd;
 
+#ifdef __aarch64__
    bo->fd = ioctl(bo->dev_fd, GPU_IOCTL_EXPORT_MEM, (uint64_t) bo->size << 32 | bo->handle);
+#else
+   bo->fd = ioctl(bo->dev_fd, GPU_IOCTL_EXPORT_MEM | (_IOC_WRITE << _IOC_DIRSHIFT), (uint32_t[]) {bo->handle, bo->size});
+#endif
    return bo->fd;
 }
 
@@ -196,7 +202,33 @@ fd_bo_map(struct fd_bo *bo)
 int
 fd_bo_cpu_prep(struct fd_bo *bo, struct fd_pipe *pipe, uint32_t op)
 {
-   return 0;
+   if ((op & (FD_BO_PREP_READ | FD_BO_PREP_WRITE)) == 0)
+      return 0;
+
+   uint64_t rptr = 0;
+
+   // find the highest rptr for this BO in the pending submits
+   // note this is not really an efficient way to do things
+   simple_mtx_lock(&pipe->submit_lock);
+
+   for (int i = 0; i < pipe->nr_submits; i++) {
+      struct fd_submit *submit = pipe->submits[i];
+
+      bool bo_in_submit = false;
+      for (int i = 0; i < submit->nr_bos; i++) {
+         if (submit->bos[i] == bo) {
+            bo_in_submit = true;
+            break;
+         }
+      }
+
+      if (bo_in_submit && rptr < submit->rptr)
+         rptr = submit->rptr;
+   }
+
+   simple_mtx_unlock(&pipe->submit_lock);
+
+   return fd_pipe_wait_rptr(pipe, rptr, (op & FD_BO_PREP_NOSYNC) ? 0 : ~0ull);
 }
 
 void fd_bo_cpu_fini(struct fd_bo *bo)

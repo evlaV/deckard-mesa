@@ -33,8 +33,6 @@
 #include "freedreno_drmif.h"
 #include "freedreno_priv.h"
 
-#define GPU_MEM_SIZE (4ul<<30) // 4GB
-
 struct fd_device *msm_device_new(int fd, drmVersionPtr version);
 
 struct fd_device *
