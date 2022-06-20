@@ -13,8 +13,9 @@
 #include <sys/poll.h>
 
 #define BO_IOVA_BASE 0x80000000ul
+#define GPU_MEM_SIZE (3ul<<30) // 3GB
 #define BO_IOVA_TO_PTR(dev, x) (dev->physical_device->map + ((x)-BO_IOVA_BASE))
-#define RPTR_FULL(dev, i) (*(volatile uint64_t*) ((dev)->physical_device->map + 0x18000-128 + (i)*8) | 3)
+#define RPTR_FULL(dev, i) (*(volatile uint64_t*) ((dev)->physical_device->map + 0x20000 - 128 + (i)*8) | 3)
 
 #define GPU_IOCTL_SUBMIT _IOC(_IOC_WRITE, 'S', 0, 0) /* arg to raw submit cmds, size/flags encoded in ioctl cmd */
 #define GPU_IOCTL_SUBMIT_PRIORITY BIT(0) /* exclusive high priority submit (cannot have IN_FENCE) */
@@ -172,8 +173,6 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo)
    assert(!ret);
 }
 
-#define GPU_MEM_SIZE (4ul<<30) // 4GB
-
 VkResult
 tu_enumerate_devices(struct tu_instance *instance)
 {
@@ -273,8 +272,6 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
    cs.reserved_end = (void*) cmds + sizeof(cmds);
 #endif
 
-   uint64_t global = *(volatile uint64_t*) (device->physical_device->map + 0x18000-128);
-
    for (uint32_t i = 0; i < count; i++) {
       const VkSubmitInfo *submit = &submits[i];
       const VkTimelineSemaphoreSubmitInfo *sinfo =
@@ -300,15 +297,8 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       }
 
       if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) {
-         simple_cs_emit_pkt7(&cs, CP_SET_PSEUDO_REG, 12);
-         simple_cs_emit(&cs, 0);
-         simple_cs_emit_qw(&cs, 0);
-         simple_cs_emit(&cs, 1);
-         simple_cs_emit_qw(&cs, BO_IOVA_BASE + 0x278000);
-         simple_cs_emit(&cs, 3);
-         simple_cs_emit_qw(&cs, BO_IOVA_BASE + 0x4a8000);
-         simple_cs_emit(&cs, 4);
-         simple_cs_emit_qw(&cs, 0);
+         simple_cs_emit_pkt7(&cs, CP_SET_MARKER, 1);
+         simple_cs_emit(&cs, 0xe); // disable preemption
       }
 
       for (uint32_t i = 0; i < submit->commandBufferCount; i++) {
@@ -329,11 +319,8 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       simple_cs_emit(&cs, 0);
 
       if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) {
-         simple_cs_emit_pkt7(&cs, CP_CONTEXT_SWITCH_YIELD, 4);
-         simple_cs_emit(&cs, 0);
-         simple_cs_emit(&cs, 0);
-         simple_cs_emit(&cs, 0);
-         simple_cs_emit(&cs, 0);
+         simple_cs_emit_pkt7(&cs, CP_SET_MARKER, 1);
+         simple_cs_emit(&cs, 0xd); // re-enable preemption
       }
 
       unsigned cmd = GPU_IOCTL_SUBMIT;

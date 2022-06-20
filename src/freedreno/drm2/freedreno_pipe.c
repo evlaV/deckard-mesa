@@ -57,6 +57,7 @@ fd_pipe_new2(struct fd_device *dev, enum fd_pipe_id id, uint32_t prio)
    pipe->suballoc_bo = NULL;
    pipe->suballoc_offset = 0;
 
+   simple_mtx_init(&pipe->submit_lock, mtx_plain);
    pipe->nr_submits = 0;
    pipe->max_submits = 0;
    pipe->submits = NULL;
@@ -191,15 +192,16 @@ sync_wait(struct pollfd *fds, uint32_t count, uint64_t timeout)
    return ret;
 }
 
-uint64_t
+void
 fd_pipe_reap_submits(struct fd_pipe *pipe)
 {
-   uint64_t global = *(volatile uint64_t*) (pipe->dev->map + 0x18000-128);
+   uint64_t rptr = read_rptr(pipe->dev);
 
    /* free bos from submits that completed: */
    for (int i = 0; i < pipe->nr_submits; i++) {
       struct fd_submit *submit = pipe->submits[i];
-      if (global < submit->rptr)
+
+      if (rptr < submit->rptr)
          continue;
 
       fd_submit_del(submit);
@@ -208,27 +210,41 @@ fd_pipe_reap_submits(struct fd_pipe *pipe)
       pipe->submits[i] = pipe->submits[pipe->nr_submits];
       i--;
    }
+}
 
-   return global;
+int
+fd_pipe_wait_rptr(struct fd_pipe *pipe, uint64_t fence_rptr, uint64_t timeout)
+{
+   /* fast path fence status check from userspace */
+   if (read_rptr(pipe->dev) >= fence_rptr)
+      return 0;
+
+   if (!timeout) // non-blocking case
+      return -1;
+
+   /* wait with kernel */
+   int fd = create_fence(pipe->dev, fence_rptr);
+   assert(fd >= 0);
+
+   struct pollfd pfd = { .fd = fd, .events = POLLIN };
+   int ret = sync_wait(&pfd, 1, timeout);
+   if (ret <= 0)
+      printf("sync_wait returned %d\n", ret); // all uses of blocking wait expect it to finish, so print a warning
+
+   close(fd);
+
+   return ret == 1 ? 0 : -1;
 }
 
 int
 fd_pipe_wait_timeout(struct fd_pipe *pipe, const struct fd_fence *fence,
                      uint64_t timeout)
 {
-   uint64_t global = fd_pipe_reap_submits(pipe);
-   /* fast path fence status check from userspace */
-   if (global >= (fence->rptr & ~1ul))
-      return 0;
+   simple_mtx_lock(&pipe->submit_lock);
+   fd_pipe_reap_submits(pipe);
+   simple_mtx_unlock(&pipe->submit_lock);
 
-   /* wait with kernel */
-   int fd = ioctl(pipe->dev->fd, GPU_IOCTL_CREATE_FENCE, fence->rptr);
-   assert(fd >= 0);
+   assert((fence->rptr & 1) == 0);
 
-   struct pollfd pfd = { .fd = fd, .events = POLLIN };
-   int ret = sync_wait(&pfd, 1, timeout);
-   if (ret <= 0)
-      printf("sync_wait returned %d\n", ret);
-
-   return 0;
+   return fd_pipe_wait_rptr(pipe, fence->rptr, timeout);
 }

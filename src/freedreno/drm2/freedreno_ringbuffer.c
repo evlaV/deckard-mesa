@@ -108,28 +108,42 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
 
    OUT_PKT7(&ring, CP_EVENT_WRITE, 4);
    OUT_RING(&ring, CP_EVENT_WRITE_0_EVENT(CACHE_FLUSH_TS) | CP_EVENT_WRITE_0_IRQ);
-   uint64_t iova2 = 0x80017ff8;
+   uint64_t iova2 = DUMMY_TIMESTAMP_IOVA;
    OUT_RING(&ring, (uint32_t) iova2);
    OUT_RING(&ring, iova2 >> 32);
    OUT_RING(&ring, 0);
 
-   long ret = syscall(SYS_ioctl, submit->pipe->dev->fd, _IOC(_IOC_WRITE, 'S', 0, (ring.cur - cmds) * 4), cmds);
-   assert(ret >= 0);
 
-   submit->rptr = ret;
+   unsigned cmd = _IOC(_IOC_WRITE, 'S', 0, (ring.cur - cmds) * 4);
+   // for arm64, wptr is returned directly as the syscall return value
+   // for 32-bit, the return value is only 32-bits so wptr is returned in memory instead
+#ifdef __aarch64__
+   uint64_t wptr = syscall(SYS_ioctl, submit->pipe->dev->fd, cmd, cmds);
+   assert((int64_t) wptr >= 0);
+#else
+   int ret = ioctl(submit->pipe->dev->fd, cmd | (_IOC_READ << _IOC_DIRSHIFT), cmds);
+   assert(ret == 0);
+   uint64_t wptr = *(uint64_t*) cmds;
+#endif
+
+   submit->rptr = wptr;
 
    if (out_fence) {
-      *(out_fence->rptr) = ret;
+      __atomic_store_n(out_fence->rptr, wptr, __ATOMIC_RELAXED); // atomic store: it may be shared memory
       if (out_fence->use_fence_fd) {
-         out_fence->fence_fd = ioctl(submit->pipe->dev->fd, GPU_IOCTL_CREATE_FENCE, ret);
+         out_fence->fence_fd = create_fence(submit->pipe->dev, wptr);
          assert(out_fence->fence_fd >= 0);
       }
       //util_queue_fence_signal(&out_fence->ready);
    }
 
+   simple_mtx_lock(&submit->pipe->submit_lock);
+
    APPEND(submit->pipe, submits, fd_submit_ref(submit));
 
    fd_pipe_reap_submits(submit->pipe);
+
+   simple_mtx_unlock(&submit->pipe->submit_lock);
 
    return 0;
 }

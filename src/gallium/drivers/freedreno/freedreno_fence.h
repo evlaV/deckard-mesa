@@ -30,7 +30,11 @@
 #include "pipe/p_context.h"
 #include "util/u_queue.h"
 
+#ifdef TEST_GPU_DRIVER
+#include "drm2/freedreno_ringbuffer.h"
+#else
 #include "drm/freedreno_ringbuffer.h"
+#endif
 
 struct pipe_fence_handle {
    struct pipe_reference reference;

@@ -62,6 +62,11 @@
 #define GPU_IOCTL_CREATE_FENCE _IO('S', 132) /* create fence from rptr value */
 #define GPU_IOCTL_RESET _IO('S', 133) /* reset GPU to recover from error */
 
+#define GPU_MEM_SIZE (3ul<<30) // 3GB
+#define BO_IOVA_BASE 0x80000000ul
+#define DUMMY_TIMESTAMP_IOVA (BO_IOVA_BASE + 0x18000)
+#define RPTR_OFFSET (0x20000-128)
+
 extern simple_mtx_t table_lock;
 
 /*
@@ -106,6 +111,20 @@ struct fd_device {
    bool closefd;
 };
 
+static inline uint64_t read_rptr(struct fd_device *dev)
+{
+   return __atomic_load_n((uint64_t*)(dev->map + RPTR_OFFSET),  __ATOMIC_RELAXED);
+}
+
+static inline int create_fence(struct fd_device *dev, uint64_t rptr)
+{
+#ifdef __aarch64__
+   return ioctl(dev->fd, GPU_IOCTL_CREATE_FENCE, rptr);
+#else
+   return ioctl(dev->fd, GPU_IOCTL_CREATE_FENCE | (_IOC_WRITE << _IOC_DIRSHIFT), &rptr);
+#endif
+}
+
 /* for where @table_lock is already held: */
 void fd_device_del_locked(struct fd_device *dev);
 void fd_pipe_del_locked(struct fd_pipe *pipe);
@@ -130,11 +149,14 @@ struct fd_pipe {
    struct fd_bo *suballoc_bo;
    uint32_t suballoc_offset;
 
+   simple_mtx_t submit_lock;
    DECLARE_ARRAY(struct fd_submit*, submits);
 };
 
-uint64_t
+void
 fd_pipe_reap_submits(struct fd_pipe *pipe);
+int
+fd_pipe_wait_rptr(struct fd_pipe *pipe, uint64_t rptr, uint64_t timeout);
 
 struct fd_submit {
    int32_t refcnt;
