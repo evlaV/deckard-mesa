@@ -93,6 +93,12 @@ typedef struct VkQueuePresentCACPlaneAdjustInfo {
       uint32_t dst_height;
 } VkQueuePresentCACPlaneAdjustInfo;
 
+#define VK_STRUCTURE_TYPE_QUEUE_PRESENT_SET_MODE_INFO_VALVE 1000002101
+typedef struct VkQueuePresentSetModeVALVE {
+      VkStructureType    sType;
+      const void*        pNext;
+      uint32_t mode_index;
+} VkQueuePresentSetModeVALVE;
 
 
 /* This is always chained to VkImageCreateInfo when a wsi image is created.
