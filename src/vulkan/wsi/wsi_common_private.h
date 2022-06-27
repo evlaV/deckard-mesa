@@ -200,6 +200,7 @@ struct wsi_swapchain {
                              uint32_t dst_width,
                              uint32_t dst_height
                              );								
+   void (*set_mode)(struct wsi_swapchain *swap_chain, uint32_t mode_index);
 };
 
 bool
