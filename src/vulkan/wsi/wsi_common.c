@@ -1164,6 +1164,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
 
    const VkQueuePresentCACPlaneAdjustInfo *cacplaneadjust =
       vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_CAC_PLANE_ADJUST_INFO_VALVE);
+   const VkQueuePresentSetModeVALVE *set_mode =
+      vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_SET_MODE_INFO_VALVE);
+
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
       VK_FROM_HANDLE(wsi_swapchain, swapchain, pPresentInfo->pSwapchains[i]);
       uint32_t image_index = pPresentInfo->pImageIndices[i];
@@ -1332,6 +1335,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
                            cacplaneadjust->dst_width,
                            cacplaneadjust->dst_height);
       }
+
+      if (set_mode)
+         swapchain->set_mode(swapchain, set_mode->mode_index);
 
       result = swapchain->queue_present(swapchain, image_index, present_id, region);
       if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)

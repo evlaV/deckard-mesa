@@ -2056,7 +2056,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    drmModeAtomicReq *req;
    uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK;
    uint32_t crtc_id = connector->crtc_id;
-   uint32_t blob_id;
+   uint32_t blob_id = 0;
    int ret;
 
    req = drmModeAtomicAlloc();
@@ -2064,8 +2064,10 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       return -1;
 
    if (!connector->active) {
-      if (drmModeCreatePropertyBlob(fd, mode, sizeof(*mode), &blob_id) != 0)
+      if (drmModeCreatePropertyBlob(fd, mode, sizeof(*mode), &blob_id) != 0) {
+         drmModeAtomicFree(req);
          return -1;
+      }
 
       drmModeAtomicAddProperty(req, connector->id, connector->property[CRTC_ID], crtc_id);
       drmModeAtomicAddProperty(req, crtc_id, connector->crtc_property[MODE_ID], blob_id);
@@ -2211,9 +2213,10 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    ret = drmModeAtomicCommit(fd, req, flags, image);
    if (ret)
       goto out;
-
 out:
    drmModeAtomicFree(req);
+   if (blob_id)
+      drmModeDestroyPropertyBlob(fd, blob_id);
 
    return ret;
 }
@@ -2316,6 +2319,27 @@ wsi_display_cac_plane_adjust(struct wsi_swapchain *drv_chain,
    surface2->dst_rgb[plane_index].extent.height = dst_height;
    surface2->dst_rgb[plane_index].extent.width = dst_width;
    return VK_SUCCESS;
+}
+
+static void
+wsi_display_set_mode(struct wsi_swapchain *drv_chain, uint32_t mode_index)
+{
+   struct wsi_display_swapchain *chain =
+      (struct wsi_display_swapchain *) drv_chain;
+   struct wsi_display *wsi = chain->wsi;
+   VkIcdSurfaceDisplay *surface = chain->surface;
+   wsi_display_mode *display_mode =
+      wsi_display_mode_from_handle(surface->displayMode);
+   wsi_display_connector *connector = display_mode->connector;
+
+   drmModeConnectorPtr drm_connector =
+      drmModeGetConnectorCurrent(wsi->fd, connector->id);
+
+   assert(mode_index < drm_connector->count_modes);
+   connector->current_drm_mode = drm_connector->modes[mode_index];
+   connector->active = false; // trigger modeset again
+
+   drmModeFreeConnector(drm_connector);
 }
 
 static VkResult
@@ -2465,6 +2489,7 @@ wsi_display_surface_create_swapchain(
    chain->base.get_wsi_image = wsi_display_get_wsi_image;
    chain->base.acquire_next_image = wsi_display_acquire_next_image;
    chain->base.cac_plane_adjust = wsi_display_cac_plane_adjust;
+   chain->base.set_mode = wsi_display_set_mode;
    chain->base.queue_present = wsi_display_queue_present;
    chain->base.wait_for_present = wsi_display_wait_for_present;
    chain->base.present_mode = wsi_swapchain_get_present_mode(wsi_device, create_info);
