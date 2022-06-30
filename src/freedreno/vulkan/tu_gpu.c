@@ -296,6 +296,11 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
          }
       }
 
+      if (submit->commandBufferCount == 0) {
+         /* if submit is empty, just use the rptr value of the last submit to this queue */
+         goto skip_empty_submit;
+      }
+
       if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) {
          simple_cs_emit_pkt7(&cs, CP_SET_MARKER, 1);
          simple_cs_emit(&cs, 0xe); // disable preemption
@@ -331,6 +336,7 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       ret = syscall(SYS_ioctl, device->fd, cmd, cmds);
       assert(ret >= 0);
       queue->rptr = ret;
+   skip_empty_submit:;
 
       for (uint32_t i = 0; i < submit->signalSemaphoreCount; i++) {
          TU_FROM_HANDLE(VkSemaphore_T, semaphore, submit->pSignalSemaphores[i]);
