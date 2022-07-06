@@ -94,12 +94,8 @@ __fd6_setup_rasterizer_stateobj(struct fd_context *ctx,
    OUT_REG(ring, A6XX_VPC_POLYGON_MODE(mode));
    OUT_REG(ring, A6XX_PC_POLYGON_MODE(mode));
 
-   if (ctx->screen->info->a6xx.has_shading_rate) {
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A00());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A10());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A20());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A30());
-   }
+   if (ctx->screen->info->a6xx.has_shading_rate)
+      OUT_REG(ring, A6XX_RB_VRS_CONFIG());
 
    return ring;
 }
