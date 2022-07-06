@@ -10445,6 +10445,11 @@ typedef void* <name>MTLSharedEvent_id</name>;
             <param><type>VkStencilFaceFlags</type> <name>faceMask</name></param>
             <param><type>uint32_t</type> <name>reference</name></param>
         </command>
+	<command queues="graphics" renderpass="both" cmdbufferlevel="primary,secondary" tasks="state">
+            <proto><type>void</type> <name>vkCmdSetFragmentShadingRateVALVE</name></proto>
+            <param externsync="true"><type>VkCommandBuffer</type> <name>commandBuffer</name></param>
+            <param><type>void*</type> <name>params</name></param>
+        </command>
         <command queues="graphics,compute" renderpass="both" cmdbufferlevel="primary,secondary" tasks="state">
             <proto><type>void</type> <name>vkCmdBindDescriptorSets</name></proto>
             <param externsync="true"><type>VkCommandBuffer</type> <name>commandBuffer</name></param>
@@ -13876,6 +13881,7 @@ typedef void* <name>MTLSharedEvent_id</name>;
             <command name="vkCmdSetStencilCompareMask"/>
             <command name="vkCmdSetStencilWriteMask"/>
             <command name="vkCmdSetStencilReference"/>
+            <command name="vkCmdSetFragmentShadingRateVALVE"/>
             <command name="vkCmdBindDescriptorSets"/>
             <command name="vkCmdBindIndexBuffer"/>
             <command name="vkCmdBindVertexBuffers"/>
