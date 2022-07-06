@@ -101,12 +101,8 @@ __fd6_setup_rasterizer_stateobj(struct fd_context *ctx,
     * thing to key off of until we find whatever new feature gen3 added
     * that uses these registers.
     */
-   if (ctx->screen->info->a6xx.tess_use_shared) {
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A00());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A10());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A20());
-      OUT_REG(ring, A6XX_RB_UNKNOWN_8A30());
-   }
+   if (ctx->screen->info->a6xx.tess_use_shared)
+      OUT_REG(ring, A6XX_RB_VRS_CONFIG());
 
    return ring;
 }
