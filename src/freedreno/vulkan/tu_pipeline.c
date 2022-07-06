@@ -4282,12 +4282,6 @@ tu6_emit_rast(struct tu_cs *cs,
                    A6XX_GRAS_SU_POINT_MINMAX(.min = 1.0f / 16.0f, .max = 4092.0f),
                    A6XX_GRAS_SU_POINT_SIZE(1.0f));
 
-   if (cs->device->physical_device->info->a6xx.has_shading_rate) {
-      tu_cs_emit_regs(cs, A6XX_RB_UNKNOWN_8A00());
-      tu_cs_emit_regs(cs, A6XX_RB_UNKNOWN_8A10());
-      tu_cs_emit_regs(cs, A6XX_RB_UNKNOWN_8A20());
-      tu_cs_emit_regs(cs, A6XX_RB_UNKNOWN_8A30());
-   }
 }
 
 static void

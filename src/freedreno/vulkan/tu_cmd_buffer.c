@@ -1070,6 +1070,8 @@ tu6_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    tu_cs_emit_write_reg(cs, REG_A6XX_RB_UNKNOWN_881E, 0);
    tu_cs_emit_write_reg(cs, REG_A6XX_RB_UNKNOWN_88F0, 0);
 
+   tu_cs_emit_write_reg(cs, REG_A6XX_RB_VRS_CONFIG, 0);
+
    tu_cs_emit_regs(cs, A6XX_VPC_POINT_COORD_INVERT(false));
    tu_cs_emit_write_reg(cs, REG_A6XX_VPC_UNKNOWN_9300, 0);
 
@@ -3632,6 +3634,49 @@ tu_CmdSetColorWriteMaskEXT(VkCommandBuffer commandBuffer,
    }
 
    cmd->state.dirty |= TU_CMD_DIRTY_BLEND;
+}
+
+/* xfocal/yfocal are integers (pixels), other parameters are fp16
+ * the value used to compare against thresholds is the square of the distance from the focal point:
+ * t = (((x - xfocal) * xatten)**2 + ((y - yfocal) * yatten)**2) / 65536.0
+ * 4 VRS levels: 1x1 < threshold0 < 2x1 < threshold1 < 2x2 < threshold2 < 4x2
+ * VRS level can be fixed by setting atten to 0 (so t = 0), and using negative thresholds
+ * note: parameters could be different for each view with multiview (up to 6 views)
+ */
+typedef struct VkFragmentShadingRateParamsVALVE {
+   VkBool32 enable;
+   uint16_t xfocal;
+   uint16_t yfocal;
+   uint16_t xatten;
+   uint16_t yatten;
+   uint16_t threshold0;
+   uint16_t threshold1;
+   uint16_t threshold2;
+   uint16_t padding0;
+} VkFragmentShadingRateParamsVALVE;
+
+VKAPI_ATTR void VKAPI_CALL
+tu_CmdSetFragmentShadingRateVALVE(VkCommandBuffer cmdbuf, void *_params)
+{
+   TU_FROM_HANDLE(tu_cmd_buffer, cmd, cmdbuf);
+   const VkFragmentShadingRateParamsVALVE *params = (const void*) _params;
+   struct tu_cs *cs = &cmd->draw_cs;
+
+   cmd->state.gras_su_cntl &= ~A6XX_GRAS_SU_CNTL_FOCUSBASEDVRSEN;
+   if (params->enable)
+      cmd->state.gras_su_cntl |= A6XX_GRAS_SU_CNTL_FOCUSBASEDVRSEN;
+
+   tu_cs_emit_pkt4(cs, REG_A6XX_RB_VRS_CONFIG, 1);
+   tu_cs_emit(cs, params->enable ? 0x5 : 0);
+
+   if (params->enable) {
+      tu_cs_emit_regs(cs, A6XX_RB_VRS_VIEW_0(params->xfocal, params->yfocal));
+      tu_cs_emit_regs(cs, A6XX_RB_VRS_VIEW_1(params->xatten, params->yatten));
+      tu_cs_emit_regs(cs, A6XX_RB_VRS_VIEW_2(params->threshold0, params->threshold1));
+      tu_cs_emit_regs(cs, A6XX_RB_VRS_VIEW_3(params->threshold2));
+   }
+
+   cmd->state.dirty |= TU_CMD_DIRTY_RAST;
 }
 
 static void
