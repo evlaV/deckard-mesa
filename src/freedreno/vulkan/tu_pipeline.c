@@ -4128,8 +4128,7 @@ tu_pipeline_builder_parse_rasterization(struct tu_pipeline_builder *builder,
    }
 
    struct tu_cs cs;
-   uint32_t cs_size = 9 +
-      (builder->device->physical_device->info->a6xx.has_shading_rate ? 8 : 0);
+   uint32_t cs_size = 9 + 0; //gabe put zero for now?
    pipeline->rast.state = tu_cs_draw_state(&pipeline->cs, &cs, cs_size);
 
    tu_cs_emit_regs(&cs,
@@ -4151,12 +4150,6 @@ tu_pipeline_builder_parse_rasterization(struct tu_pipeline_builder *builder,
                    A6XX_GRAS_SU_POINT_MINMAX(.min = 1.0f / 16.0f, .max = 4092.0f),
                    A6XX_GRAS_SU_POINT_SIZE(1.0f));
 
-   if (builder->device->physical_device->info->a6xx.has_shading_rate) {
-      tu_cs_emit_regs(&cs, A6XX_RB_UNKNOWN_8A00());
-      tu_cs_emit_regs(&cs, A6XX_RB_UNKNOWN_8A10());
-      tu_cs_emit_regs(&cs, A6XX_RB_UNKNOWN_8A20());
-      tu_cs_emit_regs(&cs, A6XX_RB_UNKNOWN_8A30());
-   }
 
    const VkPipelineRasterizationStateStreamCreateInfoEXT *stream_info =
       vk_find_struct_const(rast_info->pNext,
