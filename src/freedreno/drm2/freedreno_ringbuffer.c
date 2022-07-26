@@ -117,7 +117,7 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
    unsigned cmd = _IOC(_IOC_WRITE, 'S', 0, (ring.cur - cmds) * 4);
    // for arm64, wptr is returned directly as the syscall return value
    // for 32-bit, the return value is only 32-bits so wptr is returned in memory instead
-#ifdef __aarch64__
+#if __SIZEOF_POINTER__ == 8
    uint64_t wptr = syscall(SYS_ioctl, submit->pipe->dev->fd, cmd, cmds);
    assert((int64_t) wptr >= 0);
 #else

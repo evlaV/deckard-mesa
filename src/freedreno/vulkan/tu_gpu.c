@@ -561,7 +561,7 @@ tu_WaitForFences(VkDevice _device, uint32_t count, const VkFence *p_fence, VkBoo
    int ret = rptr_wait(device, rptr, timeout);
 
    if (ret <= 0)
-      printf("WaitForFences timed out (%d / %ld)\n", ret, timeout);
+      printf("WaitForFences timed out (%d / %" PRIu64 ")\n", ret, timeout);
 
    return ret > 0 ? VK_SUCCESS : VK_TIMEOUT;
 }
@@ -631,7 +631,7 @@ tu_WaitSemaphores(VkDevice _device, const VkSemaphoreWaitInfo* info, uint64_t ti
 
    int ret = rptr_wait(device, rptr_max, timeout);
    if (ret <= 0)
-      printf("WaitSemaphores timed out (%d / %ld)\n", ret, timeout);
+      printf("WaitSemaphores timed out (%d / %" PRIu64 ")\n", ret, timeout);
 
    return ret > 0 ? VK_SUCCESS : VK_TIMEOUT;
 }

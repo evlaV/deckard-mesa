@@ -139,7 +139,7 @@ fd_bo_del(struct fd_bo *bo)
    if (bo->fd >= 0)
       close(bo->fd);
    else
-#ifdef __aarch64__
+#if __SIZEOF_POINTER__ == 8
       ioctl(bo->dev_fd, GPU_IOCTL_FREE, (uint64_t) bo->size << 32 | bo->handle);
 #else
       ioctl(bo->dev_fd, GPU_IOCTL_FREE | (_IOC_WRITE << _IOC_DIRSHIFT), (uint32_t[]) {bo->handle, bo->size});
@@ -161,7 +161,7 @@ _fd_bo_dmabuf(struct fd_bo *bo)
    if (bo->fd >= 0)
       return bo->fd;
 
-#ifdef __aarch64__
+#if __SIZEOF_POINTER__ == 8
    bo->fd = ioctl(bo->dev_fd, GPU_IOCTL_EXPORT_MEM, (uint64_t) bo->size << 32 | bo->handle);
 #else
    bo->fd = ioctl(bo->dev_fd, GPU_IOCTL_EXPORT_MEM | (_IOC_WRITE << _IOC_DIRSHIFT), (uint32_t[]) {bo->handle, bo->size});

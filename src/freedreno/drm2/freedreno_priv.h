@@ -118,7 +118,7 @@ static inline uint64_t read_rptr(struct fd_device *dev)
 
 static inline int create_fence(struct fd_device *dev, uint64_t rptr)
 {
-#ifdef __aarch64__
+#if __SIZEOF_POINTER__ == 8
    return ioctl(dev->fd, GPU_IOCTL_CREATE_FENCE, rptr);
 #else
    return ioctl(dev->fd, GPU_IOCTL_CREATE_FENCE | (_IOC_WRITE << _IOC_DIRSHIFT), &rptr);

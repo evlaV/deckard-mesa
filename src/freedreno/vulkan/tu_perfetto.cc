@@ -235,9 +235,9 @@ stage_end(struct tu_device *dev, uint64_t ts_ns, enum tu_stage_id stage,
       }
       char buff2[128];
       uint64_t ctx2=GetNextEventId();
-      snprintf(buff2,128,"[PD] %s dtime=%ld", stage_str, 0 - evtstart_dt );
+      snprintf(buff2,128,"[PD] %s dtime=%" PRIu64, stage_str, 0 - evtstart_dt );
       EventWriteStringBegin(buff2,ctx2); //use dtime to shift event
-      snprintf(buff2,128,"[PD] %s dtime=%ld", stage_str, evtduration - evtstart_dt );
+      snprintf(buff2,128,"[PD] %s dtime=%" PRIu64, stage_str, evtduration - evtstart_dt );
       EventWriteStringEnd(buff2,ctx2);
 #endif
 
