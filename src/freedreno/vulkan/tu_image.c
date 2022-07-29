@@ -170,6 +170,7 @@ tu_image_view_init(struct tu_image_view *iview,
    const VkImageSubresourceRange *range = &pCreateInfo->subresourceRange;
    VkFormat vk_format = pCreateInfo->format;
    VkImageAspectFlagBits aspect_mask = pCreateInfo->subresourceRange.aspectMask;
+   assert(aspect_mask);
 
    const struct VkSamplerYcbcrConversionInfo *ycbcr_conversion =
       vk_find_struct_const(pCreateInfo->pNext, SAMPLER_YCBCR_CONVERSION_INFO);
