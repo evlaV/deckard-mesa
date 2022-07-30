@@ -1403,9 +1403,7 @@ tu_image_view_blit(struct fdl6_view *iview,
                    const VkImageSubresourceLayers *subres,
                    uint32_t layer)
 {
-   enum pipe_format format =
-      tu6_plane_format(image->vk_format, tu6_plane_index(image->vk_format,
-                                                         subres->aspectMask));
+   enum pipe_format format = tu_vk_format_to_pipe_format(image->vk_format);
    tu_image_view_copy_blit(iview, image, format, subres, layer, false, false);
 }
 
@@ -1464,6 +1462,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
    if (dst_image->layout[0].nr_samples > 1 ||
        src_image->vk_format == VK_FORMAT_BC1_RGB_UNORM_BLOCK ||
        src_image->vk_format == VK_FORMAT_BC1_RGB_SRGB_BLOCK ||
+       src_image->vk_format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM ||
        filter == VK_FILTER_CUBIC_EXT ||
        z_scale) {
       ops = &r3d_ops;
