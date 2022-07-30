@@ -1672,10 +1672,17 @@ tu_image_view_copy_blit(struct fdl6_view *iview,
       aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
    }
 
-   const struct fdl_layout *layout =
-      &image->layout[tu6_plane_index(image->vk.format, aspect_mask)];
+   const struct fdl_layout *layouts[3];
+   layouts[0] = &image->layout[tu6_plane_index(image->vk.format, aspect_mask)];
+   if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT &&
+       (image->vk.format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM ||
+        image->vk.format == VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM)) {
+      layouts[1] = &image->layout[1];
+      layouts[2] = &image->layout[2];
+   }
+ 
 
-   fdl6_view_init(iview, &layout, &(struct fdl_view_args) {
+   fdl6_view_init(iview, layouts, &(struct fdl_view_args) {
       .iova = image->iova,
       .base_array_layer = subres->baseArrayLayer + layer,
       .layer_count = 1,
@@ -1705,9 +1712,7 @@ tu_image_view_blit(struct fdl6_view *iview,
                    const VkImageSubresourceLayers *subres,
                    uint32_t layer)
 {
-   enum pipe_format format =
-      tu6_plane_format(image->vk.format, tu6_plane_index(image->vk.format,
-                                                         subres->aspectMask));
+   enum pipe_format format = tu_vk_format_to_pipe_format(image->vk.format);
    tu_image_view_copy_blit(iview, image, format, subres, layer, false);
 }
 
@@ -1766,6 +1771,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
    if (dst_image->layout[0].nr_samples > 1 ||
        src_image->vk.format == VK_FORMAT_BC1_RGB_UNORM_BLOCK ||
        src_image->vk.format == VK_FORMAT_BC1_RGB_SRGB_BLOCK ||
+       src_image->vk.format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM ||
        filter == VK_FILTER_CUBIC_EXT ||
        z_scale) {
       ops = &r3d_ops;
