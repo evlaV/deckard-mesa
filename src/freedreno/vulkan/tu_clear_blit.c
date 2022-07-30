@@ -1367,10 +1367,16 @@ tu_image_view_copy_blit(struct fdl6_view *iview,
       aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
    }
 
-   const struct fdl_layout *layout =
-      &image->layout[tu6_plane_index(image->vk_format, aspect_mask)];
+   const struct fdl_layout *layouts[3];
+   layouts[0] = &image->layout[tu6_plane_index(image->vk_format, aspect_mask)];
+   if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT &&
+       (image->vk_format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM ||
+        image->vk_format == VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM)) {
+      layouts[1] = &image->layout[1];
+      layouts[2] = &image->layout[2];
+   }
 
-   fdl6_view_init(iview, &layout, &(struct fdl_view_args) {
+   fdl6_view_init(iview, layouts, &(struct fdl_view_args) {
       .iova = image->iova,
       .base_array_layer = subres->baseArrayLayer + layer,
       .layer_count = 1,
