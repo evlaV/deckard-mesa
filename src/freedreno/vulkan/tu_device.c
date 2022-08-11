@@ -1448,7 +1448,7 @@ tu_get_budget_memory(struct tu_physical_device *physical_device)
    assert(has_available_memory);
 
 #ifdef TEST_GPU_DRIVER
-   return heap_size-heap_used;
+   return (heap_size * 8 / 10); //tell app that 80% of gpu memory heap is available to use
 #else
    /*
     * Let's not incite the app to starve the system: report at most 90% of
