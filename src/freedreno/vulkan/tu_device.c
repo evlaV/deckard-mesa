@@ -328,7 +328,6 @@ fail_free_name:
 }
 
 #include <sys/mman.h>
-#define GPU_MEM_SIZE (3ul<<30) // 3GB
 
 static void
 tu_physical_device_finish(struct tu_physical_device *device)
@@ -1428,6 +1427,10 @@ tu_get_system_heap_size()
    else
       available_ram = total_ram * 3 / 4;
 
+#ifdef TEST_GPU_DRIVER
+   available_ram = GPU_MEM_SIZE;
+#endif
+   
    return available_ram;
 }
 
@@ -1441,12 +1444,16 @@ tu_get_budget_memory(struct tu_physical_device *physical_device)
       os_get_available_system_memory(&sys_available);
    assert(has_available_memory);
 
+#ifdef TEST_GPU_DRIVER
+   return heap_size-heap_used;
+#else
    /*
     * Let's not incite the app to starve the system: report at most 90% of
     * available system memory.
     */
    uint64_t heap_available = sys_available * 9 / 10;
    return MIN2(heap_size, heap_used + heap_available);
+#endif
 }
 
 VKAPI_ATTR void VKAPI_CALL

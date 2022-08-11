@@ -60,7 +60,6 @@
 #define GPU_IOCTL_CREATE_FENCE _IO('S', 132) /* create fence from rptr value */
 #define GPU_IOCTL_RESET _IO('S', 133) /* reset GPU to recover from error */
 
-#define GPU_MEM_SIZE (3ul<<30) // 3GB
 #define BO_IOVA_BASE 0x80000000ul
 #define DUMMY_TIMESTAMP_IOVA (BO_IOVA_BASE + 0x18000)
 #define RPTR_OFFSET (0x20000-128)
