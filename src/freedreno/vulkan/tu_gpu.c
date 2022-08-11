@@ -13,7 +13,6 @@
 #include <sys/poll.h>
 
 #define BO_IOVA_BASE 0x80000000ul
-#define GPU_MEM_SIZE (3ul<<30) // 3GB
 #define BO_IOVA_TO_PTR(dev, x) (dev->physical_device->map + ((x)-BO_IOVA_BASE))
 #define RPTR_FULL(dev, i) (*(volatile uint64_t*) ((dev)->physical_device->map + 0x20000 - 128 + (i)*8) | 3)
 
