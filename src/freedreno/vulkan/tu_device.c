@@ -2312,6 +2312,9 @@ tu_AllocateMemory(VkDevice _device,
       result =
          tu_bo_init_new(device, &mem->bo, pAllocateInfo->allocationSize,
                         TU_BO_ALLOC_NO_FLAGS);
+#ifdef TEST_GPU_DRIVER
+      memset(mem->bo->map, 0, mem->bo->size);
+#endif
    }
 
 
