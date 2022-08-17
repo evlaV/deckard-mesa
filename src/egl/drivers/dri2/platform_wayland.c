@@ -2326,7 +2326,6 @@ swrast_update_buffers(struct dri2_egl_surface *dri2_surf)
 {
    struct dri2_egl_display *dri2_dpy =
       dri2_egl_display(dri2_surf->base.Resource.Display);
-   bool zink = dri2_surf->base.Resource.Display->Options.Zink;
 
    /* we need to do the following operations only once per frame */
    if (dri2_surf->back)
@@ -2336,8 +2335,7 @@ swrast_update_buffers(struct dri2_egl_surface *dri2_surf)
        (dri2_surf->base.Width != dri2_surf->wl_win->width ||
         dri2_surf->base.Height != dri2_surf->wl_win->height)) {
 
-      if (!zink)
-         dri2_wl_release_buffers(dri2_surf);
+      dri2_wl_release_buffers(dri2_surf);
 
       dri2_surf->base.Width  = dri2_surf->wl_win->width;
       dri2_surf->base.Height = dri2_surf->wl_win->height;
@@ -2365,8 +2363,6 @@ swrast_update_buffers(struct dri2_egl_surface *dri2_surf)
       for (int i = 0; i < ARRAY_SIZE(dri2_surf->color_buffers); i++) {
          if (!dri2_surf->color_buffers[i].locked) {
              dri2_surf->back = &dri2_surf->color_buffers[i];
-             if (zink)
-                continue;
              if (!dri2_wl_swrast_allocate_buffer(dri2_surf,
                                                  dri2_surf->format,
                                                  dri2_surf->base.Width,
@@ -2400,11 +2396,9 @@ swrast_update_buffers(struct dri2_egl_surface *dri2_surf)
       if (!dri2_surf->color_buffers[i].locked &&
           dri2_surf->color_buffers[i].wl_buffer &&
           dri2_surf->color_buffers[i].age > BUFFER_TRIM_AGE_HYSTERESIS) {
-         if (!zink) {
-            wl_buffer_destroy(dri2_surf->color_buffers[i].wl_buffer);
-            munmap(dri2_surf->color_buffers[i].data,
-                   dri2_surf->color_buffers[i].data_size);
-         }
+         wl_buffer_destroy(dri2_surf->color_buffers[i].wl_buffer);
+         munmap(dri2_surf->color_buffers[i].data,
+                dri2_surf->color_buffers[i].data_size);
          dri2_surf->color_buffers[i].wl_buffer = NULL;
          dri2_surf->color_buffers[i].data = NULL;
          dri2_surf->color_buffers[i].age = 0;
@@ -2593,10 +2587,6 @@ dri2_wl_swrast_swap_buffers(_EGLDisplay *disp, _EGLSurface *draw)
       return _eglError(EGL_BAD_NATIVE_WINDOW, "dri2_swap_buffers");
 
    dri2_dpy->core->swapBuffers(dri2_surf->dri_drawable);
-   if (disp->Options.Zink) {
-      dri2_surf->current = dri2_surf->back;
-      dri2_surf->back = NULL;
-   }
    return EGL_TRUE;
 }
 
@@ -2738,7 +2728,7 @@ dri2_initialize_wayland_swrast(_EGLDisplay *disp)
                                                      0, dri2_dpy->formats.num_formats))
       goto cleanup;
 
-   dri2_dpy->driver_name = strdup(disp->Options.Zink ? "zink" : "swrast");
+   dri2_dpy->driver_name = strdup("swrast");
    if (!dri2_load_driver_swrast(disp))
       goto cleanup;
 

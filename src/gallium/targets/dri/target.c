@@ -129,7 +129,7 @@ DEFINE_LOADER_DRM_ENTRYPOINT(lima)
 #endif
 
 #if defined(GALLIUM_ZINK) && !defined(__APPLE__)
-#if defined(ANDROID)
+#if 1
 DEFINE_LOADER_DRM_ENTRYPOINT(zink);
 #else
 const __DRIextension **__driDriverGetExtensions_zink(void);

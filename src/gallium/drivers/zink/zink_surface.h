@@ -84,6 +84,4 @@ zink_rebind_ctx_surface(struct zink_context *ctx, struct pipe_surface **psurface
 struct pipe_surface *
 zink_surface_create_null(struct zink_context *ctx, enum pipe_texture_target target, unsigned width, unsigned height, unsigned samples);
 
-void
-zink_surface_swapchain_update(struct zink_context *ctx, struct zink_surface *surface);
 #endif

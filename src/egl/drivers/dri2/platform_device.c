@@ -322,7 +322,7 @@ device_probe_device_sw(_EGLDisplay *disp)
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
 
    dri2_dpy->fd = -1;
-   dri2_dpy->driver_name = strdup(disp->Options.Zink ? "zink" : "swrast");
+   dri2_dpy->driver_name = strdup("swrast");
    if (!dri2_dpy->driver_name)
       return false;
 

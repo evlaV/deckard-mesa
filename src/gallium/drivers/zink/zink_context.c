@@ -29,7 +29,6 @@
 #include "zink_framebuffer.h"
 #include "zink_helpers.h"
 #include "zink_inlines.h"
-#include "zink_kopper.h"
 #include "zink_program.h"
 #include "zink_query.h"
 #include "zink_render_pass.h"
@@ -86,7 +85,7 @@ check_resource_for_batch_ref(struct zink_context *ctx, struct zink_resource *res
        * - if tracking will be added here, also reapply usage to avoid dangling usage once tracking is removed
        * TODO: somehow fix this for perf because it's an extra hash lookup
        */
-      if (!res->obj->dt && (res->obj->bo->reads || res->obj->bo->writes))
+      if (res->obj->bo->reads || res->obj->bo->writes)
          zink_batch_reference_resource_rw(&ctx->batch, res, !!res->obj->bo->writes);
       else
          zink_batch_reference_resource(&ctx->batch, res);
@@ -954,13 +953,6 @@ zink_create_sampler_view(struct pipe_context *pctx, struct pipe_resource *pres,
          templ.u.tex.last_layer = state->u.tex.last_layer;
       }
 
-      if (zink_is_swapchain(res)) {
-         if (!zink_kopper_acquire(ctx, res, UINT64_MAX)) {
-            FREE_CL(sampler_view);
-            return NULL;
-         }
-      }
-
       ivci = create_ivci(screen, res, &templ, state->target);
       ivci.subresourceRange.levelCount = state->u.tex.last_level - state->u.tex.first_level + 1;
       ivci.subresourceRange.aspectMask = sampler_aspect_from_format(state->format);
@@ -1676,7 +1668,7 @@ create_image_surface(struct zink_context *ctx, const struct pipe_image_view *vie
       break;
    default: break;
    }
-   if (!res->obj->dt && view->resource->format != view->format)
+   if (view->resource->format != view->format)
       /* mutable not set by default */
       zink_resource_object_init_mutable(ctx, res);
    VkImageViewCreateInfo ivci = create_ivci(screen, res, &tmpl, target);
@@ -2298,7 +2290,6 @@ begin_rendering(struct zink_context *ctx)
    unsigned clear_buffers = 0;
    ctx->gfx_pipeline_state.render_pass = NULL;
    zink_update_vk_sample_locations(ctx);
-   zink_render_update_swapchain(ctx);
    bool has_depth = false;
    bool has_stencil = false;
    bool changed_layout = false;
@@ -2555,13 +2546,6 @@ zink_prep_fb_attachment(struct zink_context *ctx, struct zink_surface *surf, uns
 
    VkAccessFlags access;
    VkPipelineStageFlags pipeline;
-   if (zink_is_swapchain(res)) {
-      if (!zink_kopper_acquire(ctx, res, UINT64_MAX))
-         return VK_NULL_HANDLE;
-      zink_surface_swapchain_update(ctx, surf);
-      if (!i)
-         zink_update_fbfetch(ctx);
-   }
    VkImageLayout layout;
    if (ctx->tc && zink_screen(ctx->base.screen)->driver_workarounds.track_renderpasses && !ctx->blitting) {
       assert(threaded_context_get_renderpass_info(ctx->tc, false)->data == ctx->dynamic_fb.tc_info.data);
@@ -3007,17 +2991,6 @@ zink_set_framebuffer_state(struct pipe_context *pctx,
             assert(!ctx->needs_present || ctx->needs_present == res);
             ctx->needs_present = res;
          }
-         if (res->obj->dt) {
-            /* #6274 */
-            if (!zink_screen(ctx->base.screen)->info.have_KHR_swapchain_mutable_format &&
-                psurf->format != res->base.b.format) {
-               static bool warned = false;
-               if (!warned) {
-                  mesa_loge("zink: SRGB framebuffer unsupported without KHR_swapchain_mutable_format");
-                  warned = true;
-               }
-            }
-         }
          res->fb_bind_count++;
          res->fb_binds |= BITFIELD_BIT(i);
          if (util_format_has_alpha1(psurf->format)) {
@@ -3431,11 +3404,6 @@ zink_resource_image_barrier(struct zink_context *ctx, struct zink_resource *res,
    if (res->obj->needs_zs_evaluate)
       imb.pNext = &res->obj->zs_evaluate;
    res->obj->needs_zs_evaluate = false;
-   if (res->dmabuf_acquire) {
-      imb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-      imb.dstQueueFamilyIndex = zink_screen(ctx->base.screen)->gfx_queue;
-      res->dmabuf_acquire = false;
-   }
    VKCTX(CmdPipelineBarrier)(
       cmdbuf,
       res->obj->access_stage ? res->obj->access_stage : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -3471,11 +3439,6 @@ zink_resource_image_barrier2(struct zink_context *ctx, struct zink_resource *res
    if (res->obj->needs_zs_evaluate)
       imb.pNext = &res->obj->zs_evaluate;
    res->obj->needs_zs_evaluate = false;
-   if (res->dmabuf_acquire) {
-      imb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-      imb.dstQueueFamilyIndex = zink_screen(ctx->base.screen)->gfx_queue;
-      res->dmabuf_acquire = false;
-   }
    VkDependencyInfo dep = {
       VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
       NULL,
@@ -3933,18 +3896,6 @@ static void
 zink_flush_resource(struct pipe_context *pctx,
                     struct pipe_resource *pres)
 {
-   struct zink_context *ctx = zink_context(pctx);
-   struct zink_resource *res = zink_resource(pres);
-   if (res->obj->dt) {
-      if (zink_kopper_acquired(res->obj->dt, res->obj->dt_idx)) {
-         zink_screen(ctx->base.screen)->image_barrier(ctx, res, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-         zink_batch_reference_resource_rw(&ctx->batch, res, true);
-      } else {
-         ctx->needs_present = res;
-      }
-      ctx->batch.swapchain = res;
-   } else if (res->dmabuf)
-      res->dmabuf_acquire = true;
 }
 
 static struct pipe_stream_output_target *
@@ -4275,15 +4226,9 @@ zink_copy_image_buffer(struct zink_context *ctx, struct zink_resource *dst, stru
    bool buf2img = buf == src;
 
    if (buf2img) {
-      if (zink_is_swapchain(img)) {
-         if (!zink_kopper_acquire(ctx, img, UINT64_MAX))
-            return;
-      }
       zink_screen(ctx->base.screen)->image_barrier(ctx, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0);
       zink_screen(ctx->base.screen)->buffer_barrier(ctx, buf, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
    } else {
-      if (zink_is_swapchain(img))
-         needs_present_readback = zink_kopper_acquire_readback(ctx, img);
       zink_screen(ctx->base.screen)->image_barrier(ctx, img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, 0);
       zink_screen(ctx->base.screen)->buffer_barrier(ctx, buf, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
       util_range_add(&dst->base.b, &dst->valid_buffer_range, dstx, dstx + src_box->width);
@@ -4366,8 +4311,6 @@ zink_copy_image_buffer(struct zink_context *ctx, struct zink_resource *dst, stru
       else
          VKCTX(CmdCopyImageToBuffer)(cmdbuf, img->obj->image, img->layout, buf->obj->buffer, 1, &region);
    }
-   if (needs_present_readback)
-      zink_kopper_present_readback(ctx, img);
 }
 
 static void
