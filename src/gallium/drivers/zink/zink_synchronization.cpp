@@ -425,12 +425,7 @@ zink_resource_image_barrier(struct zink_context *ctx, struct zink_resource *res,
    res->obj->access = flags;
    res->obj->access_stage = pipeline;
    res->layout = new_layout;
-   if (res->obj->dt) {
-      struct kopper_displaytarget *cdt = res->obj->dt;
-      if (cdt->swapchain->num_acquires && res->obj->dt_idx != UINT32_MAX) {
-         cdt->swapchain->images[res->obj->dt_idx].layout = res->layout;
-      }
-   } else if (res->obj->exportable) {
+   if (res->obj->exportable) {
       struct pipe_resource *pres = NULL;
       bool found = false;
       _mesa_set_search_or_add(&ctx->batch.state->dmabuf_exports, res, &found);

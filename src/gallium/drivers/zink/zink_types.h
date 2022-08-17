@@ -606,11 +606,6 @@ struct zink_batch_state {
    struct util_dynarray fd_wait_semaphores; //dmabuf wait semaphores
    struct util_dynarray fd_wait_semaphore_stages; //dmabuf wait semaphores
 
-   VkSemaphore present;
-   struct zink_resource *swapchain;
-   struct util_dynarray acquires;
-   struct util_dynarray acquire_flags;
-
    struct {
       struct util_dynarray pipelines;
       struct util_dynarray layouts;
@@ -636,7 +631,6 @@ struct zink_batch_state {
    struct zink_batch_obj_list slab_objs;
    struct zink_batch_obj_list sparse_objs;
    struct zink_resource_object *last_added_obj;
-   struct util_dynarray swapchain_obj; //this doesn't have a zink_bo and must be handled differently
 
    struct util_dynarray unref_resources;
    struct util_dynarray bindless_releases[2];
@@ -665,7 +659,6 @@ struct zink_batch {
    struct zink_batch_state *state;
 
    struct zink_batch_usage *last_batch_usage;
-   struct zink_resource *swapchain;
 
    unsigned work_count;
 
@@ -1254,14 +1247,6 @@ struct zink_resource_object {
    /* TODO: this should be a union */
    int handle;
    struct zink_bo *bo;
-   // struct {
-   struct kopper_displaytarget *dt;
-   uint32_t dt_idx;
-   uint32_t last_dt_idx;
-   VkSemaphore present;
-   bool new_dt;
-   bool indefinite_acquire;
-   // }
 
 
    VkDeviceSize offset, size, alignment;
@@ -1340,9 +1325,7 @@ struct zink_resource {
    };
 
    bool copies_warned;
-   bool swapchain;
    bool dmabuf;
-   unsigned dt_stride;
 
    uint8_t modifiers_count;
    uint64_t *modifiers;
@@ -1402,9 +1385,6 @@ struct zink_screen {
    unsigned buffer_rebind_counter;
    unsigned image_rebind_counter;
    unsigned robust_ctx_count;
-
-   struct hash_table dts;
-   simple_mtx_t dt_lock;
 
    bool device_lost;
    int drm_fd;
@@ -1569,14 +1549,9 @@ struct zink_surface {
    VkImageViewUsageCreateInfo usage_info;
    /* for framebuffer use */
    struct zink_surface_info info;
-   bool is_swapchain;
    /* the current imageview */
    VkImageView image_view;
-   /* array of imageviews for swapchains, one for each image */
-   VkImageView *swapchain;
-   unsigned swapchain_size;
    void *obj; //backing resource object; used to determine rebinds
-   void *dt_swapchain; //current swapchain object; used to determine swapchain rebinds
    uint32_t hash; //for surface caching
 };
 
@@ -1841,7 +1816,7 @@ struct zink_context {
    struct set rendering_state_cache[6]; //[util_logbase2_ceil(msrtss samplecount)]
    struct set render_pass_state_cache;
    struct hash_table *render_pass_cache;
-   VkExtent2D swapchain_size;
+
    bool fb_changed;
    bool rp_changed; //force renderpass restart
    bool rp_layout_changed; //renderpass changed, maybe restart
@@ -1856,7 +1831,6 @@ struct zink_context {
    uint16_t void_clears;
    uint16_t fbfetch_outputs;
    uint16_t feedback_loops;
-   struct zink_resource *needs_present;
 
    struct pipe_vertex_buffer vertex_buffers[PIPE_MAX_ATTRIBS];
    bool vertex_buffers_dirty;

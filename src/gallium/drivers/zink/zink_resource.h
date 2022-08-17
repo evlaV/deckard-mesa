@@ -87,12 +87,6 @@ zink_resource_has_binds(const struct zink_resource *res)
    return res->all_binds > 0;
 }
 
-static ALWAYS_INLINE  bool
-zink_is_swapchain(const struct zink_resource *res)
-{
-   return res->swapchain;
-}
-
 bool
 zink_resource_copy_box_intersects(struct zink_resource *res, unsigned level, const struct pipe_box *box);
 void
@@ -102,7 +96,6 @@ zink_resource_copies_reset(struct zink_resource *res);
 
 #include "zink_batch.h"
 #include "zink_bo.h"
-#include "zink_kopper.h"
 
 static inline bool
 zink_resource_usage_is_unflushed(const struct zink_resource *res)
@@ -175,11 +168,6 @@ static inline void
 zink_batch_resource_usage_set(struct zink_batch *batch, struct zink_resource *res, bool write, bool is_buffer)
 {
    if (!is_buffer) {
-      if (res->obj->dt) {
-         VkSemaphore acquire = zink_kopper_acquire_submit(zink_screen(batch->state->ctx->base.screen), res);
-         if (acquire)
-            util_dynarray_append(&batch->state->acquires, VkSemaphore, acquire);
-      }
       if (write) {
          if (!res->valid && res->fb_bind_count)
             batch->state->ctx->rp_loadop_changed = true;

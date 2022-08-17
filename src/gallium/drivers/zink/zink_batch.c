@@ -2,7 +2,6 @@
 #include "zink_context.h"
 #include "zink_descriptors.h"
 #include "zink_framebuffer.h"
-#include "zink_kopper.h"
 #include "zink_program.h"
 #include "zink_query.h"
 #include "zink_resource.h"
@@ -48,8 +47,6 @@ reset_obj(struct zink_screen *screen, struct zink_batch_state *bs, struct zink_r
       obj->view_prune_count = 0;
       obj->view_prune_timeline = 0;
       simple_mtx_unlock(&obj->view_lock);
-      if (obj->dt)
-         zink_kopper_prune_batch_usage(obj->dt, &bs->usage);
    } else if (util_dynarray_num_elements(&obj->views, VkBufferView) > MAX_VIEW_COUNT && !zink_bo_has_unflushed_usage(obj->bo)) {
       /* avoid ballooning from too many views on always-used resources: */
       simple_mtx_lock(&obj->view_lock);
@@ -93,10 +90,6 @@ zink_reset_batch_state(struct zink_context *ctx, struct zink_batch_state *bs)
    reset_obj_list(screen, bs, &bs->real_objs);
    reset_obj_list(screen, bs, &bs->slab_objs);
    reset_obj_list(screen, bs, &bs->sparse_objs);
-   while (util_dynarray_contains(&bs->swapchain_obj, struct zink_resource_object*)) {
-      struct zink_resource_object *obj = util_dynarray_pop(&bs->swapchain_obj, struct zink_resource_object*);
-      reset_obj(screen, bs, obj);
-   }
 
    /* this is where bindless texture/buffer ids get recycled */
    for (unsigned i = 0; i < 2; i++) {
@@ -152,16 +145,14 @@ zink_reset_batch_state(struct zink_context *ctx, struct zink_batch_state *bs)
    bs->signal_semaphore = VK_NULL_HANDLE;
    util_dynarray_clear(&bs->wait_semaphore_stages);
 
-   bs->present = VK_NULL_HANDLE;
    /* check the arrays first to avoid locking unnecessarily */
-   if (util_dynarray_contains(&bs->acquires, VkSemaphore) || util_dynarray_contains(&bs->wait_semaphores, VkSemaphore)) {
+   if (util_dynarray_contains(&bs->wait_semaphores, VkSemaphore)) {
       simple_mtx_lock(&screen->semaphores_lock);
-      util_dynarray_append_dynarray(&screen->semaphores, &bs->acquires);
-      util_dynarray_clear(&bs->acquires);
       util_dynarray_append_dynarray(&screen->semaphores, &bs->wait_semaphores);
       util_dynarray_clear(&bs->wait_semaphores);
       simple_mtx_unlock(&screen->semaphores_lock);
    }
+
    if (util_dynarray_contains(&bs->signal_semaphores, VkSemaphore) || util_dynarray_contains(&bs->fd_wait_semaphores, VkSemaphore)) {
       simple_mtx_lock(&screen->semaphores_lock);
       util_dynarray_append_dynarray(&screen->fd_semaphores, &bs->signal_semaphores);
@@ -170,7 +161,6 @@ zink_reset_batch_state(struct zink_context *ctx, struct zink_batch_state *bs)
       util_dynarray_clear(&bs->fd_wait_semaphores);
       simple_mtx_unlock(&screen->semaphores_lock);
    }
-   bs->swapchain = NULL;
 
    bs->unordered_write_access = 0;
    bs->unordered_write_stages = 0;
@@ -291,14 +281,11 @@ zink_batch_state_destroy(struct zink_screen *screen, struct zink_batch_state *bs
    util_dynarray_fini(&bs->dead_querypools);
    util_dynarray_fini(&bs->dgc.pipelines);
    util_dynarray_fini(&bs->dgc.layouts);
-   util_dynarray_fini(&bs->swapchain_obj);
    util_dynarray_fini(&bs->zombie_samplers);
    util_dynarray_fini(&bs->dead_framebuffers);
    util_dynarray_fini(&bs->unref_resources);
    util_dynarray_fini(&bs->bindless_releases[0]);
    util_dynarray_fini(&bs->bindless_releases[1]);
-   util_dynarray_fini(&bs->acquires);
-   util_dynarray_fini(&bs->acquire_flags);
    unsigned num_mfences = util_dynarray_num_elements(&bs->fence.mfences, void *);
    struct zink_tc_fence **mfence = bs->fence.mfences.data;
    for (unsigned i = 0; i < num_mfences; i++) {
@@ -362,11 +349,8 @@ create_batch_state(struct zink_context *ctx)
    util_dynarray_init(&bs->zombie_samplers, NULL);
    util_dynarray_init(&bs->dead_framebuffers, NULL);
    util_dynarray_init(&bs->unref_resources, NULL);
-   util_dynarray_init(&bs->acquires, NULL);
-   util_dynarray_init(&bs->acquire_flags, NULL);
    util_dynarray_init(&bs->bindless_releases[0], NULL);
    util_dynarray_init(&bs->bindless_releases[1], NULL);
-   util_dynarray_init(&bs->swapchain_obj, NULL);
    util_dynarray_init(&bs->fence.mfences, NULL);
 
    cnd_init(&bs->usage.flush);
@@ -551,7 +535,6 @@ post_submit(void *data, void *gdata, int thread_index)
 }
 
 typedef enum {
-   ZINK_SUBMIT_WAIT_ACQUIRE,
    ZINK_SUBMIT_WAIT_FD,
    ZINK_SUBMIT_CMDBUF,
    ZINK_SUBMIT_SIGNAL,
@@ -573,17 +556,8 @@ submit_queue(void *data, void *gdata, int thread_index)
    bs->usage.unflushed = false;
 
    uint64_t batch_id = bs->fence.batch_id;
-   /* first submit is just for acquire waits since they have a separate array */
    for (unsigned i = 0; i < ARRAY_SIZE(si); i++)
       si[i].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-   si[ZINK_SUBMIT_WAIT_ACQUIRE].waitSemaphoreCount = util_dynarray_num_elements(&bs->acquires, VkSemaphore);
-   si[ZINK_SUBMIT_WAIT_ACQUIRE].pWaitSemaphores = bs->acquires.data;
-   while (util_dynarray_num_elements(&bs->acquire_flags, VkPipelineStageFlags) < si[ZINK_SUBMIT_WAIT_ACQUIRE].waitSemaphoreCount) {
-      VkPipelineStageFlags mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      util_dynarray_append(&bs->acquire_flags, VkPipelineStageFlags, mask);
-   }
-   assert(util_dynarray_num_elements(&bs->acquires, VkSemaphore) <= util_dynarray_num_elements(&bs->acquire_flags, VkPipelineStageFlags));
-   si[ZINK_SUBMIT_WAIT_ACQUIRE].pWaitDstStageMask = bs->acquire_flags.data;
 
    si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount = util_dynarray_num_elements(&bs->fd_wait_semaphores, VkSemaphore);
    si[ZINK_SUBMIT_WAIT_FD].pWaitSemaphores = bs->fd_wait_semaphores.data;
@@ -594,13 +568,9 @@ submit_queue(void *data, void *gdata, int thread_index)
    assert(util_dynarray_num_elements(&bs->fd_wait_semaphores, VkSemaphore) <= util_dynarray_num_elements(&bs->fd_wait_semaphore_stages, VkPipelineStageFlags));
    si[ZINK_SUBMIT_WAIT_FD].pWaitDstStageMask = bs->fd_wait_semaphore_stages.data;
 
-   if (si[ZINK_SUBMIT_WAIT_ACQUIRE].waitSemaphoreCount == 0) {
+   if (si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount == 0) {
       num_si--;
       submit++;
-      if (si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount == 0) {
-         num_si--;
-         submit++;
-      }
    }
 
    /* then the real submit */
@@ -737,15 +707,6 @@ zink_end_batch(struct zink_context *ctx, struct zink_batch *batch)
    ctx->batch_states_count++;
    batch->work_count = 0;
 
-   /* this is swapchain presentation semaphore handling */
-   if (batch->swapchain) {
-      if (zink_kopper_acquired(batch->swapchain->obj->dt, batch->swapchain->obj->dt_idx) && !batch->swapchain->obj->present) {
-         batch->state->present = zink_kopper_present(screen, batch->swapchain);
-         batch->state->swapchain = batch->swapchain;
-      }
-      batch->swapchain = NULL;
-   }
-
    if (screen->device_lost)
       return;
 
@@ -856,7 +817,7 @@ zink_batch_reference_resource_rw(struct zink_batch *batch, struct zink_resource 
 void
 zink_batch_add_wait_semaphore(struct zink_batch *batch, VkSemaphore sem)
 {
-   util_dynarray_append(&batch->state->acquires, VkSemaphore, sem);
+   printf("XXXXXXX: zink_batch_add_wait_semaphore\n");
 }
 
 static bool
@@ -892,17 +853,6 @@ zink_batch_reference_resource_move(struct zink_batch *batch, struct zink_resourc
 {
    struct zink_batch_state *bs = batch->state;
 
-   /* swapchains are special */
-   if (zink_is_swapchain(res)) {
-      struct zink_resource_object **swapchains = bs->swapchain_obj.data;
-      unsigned count = util_dynarray_num_elements(&bs->swapchain_obj, struct zink_resource_object*);
-      for (unsigned i = 0; i < count; i++) {
-         if (swapchains[i] == res->obj)
-            return true;
-      }
-      util_dynarray_append(&bs->swapchain_obj, struct zink_resource_object*, res->obj);
-      return false;
-   }
    /* Fast exit for no-op calls.
     * This is very effective with suballocators and linear uploaders that
     * are outside of the winsys.

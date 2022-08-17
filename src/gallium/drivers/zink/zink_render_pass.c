@@ -24,7 +24,6 @@
 #include "zink_context.h"
 #include "zink_clear.h"
 #include "zink_framebuffer.h"
-#include "zink_kopper.h"
 #include "zink_query.h"
 #include "zink_render_pass.h"
 #include "zink_resource.h"
@@ -602,9 +601,6 @@ setup_framebuffer(struct zink_context *ctx)
    ctx->rp_layout_changed = false;
    ctx->rp_changed = false;
 
-   if (zink_render_update_swapchain(ctx))
-      zink_render_fixup_swapchain(ctx);
-
    if (!ctx->fb_changed)
       return;
 
@@ -849,40 +845,4 @@ zink_init_render_pass(struct zink_context *ctx)
                                                     hash_render_pass_state,
                                                     equals_render_pass_state);
    return !!ctx->render_pass_cache;
-}
-
-void
-zink_render_fixup_swapchain(struct zink_context *ctx)
-{
-   if ((ctx->swapchain_size.width || ctx->swapchain_size.height)) {
-      unsigned old_w = ctx->fb_state.width;
-      unsigned old_h = ctx->fb_state.height;
-      ctx->fb_state.width = ctx->swapchain_size.width;
-      ctx->fb_state.height = ctx->swapchain_size.height;
-      ctx->dynamic_fb.info.renderArea.extent.width = MIN2(ctx->dynamic_fb.info.renderArea.extent.width, ctx->fb_state.width);
-      ctx->dynamic_fb.info.renderArea.extent.height = MIN2(ctx->dynamic_fb.info.renderArea.extent.height, ctx->fb_state.height);
-      zink_kopper_fixup_depth_buffer(ctx);
-      if (ctx->fb_state.width != old_w || ctx->fb_state.height != old_h)
-         ctx->scissor_changed = true;
-      if (ctx->framebuffer)
-         zink_update_framebuffer_state(ctx);
-      ctx->swapchain_size.width = ctx->swapchain_size.height = 0;
-   }
-}
-
-bool
-zink_render_update_swapchain(struct zink_context *ctx)
-{
-   bool has_swapchain = false;
-   for (unsigned i = 0; i < ctx->fb_state.nr_cbufs; i++) {
-      if (!ctx->fb_state.cbufs[i])
-         continue;
-      struct zink_resource *res = zink_resource(ctx->fb_state.cbufs[i]->texture);
-      if (zink_is_swapchain(res)) {
-         has_swapchain = true;
-         if (zink_kopper_acquire(ctx, res, UINT64_MAX))
-            zink_surface_swapchain_update(ctx, zink_csurface(ctx->fb_state.cbufs[i]));
-      }
-   }
-   return has_swapchain;
 }

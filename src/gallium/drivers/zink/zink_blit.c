@@ -2,7 +2,6 @@
 #include "zink_context.h"
 #include "zink_format.h"
 #include "zink_inlines.h"
-#include "zink_kopper.h"
 #include "zink_helpers.h"
 #include "zink_query.h"
 #include "zink_resource.h"
@@ -25,7 +24,7 @@ apply_dst_clears(struct zink_context *ctx, const struct pipe_blit_info *info, bo
 }
 
 static bool
-blit_resolve(struct zink_context *ctx, const struct pipe_blit_info *info, bool *needs_present_readback)
+blit_resolve(struct zink_context *ctx, const struct pipe_blit_info *info)
 {
    if (util_format_get_mask(info->dst.format) != info->mask ||
        util_format_get_mask(info->src.format) != info->mask ||
@@ -66,14 +65,9 @@ blit_resolve(struct zink_context *ctx, const struct pipe_blit_info *info, bool *
    apply_dst_clears(ctx, info, false);
    zink_fb_clears_apply_region(ctx, info->src.resource, zink_rect_from_box(&info->src.box));
 
-   if (src->obj->dt)
-      *needs_present_readback = zink_kopper_acquire_readback(ctx, src);
-
    struct zink_batch *batch = &ctx->batch;
    zink_resource_setup_transfer_layouts(ctx, src, dst);
-   VkCommandBuffer cmdbuf = *needs_present_readback ?
-                            ctx->batch.state->cmdbuf :
-                            zink_get_cmdbuf(ctx, src, dst);
+   VkCommandBuffer cmdbuf = zink_get_cmdbuf(ctx, src, dst);
    if (cmdbuf == ctx->batch.state->cmdbuf)
       zink_flush_dgc_if_enabled(ctx);
    zink_batch_reference_resource_rw(batch, src, false);
@@ -130,7 +124,7 @@ blit_resolve(struct zink_context *ctx, const struct pipe_blit_info *info, bool *
 }
 
 static bool
-blit_native(struct zink_context *ctx, const struct pipe_blit_info *info, bool *needs_present_readback)
+blit_native(struct zink_context *ctx, const struct pipe_blit_info *info)
 {
    if (util_format_get_mask(info->dst.format) != info->mask ||
        util_format_get_mask(info->src.format) != info->mask ||
@@ -260,14 +254,9 @@ blit_native(struct zink_context *ctx, const struct pipe_blit_info *info, bool *n
    apply_dst_clears(ctx, info, false);
    zink_fb_clears_apply_region(ctx, info->src.resource, zink_rect_from_box(&info->src.box));
 
-   if (src->obj->dt)
-      *needs_present_readback = zink_kopper_acquire_readback(ctx, src);
-
    struct zink_batch *batch = &ctx->batch;
    zink_resource_setup_transfer_layouts(ctx, src, dst);
-   VkCommandBuffer cmdbuf = *needs_present_readback ?
-                            ctx->batch.state->cmdbuf :
-                            zink_get_cmdbuf(ctx, src, dst);
+   VkCommandBuffer cmdbuf = zink_get_cmdbuf(ctx, src, dst);
    if (cmdbuf == ctx->batch.state->cmdbuf)
       zink_flush_dgc_if_enabled(ctx);
    zink_batch_reference_resource_rw(batch, src, false);
@@ -318,11 +307,6 @@ zink_blit(struct pipe_context *pctx,
 
    struct zink_resource *src = zink_resource(info->src.resource);
    struct zink_resource *dst = zink_resource(info->dst.resource);
-   bool needs_present_readback = false;
-   if (zink_is_swapchain(dst)) {
-      if (!zink_kopper_acquire(ctx, dst, UINT64_MAX))
-         return;
-   }
 
    if (src_desc == dst_desc ||
        src_desc->nr_channels != 4 || src_desc->layout != UTIL_FORMAT_LAYOUT_PLAIN ||
@@ -332,12 +316,12 @@ zink_blit(struct pipe_context *pctx,
        */
       if (info->src.resource->nr_samples > 1 &&
           info->dst.resource->nr_samples <= 1) {
-         if (blit_resolve(ctx, info, &needs_present_readback))
+         if (blit_resolve(ctx, info))
             goto end;
       } else {
          if (try_copy_region(pctx, info))
             goto end;
-         if (blit_native(ctx, info, &needs_present_readback))
+         if (blit_native(ctx, info))
             goto end;
       }
    }
@@ -361,11 +345,6 @@ zink_blit(struct pipe_context *pctx,
                  util_format_short_name(info->dst.resource->format));
          goto end;
       }
-   }
-
-   if (src->obj->dt) {
-      zink_fb_clears_apply_region(ctx, info->src.resource, zink_rect_from_box(&info->src.box));
-      needs_present_readback = zink_kopper_acquire_readback(ctx, src);
    }
 
    /* this is discard_only because we're about to start a renderpass that will
@@ -400,7 +379,6 @@ zink_blit(struct pipe_context *pctx,
    zink_flush_dgc_if_enabled(ctx);
    ctx->unordered_blitting = !(info->render_condition_enable && ctx->render_condition_active) &&
                              zink_screen(ctx->base.screen)->info.have_KHR_dynamic_rendering &&
-                             !needs_present_readback &&
                              zink_get_cmdbuf(ctx, src, dst) == ctx->batch.state->barrier_cmdbuf;
    VkCommandBuffer cmdbuf = ctx->batch.state->cmdbuf;
    VkPipeline pipeline = ctx->gfx_pipeline_state.pipeline;
@@ -470,11 +448,6 @@ zink_blit(struct pipe_context *pctx,
    }
    ctx->unordered_blitting = false;
 end:
-   if (needs_present_readback) {
-      src->obj->unordered_read = false;
-      dst->obj->unordered_write = false;
-      zink_kopper_present_readback(ctx, src);
-   }
 }
 
 /* similar to radeonsi */
@@ -527,14 +500,6 @@ void
 zink_blit_barriers(struct zink_context *ctx, struct zink_resource *src, struct zink_resource *dst, bool whole_dst)
 {
    struct zink_screen *screen = zink_screen(ctx->base.screen);
-   if (src && zink_is_swapchain(src)) {
-      if (!zink_kopper_acquire(ctx, src, UINT64_MAX))
-         return;
-   } else if (dst && zink_is_swapchain(dst)) {
-      if (!zink_kopper_acquire(ctx, dst, UINT64_MAX))
-         return;
-   }
-
    VkAccessFlagBits flags;
    VkPipelineStageFlagBits pipeline;
    if (util_format_is_depth_or_stencil(dst->base.b.format)) {
