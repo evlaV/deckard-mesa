@@ -2,7 +2,6 @@
 #include "zink_context.h"
 #include "zink_descriptors.h"
 #include "zink_framebuffer.h"
-#include "zink_kopper.h"
 #include "zink_program.h"
 #include "zink_query.h"
 #include "zink_resource.h"
@@ -88,14 +87,6 @@ zink_reset_batch_state(struct zink_context *ctx, struct zink_batch_state *bs)
    util_dynarray_clear(&bs->wait_semaphores);
    util_dynarray_clear(&bs->wait_semaphore_stages);
 
-   bs->present = VK_NULL_HANDLE;
-   while (util_dynarray_contains(&bs->acquires, VkSemaphore))
-      VKSCR(DestroySemaphore)(screen->dev, util_dynarray_pop(&bs->acquires, VkSemaphore), NULL);
-   bs->swapchain = NULL;
-
-   while (util_dynarray_contains(&bs->dead_swapchains, VkImageView))
-      VKSCR(DestroyImageView)(screen->dev, util_dynarray_pop(&bs->dead_swapchains, VkImageView), NULL);
-
    /* only reset submitted here so that tc fence desync can pick up the 'completed' flag
     * before the state is reused
     */
@@ -171,9 +162,6 @@ zink_batch_state_destroy(struct zink_screen *screen, struct zink_batch_state *bs
    util_dynarray_fini(&bs->unref_resources);
    util_dynarray_fini(&bs->bindless_releases[0]);
    util_dynarray_fini(&bs->bindless_releases[1]);
-   util_dynarray_fini(&bs->acquires);
-   util_dynarray_fini(&bs->acquire_flags);
-   util_dynarray_fini(&bs->dead_swapchains);
    _mesa_set_destroy(bs->surfaces, NULL);
    _mesa_set_destroy(bs->bufferviews, NULL);
    _mesa_set_destroy(bs->programs, NULL);
@@ -232,9 +220,6 @@ create_batch_state(struct zink_context *ctx)
    util_dynarray_init(&bs->dead_framebuffers, NULL);
    util_dynarray_init(&bs->persistent_resources, NULL);
    util_dynarray_init(&bs->unref_resources, NULL);
-   util_dynarray_init(&bs->acquires, NULL);
-   util_dynarray_init(&bs->acquire_flags, NULL);
-   util_dynarray_init(&bs->dead_swapchains, NULL);
    util_dynarray_init(&bs->bindless_releases[0], NULL);
    util_dynarray_init(&bs->bindless_releases[1], NULL);
 
@@ -363,16 +348,7 @@ submit_queue(void *data, void *gdata, int thread_index)
    bs->usage.unflushed = false;
 
    uint64_t batch_id = bs->fence.batch_id;
-   /* first submit is just for acquire waits since they have a separate array */
-   si[0].sType = si[1].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-   si[0].waitSemaphoreCount = util_dynarray_num_elements(&bs->acquires, VkSemaphore);
-   si[0].pWaitSemaphores = bs->acquires.data;
-   while (util_dynarray_num_elements(&bs->acquire_flags, VkPipelineStageFlags) < si[0].waitSemaphoreCount) {
-      VkPipelineStageFlags mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      util_dynarray_append(&bs->acquire_flags, VkPipelineStageFlags, mask);
-   }
-   assert(util_dynarray_num_elements(&bs->acquires, VkSemaphore) <= util_dynarray_num_elements(&bs->acquire_flags, VkPipelineStageFlags));
-   si[0].pWaitDstStageMask = bs->acquire_flags.data;
+   si[1].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
    if (si[0].waitSemaphoreCount == 0)
      num_si--;
@@ -399,10 +375,6 @@ submit_queue(void *data, void *gdata, int thread_index)
    tsi.pSignalSemaphoreValues = signal_values;
    signal_values[si[1].signalSemaphoreCount] = batch_id;
    signals[si[1].signalSemaphoreCount++] = screen->sem;
-   tsi.signalSemaphoreValueCount = si[1].signalSemaphoreCount;
-
-   if (bs->present)
-      signals[si[1].signalSemaphoreCount++] = bs->present;
    tsi.signalSemaphoreValueCount = si[1].signalSemaphoreCount;
 
    VkResult result = VKSCR(EndCommandBuffer)(bs->cmdbuf);
@@ -484,14 +456,6 @@ zink_end_batch(struct zink_context *ctx, struct zink_batch *batch)
    ctx->batch_states_count++;
    batch->work_count = 0;
 
-   if (batch->swapchain) {
-      if (zink_kopper_acquired(batch->swapchain->obj->dt, batch->swapchain->obj->dt_idx) && !batch->swapchain->obj->present) {
-         batch->state->present = zink_kopper_present(screen, batch->swapchain);
-         batch->state->swapchain = batch->swapchain;
-      }
-      batch->swapchain = NULL;
-   }
-
    if (screen->device_lost)
       return;
 
@@ -507,11 +471,6 @@ zink_end_batch(struct zink_context *ctx, struct zink_batch *batch)
 void
 zink_batch_resource_usage_set(struct zink_batch *batch, struct zink_resource *res, bool write)
 {
-   if (res->obj->dt) {
-      VkSemaphore acquire = zink_kopper_acquire_submit(zink_screen(batch->state->ctx->base.screen), res);
-      if (acquire)
-         util_dynarray_append(&batch->state->acquires, VkSemaphore, acquire);
-   }
    if (write && !res->obj->is_buffer) {
       if (!res->valid && res->fb_binds)
          batch->state->ctx->rp_loadop_changed = true;
@@ -540,7 +499,7 @@ zink_batch_reference_resource_rw(struct zink_batch *batch, struct zink_resource 
 void
 zink_batch_add_wait_semaphore(struct zink_batch *batch, VkSemaphore sem)
 {
-   util_dynarray_append(&batch->state->acquires, VkSemaphore, sem);
+   printf("XXXXXXX: zink_batch_add_wait_semaphore\n");
 }
 
 bool

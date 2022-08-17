@@ -29,7 +29,6 @@
 #include "zink_fence.h"
 #include "zink_program.h"
 #include "zink_screen.h"
-#include "zink_kopper.h"
 
 #ifdef VK_USE_PLATFORM_METAL_EXT
 #include "QuartzCore/CAMetalLayer.h"
@@ -101,8 +100,6 @@ zink_destroy_resource_object(struct zink_screen *screen, struct zink_resource_ob
    if (obj->is_buffer) {
       VKSCR(DestroyBuffer)(screen->dev, obj->buffer, NULL);
       VKSCR(DestroyBuffer)(screen->dev, obj->storage_buffer, NULL);
-   } else if (obj->dt) {
-      zink_kopper_displaytarget_destroy(screen, obj->dt);
    } else if (!obj->is_aux) {
       VKSCR(DestroyImage)(screen->dev, obj->image, NULL);
    } else {
@@ -111,10 +108,7 @@ zink_destroy_resource_object(struct zink_screen *screen, struct zink_resource_ob
 #endif
    }
 
-   if (obj->dt) {
-      FREE(obj->bo); //this is a dummy struct
-   } else
-      zink_bo_unref(screen, obj->bo);
+   zink_bo_unref(screen, obj->bo);
    FREE(obj);
 }
 
@@ -557,12 +551,11 @@ retry:
 
 static struct zink_resource_object *
 resource_object_create(struct zink_screen *screen, const struct pipe_resource *templ, struct winsys_handle *whandle, bool *linear,
-                       uint64_t *modifiers, int modifiers_count, const void *loader_private)
+                       uint64_t *modifiers, int modifiers_count)
 {
    struct zink_resource_object *obj = CALLOC_STRUCT(zink_resource_object);
    if (!obj)
       return NULL;
-   obj->last_dt_idx = obj->dt_idx = UINT32_MAX; //TODO: unionize
 
    VkMemoryRequirements reqs = {0};
    VkMemoryPropertyFlags flags;
@@ -616,11 +609,7 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
       export_types |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 
    pipe_reference_init(&obj->reference, 1);
-   if (loader_private) {
-      obj->bo = CALLOC_STRUCT(zink_bo);
-      obj->transfer_dst = true;
-      return obj;
-   } else if (templ->target == PIPE_BUFFER) {
+   if (templ->target == PIPE_BUFFER) {
       VkBufferCreateInfo bci = create_bci(screen, templ, templ->bind);
 
       if (VKSCR(CreateBuffer)(screen->dev, &bci, NULL, &obj->buffer) != VK_SUCCESS) {
@@ -1102,6 +1091,8 @@ resource_create(struct pipe_screen *pscreen,
                 const uint64_t *modifiers, int modifiers_count,
                 const void *loader_private)
 {
+   assert(!loader_private);
+
    struct zink_screen *screen = zink_screen(pscreen);
    struct zink_resource *res = CALLOC_STRUCT_CL(zink_resource);
 
@@ -1129,7 +1120,7 @@ resource_create(struct pipe_screen *pscreen,
       templ2.flags &= ~PIPE_RESOURCE_FLAG_SPARSE;
       res->base.b.flags &= ~PIPE_RESOURCE_FLAG_SPARSE;
    }
-   res->obj = resource_object_create(screen, &templ2, whandle, &linear, res->modifiers, res->modifiers_count, loader_private);
+   res->obj = resource_object_create(screen, &templ2, whandle, &linear, res->modifiers, res->modifiers_count);
    if (!res->obj) {
       free(res->modifiers);
       FREE_CL(res);
@@ -1163,54 +1154,12 @@ resource_create(struct pipe_screen *pscreen,
          res->need_2D = (screen->need_2D_zs && util_format_is_depth_or_stencil(templ->format)) ||
                         (screen->need_2D_sparse && (templ->flags & PIPE_RESOURCE_FLAG_SPARSE));
       }
-      res->dmabuf_acquire = whandle && whandle->type == WINSYS_HANDLE_TYPE_FD;
-      res->dmabuf = res->dmabuf_acquire = whandle && whandle->type == WINSYS_HANDLE_TYPE_FD;
-      res->layout = res->dmabuf_acquire ? VK_IMAGE_LAYOUT_PREINITIALIZED : VK_IMAGE_LAYOUT_UNDEFINED;
+      res->dmabuf = whandle && whandle->type == WINSYS_HANDLE_TYPE_FD;;
+      res->layout = res->dmabuf ? VK_IMAGE_LAYOUT_PREINITIALIZED : VK_IMAGE_LAYOUT_UNDEFINED;
       res->linear = linear;
       res->aspect = aspect_from_format(templ->format);
    }
 
-   if (loader_private) {
-      if (templ->bind & PIPE_BIND_DISPLAY_TARGET) {
-         /* backbuffer */
-         res->obj->dt = zink_kopper_displaytarget_create(screen,
-                                                         res->base.b.bind,
-                                                         res->base.b.format,
-                                                         templ->width0,
-                                                         templ->height0,
-                                                         64, loader_private,
-                                                         &res->dt_stride);
-         assert(res->obj->dt);
-      } else {
-         /* frontbuffer */
-         struct zink_resource *back = (void*)loader_private;
-         struct kopper_displaytarget *cdt = back->obj->dt;
-         cdt->refcount++;
-         assert(back->obj->dt);
-         res->obj->dt = back->obj->dt;
-      }
-      struct kopper_displaytarget *cdt = res->obj->dt;
-      if (zink_kopper_has_srgb(cdt))
-         res->obj->vkflags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
-      if (cdt->swapchain->scci.flags == VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR)
-         res->obj->vkflags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
-      res->obj->vkusage = cdt->swapchain->scci.imageUsage;
-      res->base.b.bind |= PIPE_BIND_DISPLAY_TARGET;
-      res->linear = false;
-      res->swapchain = true;
-      /* on swapchain create, try to get an implicit format modifier for dmabuf export */
-      if (screen->implicit_mod == DRM_FORMAT_MOD_INVALID) {
-         /* context isn't actually used, so just pass copy context */
-         if (zink_kopper_acquire(screen->copy_context, res, UINT64_MAX)) {
-            VkImageDrmFormatModifierPropertiesEXT modprops = {0};
-            modprops.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
-            VkResult result = VKSCR(GetImageDrmFormatModifierPropertiesEXT)(screen->dev, res->obj->image, &modprops);
-            /* if this fails, no big deal */
-            if (result == VK_SUCCESS)
-               screen->implicit_mod = modprops.drmFormatModifier;
-         }
-      }
-   }
    if (!res->obj->host_visible)
       res->base.b.flags |= PIPE_RESOURCE_FLAG_DONT_MAP_DIRECTLY;
    if (res->obj->is_buffer) {
@@ -1268,7 +1217,7 @@ add_resource_bind(struct zink_context *ctx, struct zink_resource *res, unsigned 
             res->modifiers[i] = screen->modifier_props[res->base.b.format].pDrmFormatModifierProperties[i].drmFormatModifier;
       }
    }
-   struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, &res->linear, res->modifiers, res->modifiers_count, NULL);
+   struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, &res->linear, res->modifiers, res->modifiers_count);
    if (!new_obj) {
       debug_printf("new backing resource alloc failed!");
       res->base.b.bind &= ~bind;
@@ -1615,7 +1564,7 @@ invalidate_buffer(struct zink_context *ctx, struct zink_resource *res)
    if (!zink_resource_has_usage(res))
       return false;
 
-   struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, NULL, NULL, 0, NULL);
+   struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, NULL, NULL, 0);
    if (!new_obj) {
       debug_printf("new backing resource alloc failed!");
       return false;
@@ -1938,9 +1887,6 @@ zink_image_map(struct pipe_context *pctx,
       return NULL;
 
    trans->base.b.level = level;
-   if (zink_is_swapchain(res))
-      /* this is probably a multi-chain which has already been acquired */
-      zink_kopper_acquire(ctx, res, 0);
 
    void *ptr;
    if (usage & PIPE_MAP_WRITE && !(usage & PIPE_MAP_READ))
@@ -2189,7 +2135,6 @@ zink_resource_object_init_storage(struct zink_context *ctx, struct zink_resource
       unreachable("zink: all buffers should have this bit");
       return true;
    }
-   assert(!res->obj->dt);
    zink_fb_clears_apply_region(ctx, &res->base.b, (struct u_rect){0, res->base.b.width0, 0, res->base.b.height0});
    bool ret = add_resource_bind(ctx, res, PIPE_BIND_SHADER_IMAGE);
    if (ret)
