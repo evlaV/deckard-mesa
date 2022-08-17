@@ -813,7 +813,7 @@ gbm_dri_bo_get_handle_for_plane(struct gbm_bo *_bo, int plane)
       dri->image->queryImage(bo->image, __DRI_IMAGE_ATTRIB_HANDLE, &ret.s32);
    }
 
-#ifdef TEST_GPU_DRIVER
+#if 0
    // __DRI_IMAGE_ATTRIB_HANDLE actually returned a DMABUF fd instead of a drm handle
    // this will leak the handle (image's memory won't be freed until gbm device is closed)
    struct drm_prime_handle handle = { .fd = ret.s32 };
@@ -1152,7 +1152,7 @@ gbm_dri_bo_import(struct gbm_device *gbm,
    dri->image->queryImage(bo->image, __DRI_IMAGE_ATTRIB_HANDLE,
                           &bo->base.v0.handle.s32);
 
-#ifdef TEST_GPU_DRIVER
+#if 0
    // __DRI_IMAGE_ATTRIB_HANDLE actually returned a DMABUF fd instead of a drm handle
    // this will leak the handle (image's memory won't be freed until gbm device is closed)
    struct drm_prime_handle handle = { .fd = bo->base.v0.handle.s32 };
@@ -1288,7 +1288,7 @@ gbm_dri_bo_create(struct gbm_device *gbm,
    dri->image->queryImage(bo->image, __DRI_IMAGE_ATTRIB_STRIDE,
                           (int *) &bo->base.v0.stride);
 
-#ifdef TEST_GPU_DRIVER
+#if 0
    // __DRI_IMAGE_ATTRIB_HANDLE actually returned a DMABUF fd instead of a drm handle
    // this will leak the handle (image's memory won't be freed until gbm device is closed)
    struct drm_prime_handle handle = { .fd = bo->base.v0.handle.s32 };
