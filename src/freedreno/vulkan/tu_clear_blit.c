@@ -2800,7 +2800,7 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
        info->renderArea.offset.y == 0 &&
        info->renderArea.extent.width == iview->view.width &&
        info->renderArea.extent.height == iview->view.height &&
-       fast_clearable(&info->pClearValues[a], format, &fast_clear_val)) {
+       fast_clearable(&info->pClearValues[a], vk_format, &fast_clear_val)) {
       VkClearValue clear_val = { .color.uint32[0] = fast_clear_val };
       VkExtent2D extent;
 
