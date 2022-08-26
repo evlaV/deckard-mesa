@@ -203,7 +203,9 @@ flush_ring(void)
       return;
 
    struct fd_submit_fence fence = {};
-   fence.rptr = &fence.rptr_storage;
+#ifdef TEST_GPU_DRIVER  
+    fence.rptr = &fence.rptr_storage;
+#endif
    util_queue_fence_init(&fence.ready);
 
    ret = fd_submit_flush(dev.submit, -1, &fence);
