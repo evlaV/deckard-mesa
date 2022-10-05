@@ -270,9 +270,7 @@ enum tu_debug_flags
    TU_DEBUG_LOG_SKIP_GMEM_OPS = 1 << 17,
    TU_DEBUG_PERF = 1 << 18,
    TU_DEBUG_NOLRZFC = 1 << 19,
-#ifdef TEST_GPU_DRIVER
    TU_DEBUG_PREEMPT = 1 << 20,
-#endif
 };
 
 struct tu_instance
