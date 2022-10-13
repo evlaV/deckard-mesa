@@ -694,6 +694,8 @@ tu_timeline_sync_wait(struct vk_device *vk_device,
    uint32_t pending = wait_count;
    struct tu_timeline_sync *submitted_syncs[wait_count];
 
+   abs_timeout_ns = MIN2(abs_timeout_ns, INT64_MAX); //clamp abs_timeout_ns to int64_max for proper behavior
+   
    while (pending) {
       pending = 0;
       submit_count = 0;
