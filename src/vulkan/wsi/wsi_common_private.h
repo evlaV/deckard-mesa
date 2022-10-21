@@ -176,6 +176,9 @@ void
 wsi_wl_surface_destroy(VkIcdSurfaceBase *icd_surface, VkInstance _instance,
                        const VkAllocationCallbacks *pAllocator);
 
+bool
+wsi_init_pthread_cond_monotonic(pthread_cond_t *cond);
+
 VkResult
 wsi_swapchain_init(const struct wsi_device *wsi,
                    struct wsi_swapchain *chain,
