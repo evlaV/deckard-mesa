@@ -179,7 +179,7 @@ tu_drm_submitqueue_new(const struct tu_device *dev,
           priority < dev->physical_device->submitqueue_priority_count);
    struct drm_msm_submitqueue req = {
       .flags = 0,
-      .prio = priority,
+      .prio = 0,
    };
 
    int ret = drmCommandWriteRead(dev->fd,
