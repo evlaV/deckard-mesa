@@ -179,7 +179,7 @@ tu_drm_submitqueue_new(const struct tu_device *dev,
           priority < dev->physical_device->submitqueue_priority_count);
    struct drm_msm_submitqueue req = {
       .flags = 0,
-      .prio = (dev->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) ? 3 : 0, // note: ring1 starts at prio 3 because of sched prios
+      .prio = (TU_DEBUG(PREEMPT)) ? 3 : 0, // note: ring1 starts at prio 3 because of sched prios
    };
 
    int ret = drmCommandWriteRead(dev->fd,

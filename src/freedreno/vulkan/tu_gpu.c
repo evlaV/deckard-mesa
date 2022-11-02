@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "tu_private.h"
+#include "tu_device.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
+#include "tu_cmd_buffer.h"
 
 #define BO_IOVA_BASE 0x80000000ul
 #define BO_IOVA_TO_PTR(dev, x) (dev->physical_device->map + ((x)-BO_IOVA_BASE))
@@ -101,8 +103,11 @@ tu_drm_submitqueue_close(const struct tu_device *dev, uint32_t queue_id)
 }
 
 VkResult
-tu_bo_init_new(struct tu_device *dev, struct tu_bo **_bo, uint64_t size,
-               enum tu_bo_alloc_flags flags)
+tu_bo_init_new_explicit_iova(struct tu_device *dev,
+                             struct tu_bo **_bo,
+                             uint64_t size,
+                             uint64_t client_iova,
+                             enum tu_bo_alloc_flags flags, const char *name)
 {
    struct tu_bo *bo = malloc(sizeof(*bo));
    assert(bo);
@@ -213,9 +218,14 @@ static inline int create_fence(int fd, uint64_t rptr)
 }
 
 VkResult
-tu_enumerate_devices(struct tu_instance *instance)
+tu_enumerate_devices(struct vk_instance *vk_instance)
 {
-   struct tu_physical_device *device = &instance->physical_devices[0];
+   struct tu_instance *instance =
+      container_of(vk_instance, struct tu_instance, vk);
+
+   struct tu_physical_device *device =
+      vk_zalloc(&instance->vk.alloc, sizeof(*device), 8,
+                VK_SYSTEM_ALLOCATION_SCOPE_INSTANCE);
 
    int fd = open("/dev/gpu", O_RDWR | O_CLOEXEC);
    if (fd < 0)
@@ -249,7 +259,7 @@ tu_enumerate_devices(struct tu_instance *instance)
       return VK_ERROR_INITIALIZATION_FAILED;
    }
 
-   instance->physical_device_count = 1;
+   list_addtail(&device->vk.link, &instance->vk.physical_devices.list);
 
    return VK_SUCCESS;
 }
@@ -346,7 +356,7 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
          goto skip_empty_submit;
       }
 
-      if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) {
+      if ( TU_DEBUG(PREEMPT) ) {
          simple_cs_emit_pkt7(&cs, CP_SET_MARKER, 1);
          simple_cs_emit(&cs, 0xe); // disable preemption
       }
@@ -383,14 +393,14 @@ tu_QueueSubmit(VkQueue _queue, uint32_t count, const VkSubmitInfo *submits, VkFe
       simple_cs_emit_qw(&cs, device->global_bo->iova + gb_offset(seqno_dummy));
       simple_cs_emit(&cs, 0);
 
-      if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT) {
+      if ( TU_DEBUG(PREEMPT) ) {
          simple_cs_emit_pkt7(&cs, CP_SET_MARKER, 1);
          simple_cs_emit(&cs, 0xd); // re-enable preemption
       }
 
       unsigned cmd = GPU_IOCTL_SUBMIT;
       cmd |= (cs.cur - cmds) * 4 << _IOC_SIZESHIFT;
-      if (device->physical_device->instance->debug_flags & TU_DEBUG_PREEMPT)
+      if (TU_DEBUG(PREEMPT))
          cmd |= GPU_IOCTL_SUBMIT_PRIORITY;
 
       ret = syscall(SYS_ioctl, device->fd, cmd, cmds);
@@ -746,6 +756,9 @@ void tu_gpu_signal_fence(VkFence _fence)
    assert(!fence->is_timeline);
    fence->rptr[0] = 0;
 }
+
+int
+tu_syncobj_to_fd(struct tu_device *device, struct vk_sync *sync);
 
 int
 tu_syncobj_to_fd(struct tu_device *device, struct vk_sync *sync)

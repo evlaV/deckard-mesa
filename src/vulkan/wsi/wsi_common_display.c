@@ -2374,6 +2374,8 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
    image->state = WSI_IMAGE_QUEUED;
 
 #ifdef TEST_GPU_DRIVER
+#if 0
+//disable since this doesnt work with latest mesa
    if (image->fence_fd >= 0)
       close(image->fence_fd);
    result = chain->base.wsi->GetFenceFdKHR(drv_chain->device, &(VkFenceGetFdInfoKHR) {
@@ -2382,6 +2384,7 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
       .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
    }, &image->fence_fd);
    assert(result == VK_SUCCESS);
+#endif   
 #endif
 
    result = _wsi_display_queue_next(drv_chain);

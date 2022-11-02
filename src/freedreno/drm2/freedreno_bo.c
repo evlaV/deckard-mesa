@@ -221,9 +221,9 @@ fd_bo_map(struct fd_bo *bo)
 }
 
 void
-fd_bo_upload(struct fd_bo *bo, void *src, unsigned len)
+fd_bo_upload(struct fd_bo *bo, void *src, unsigned off, unsigned len)
 {
-   memcpy(fd_bo_map(bo), src, len);
+   memcpy(fd_bo_map(bo) + off, src, len);
 }
 
 int
