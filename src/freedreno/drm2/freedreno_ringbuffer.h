@@ -181,6 +181,17 @@ fd_ringbuffer_emit(struct fd_ringbuffer *ring, uint32_t data)
    (*ring->cur++) = data;
 }
 
+struct fd_reloc {
+   struct fd_bo *bo;
+   uint64_t iova;
+   uint64_t orval;
+#define FD_RELOC_READ  0x0001
+#define FD_RELOC_WRITE 0x0002
+#define FD_RELOC_DUMP  0x0004
+   uint32_t offset;
+   int32_t shift;
+};
+
 /* We always mark BOs for write, instead of tracking it across reloc
  * sources in userspace.  On the kernel side, this means we track a single
  * excl fence in the BO instead of a set of read fences, which is cheaper.
@@ -190,6 +201,20 @@ fd_ringbuffer_emit(struct fd_ringbuffer *ring, uint32_t data)
  * tracking, as well.
  */
 #define FD_RELOC_FLAGS_INIT (FD_RELOC_READ | FD_RELOC_WRITE)
+
+/* NOTE: relocs are 2 dwords on a5xx+ */
+
+static inline void
+fd_ringbuffer_attach_bo(struct fd_ringbuffer *ring, struct fd_bo *bo)
+{
+   //ring->funcs->emit_bo(ring, bo);
+}
+
+static inline void
+fd_ringbuffer_reloc(struct fd_ringbuffer *ring, const struct fd_reloc *reloc)
+{
+   //ring->funcs->emit_reloc(ring, reloc);
+}
 
 static inline uint32_t
 fd_ringbuffer_cmd_count(struct fd_ringbuffer *ring)
@@ -250,6 +275,20 @@ OUT_RING(struct fd_ringbuffer *ring, uint32_t data)
    fd_ringbuffer_emit(ring, data);
 }
 
+static inline uint64_t
+__reloc_iova(struct fd_bo *bo, uint32_t offset, uint64_t orval, int32_t shift)
+{
+   uint64_t iova = fd_bo_get_iova(bo) + offset;
+
+   if (shift < 0)
+      iova >>= -shift;
+   else
+      iova <<= shift;
+
+   iova |= orval;
+
+   return iova;
+}
 /*
  * NOTE: OUT_RELOC() is 2 dwords (64b) on a5xx+
  */

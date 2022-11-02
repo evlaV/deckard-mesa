@@ -140,7 +140,7 @@ fd_pipe_get_param(struct fd_pipe *pipe, enum fd_param_id param, uint64_t *value)
    case FD_TIMESTAMP:
       *value = 0;
       return 0;
-   case FD_NR_RINGS:
+   case FD_NR_PRIORITIES:
       *value = 1;
       return 0;
    case FD_CTX_FAULTS:
