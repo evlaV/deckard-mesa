@@ -811,6 +811,8 @@ resource_transfer_map_unsync(struct pipe_context *pctx,
    uint32_t offset;
    char *buf;
 
+#ifndef TEST_GPU_DRIVER
+//gabe: not sure we should skip this actually?
    if ((prsc->target == PIPE_BUFFER) &&
        !(usage & (PIPE_MAP_READ | PIPE_MAP_DIRECTLY | PIPE_MAP_PERSISTENT)) &&
        ((usage & PIPE_MAP_DISCARD_RANGE) || !valid_range(rsc, box)) &&
@@ -818,7 +820,7 @@ resource_transfer_map_unsync(struct pipe_context *pctx,
       trans->upload_ptr = malloc(box->width);
       return trans->upload_ptr;
    }
-
+#endif
    buf = fd_bo_map(rsc->bo);
 
    /* With imported bo's allocated by something outside of mesa, when
