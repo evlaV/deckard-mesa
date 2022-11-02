@@ -1981,8 +1981,10 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    mtx_init(&device->autotune_mutex, mtx_plain);
    pthread_mutex_init(&device->submit_mutex, NULL);
 
+#ifndef TEST_GPU_DRIVER
    if (device->instance->debug_flags & TU_DEBUG_BOS)
       device->bo_sizes = _mesa_hash_table_create(NULL, _mesa_hash_string, _mesa_key_string_equal);
+#endif
 
 #ifndef TU_USE_KGSL
    vk_device_set_drm_fd(&device->vk, device->fd);
@@ -2287,8 +2289,11 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
 #endif
 
    pthread_cond_destroy(&device->timeline_cond);
+
+#ifndef TEST_GPU_DRIVER   
    _mesa_hash_table_destroy(device->bo_sizes, NULL);
    vk_free(&device->vk.alloc, device->bo_list);
+#endif
    vk_device_finish(&device->vk);
    vk_free(&device->vk.alloc, device);
 }
@@ -2500,9 +2505,11 @@ tu_AllocateMemory(VkDevice _device,
       }
 
       char name[64] = "vkAllocateMemory()";
+#ifndef TEST_GPU_DRIVER      
       if (device->bo_sizes)
          snprintf(name, ARRAY_SIZE(name), "vkAllocateMemory(%ldkb)",
                   (long)DIV_ROUND_UP(pAllocateInfo->allocationSize, 1024));
+#endif                  
       result = tu_bo_init_new_explicit_iova(
          device, &mem->bo, pAllocateInfo->allocationSize, client_address,
          alloc_flags, name);
@@ -3197,6 +3204,9 @@ tu_debug_bos_add(struct tu_device *dev, uint64_t size, const char *name)
 {
    assert(name);
 
+#ifdef TEST_GPU_DRIVER
+   return NULL;
+#else
    if (likely(!dev->bo_sizes))
       return NULL;
 
@@ -3217,11 +3227,15 @@ tu_debug_bos_add(struct tu_device *dev, uint64_t size, const char *name)
    mtx_unlock(&dev->bo_mutex);
 
    return debug_bos->name;
+#endif   
 }
 
 void
 tu_debug_bos_del(struct tu_device *dev, struct tu_bo *bo)
 {
+#ifdef TEST_GPU_DRIVER
+   return;
+#else
    if (likely(!dev->bo_sizes) || !bo->name)
       return;
 
@@ -3240,6 +3254,7 @@ tu_debug_bos_del(struct tu_device *dev, struct tu_bo *bo)
       free(debug_bos);
    }
    mtx_unlock(&dev->bo_mutex);
+#endif   
 }
 
 static int debug_bos_count_compare(const void *in_a, const void *in_b)
@@ -3252,6 +3267,9 @@ static int debug_bos_count_compare(const void *in_a, const void *in_b)
 void
 tu_debug_bos_print_stats(struct tu_device *dev)
 {
+#ifdef TEST_GPU_DRIVER
+   return;
+#else   
    if (likely(!dev->bo_sizes))
       return;
 
@@ -3287,4 +3305,5 @@ tu_debug_bos_print_stats(struct tu_device *dev)
    util_dynarray_fini(&dyn);
 
    mtx_unlock(&dev->bo_mutex);
+#endif   
 }
