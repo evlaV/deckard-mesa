@@ -1847,8 +1847,6 @@ static void wsi_display_fence_event_handler(struct wsi_display_fence *fence,
                                             uint64_t frame)
 {
 
-   struct wsi_display_connector *connector = 
-                  wsi_display_mode_from_handle(fence->image->chain->surface->displayMode)->connector;
    struct wsi_display_image *image = fence->image;
 
    wsi_display_debug("%9lu fence %lu received %lu nsec %lu\n",
@@ -1860,8 +1858,12 @@ static void wsi_display_fence_event_handler(struct wsi_display_fence *fence,
       (void) drmSyncobjDestroy(fence->wsi->syncobj_fd, fence->syncobj);
    }
 
-   connector->last_nsec = nsec;
-   connector->last_frame = frame;
+   if (image) {
+      struct wsi_display_connector *connector = 
+         wsi_display_mode_from_handle(image->chain->surface->displayMode)->connector;
+      connector->last_nsec = nsec;
+      connector->last_frame = frame;
+   }
 
    fence->event_received = true;
    wsi_display_fence_check_free(fence);
