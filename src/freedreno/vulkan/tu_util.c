@@ -245,7 +245,7 @@ tu_tiling_config_update_pipe_layout(struct tu_tiling_config *tiling,
    tiling->pipe_count = tiling->tile_count;
 
    while (tiling->pipe_count.width * tiling->pipe_count.height > max_pipe_count) {
-      if (tiling->pipe0.width < tiling->pipe0.height) {
+      if (tiling->pipe0.width <= tiling->tile_count.width) {
          tiling->pipe0.width += 1;
          tiling->pipe_count.width =
             DIV_ROUND_UP(tiling->tile_count.width, tiling->pipe0.width);
