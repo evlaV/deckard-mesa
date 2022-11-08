@@ -136,7 +136,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_external_semaphore_fd = true,
       .KHR_format_feature_flags2 = true,
       .KHR_get_memory_requirements2 = true,
-      .KHR_global_priority = true,
+      .KHR_global_priority = false,
       .KHR_imageless_framebuffer = true,
       .KHR_incremental_present = TU_HAS_SURFACE,
       .KHR_image_format_list = true,
@@ -204,8 +204,8 @@ get_device_extensions(const struct tu_physical_device *device,
       .EXT_extended_dynamic_state2 = true,
       .EXT_extended_dynamic_state3 = true,
       .EXT_filter_cubic = device->info->a6xx.has_tex_filter_cubic,
-      .EXT_global_priority = true,
-      .EXT_global_priority_query = true,
+      .EXT_global_priority = false,
+      .EXT_global_priority_query = false,
       .EXT_host_query_reset = true,
       .EXT_index_type_uint8 = true,
       .EXT_memory_budget = true,
@@ -932,7 +932,7 @@ tu_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_KHR: {
          VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR *features =
             (VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR*)ext;
-         features->globalPriorityQuery = true;
+         features->globalPriorityQuery = false;
          break;
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT: {
