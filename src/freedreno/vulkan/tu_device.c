@@ -171,17 +171,8 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_shader_non_semantic_info = true,
       .KHR_synchronization2 = true,
       .KHR_dynamic_rendering = true,
-      /* Hide these behind dri configs for now since we cannot implement it reliably on
-       * all surfaces yet. There is no surface capability query for present wait/id,
-       * but the feature is useful enough to hide behind an opt-in mechanism for now.
-       * If the instance only enables surface extensions that unconditionally support present wait,
-       * we can also expose the extension that way. */
-      .KHR_present_id =
-         driQueryOptionb(&device->instance->dri_options, "vk_khr_present_wait") ||
-         wsi_common_vk_instance_supports_present_wait(&device->instance->vk),
-      .KHR_present_wait =
-         driQueryOptionb(&device->instance->dri_options, "vk_khr_present_wait") ||
-         wsi_common_vk_instance_supports_present_wait(&device->instance->vk),
+      .KHR_present_id = true,
+      .KHR_present_wait = true,
 #ifndef TU_USE_KGSL
       .KHR_timeline_semaphore = true,
 #endif
