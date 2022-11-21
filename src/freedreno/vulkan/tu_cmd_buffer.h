@@ -282,6 +282,7 @@ struct tu_render_pass_state
    bool has_prim_generated_query_in_rp;
    bool disable_gmem;
    bool sysmem_single_prim_mode;
+   bool shared_viewport;
 
    /* Track whether conditional predicate for COND_REG_EXEC is changed in draw_cs */
    bool draw_cs_writes_to_cond_pred;
@@ -337,6 +338,7 @@ struct tu_cmd_state
    VkViewport viewport[MAX_VIEWPORTS];
    VkRect2D scissor[MAX_SCISSORS];
    uint32_t viewport_count, scissor_count;
+   bool per_view_viewport;
 
    /* for dynamic states that can't be emitted directly */
    uint32_t dynamic_stencil_mask;
