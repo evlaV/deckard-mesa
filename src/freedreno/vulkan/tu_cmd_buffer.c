@@ -936,6 +936,9 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    const struct tu_subpass *subpass = &pass->subpasses[pass->subpass_count-1];
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
 
+   if (pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+      tu_cs_set_writeable(cs, true);
+
    tu_cs_emit_pkt7(cs, CP_SET_MARKER, 1);
    tu_cs_emit(cs, A6XX_CP_SET_MARKER_0_MODE(RM6_RESOLVE));
 
@@ -959,6 +962,9 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
          }
       }
    }
+
+   if (pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+      tu_cs_set_writeable(cs, false);
 }
 
 void
@@ -1390,6 +1396,9 @@ tu_emit_renderpass_begin(struct tu_cmd_buffer *cmd,
 {
    struct tu_cs *cs = &cmd->draw_cs;
 
+   if (cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+      tu_cs_set_writeable(cs, true);
+
    tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_GMEM);
 
    tu6_emit_tile_load(cmd, cs);
@@ -1400,6 +1409,9 @@ tu_emit_renderpass_begin(struct tu_cmd_buffer *cmd,
       tu_clear_gmem_attachment(cmd, cs, i, &clear_values[i]);
 
    tu_cond_exec_end(cs);
+
+   if (cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+      tu_cs_set_writeable(cs, false);
 
    tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_SYSMEM);
 
@@ -4619,9 +4631,12 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
       cmd->state.dirty |= TU_CMD_DIRTY_LRZ;
    }
 
-   tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_GMEM);
-
    if (subpass->resolve_attachments) {
+      if (cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+         tu_cs_set_writeable(cs, true);
+
+      tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_GMEM);
+
       tu6_emit_blit_scissor(cmd, cs, true);
 
       for (unsigned i = 0; i < subpass->resolve_count; i++) {
@@ -4643,9 +4658,13 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
          perf_debug(cmd->device, "TODO: missing GMEM->GMEM resolve path\n");
          tu_load_gmem_attachment(cmd, cs, a, false, true);
       }
+
+      tu_cond_exec_end(cs);
+
+      if (cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+         tu_cs_set_writeable(cs, false);
    }
 
-   tu_cond_exec_end(cs);
 
    tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_SYSMEM);
 
