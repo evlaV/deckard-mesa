@@ -118,6 +118,11 @@
 #define A6XX_TEX_CONST_DWORDS 16
 #define A6XX_TEX_SAMP_DWORDS 4
 
+#define MIN_FDM_TEXEL_SIZE_LOG2 5
+#define MIN_FDM_TEXEL_SIZE (1u << MIN_FDM_TEXEL_SIZE_LOG2)
+#define MAX_FDM_TEXEL_SIZE_LOG2 10
+#define MAX_FDM_TEXEL_SIZE (1u << MAX_FDM_TEXEL_SIZE_LOG2)
+
 #define TU_FROM_HANDLE(__tu_type, __name, __handle)                          \
    VK_FROM_HANDLE(__tu_type, __name, __handle)
 
