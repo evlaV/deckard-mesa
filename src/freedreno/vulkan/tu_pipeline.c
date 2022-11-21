@@ -4067,6 +4067,8 @@ tu_pipeline_builder_parse_shader_stages(struct tu_pipeline_builder *builder,
 
    struct ir3_shader_variant *vs = builder->variants[MESA_SHADER_VERTEX];
    struct ir3_shader_variant *hs = builder->variants[MESA_SHADER_TESS_CTRL];
+   struct ir3_shader_variant *ds = builder->variants[MESA_SHADER_TESS_EVAL];
+   struct ir3_shader_variant *gs = builder->variants[MESA_SHADER_GEOMETRY];
    if (hs) {
       pipeline->program.vs_param_stride = vs->output_size;
       pipeline->program.hs_param_stride = hs->output_size;
@@ -4091,6 +4093,16 @@ tu_pipeline_builder_parse_shader_stages(struct tu_pipeline_builder *builder,
                                        pipeline->tess.patch_control_points);
       }
    }
+
+   struct ir3_shader_variant *last_shader;
+   if (gs)
+      last_shader = gs;
+   else if (ds)
+      last_shader = ds;
+   else
+      last_shader = vs;
+
+   pipeline->program.writes_viewport = last_shader->writes_viewport;
 }
 
 static void
@@ -4225,16 +4237,17 @@ tu_pipeline_builder_parse_viewport(struct tu_pipeline_builder *builder,
 
    if (tu_pipeline_static_state(pipeline, &cs, VK_DYNAMIC_STATE_VIEWPORT, 8 + 10 * vp_info->viewportCount)) {
       tu6_emit_viewport(&cs, vp_info->pViewports, vp_info->viewportCount, pipeline->viewport.z_negative_one_to_one);
-   } else if (pipeline->viewport.set_dynamic_vp_to_static) {
-      memcpy(pipeline->viewport.viewports, vp_info->pViewports,
-             vp_info->viewportCount * sizeof(*vp_info->pViewports));
    }
 
+   memcpy(pipeline->viewport.viewports, vp_info->pViewports,
+          vp_info->viewportCount * sizeof(*vp_info->pViewports));
    pipeline->viewport.num_viewports = vp_info->viewportCount;
 
    if (tu_pipeline_static_state(pipeline, &cs, VK_DYNAMIC_STATE_SCISSOR, 1 + 2 * vp_info->scissorCount))
       tu6_emit_scissor(&cs, vp_info->pScissors, vp_info->scissorCount);
 
+   memcpy(pipeline->viewport.scissors, vp_info->pScissors,
+          vp_info->scissorCount * sizeof(*vp_info->pScissors));
    pipeline->viewport.num_scissors = vp_info->scissorCount;
 }
 
@@ -4484,6 +4497,42 @@ tu_pipeline_builder_parse_rast_ds(struct tu_pipeline_builder *builder,
          tu_cs_emit(&cs, 0);
       else
          tu_cs_emit(&cs, pipeline->rast_ds.rb_depth_cntl);
+   }
+
+   /* With FDM we have to overwrite the viewport and scissor so they have to
+    * be set dynamically. This can only be done once we know the output state
+    * and whether viewport/scissor is dynamic. We also have to figure out
+    * whether we can use per-view viewports to and enable that if true.
+    */
+   if (pipeline->fs.fragment_density_map) {
+      if (!(pipeline->dynamic_state_mask & BIT(VK_DYNAMIC_STATE_VIEWPORT))) {
+         pipeline->viewport.set_dynamic_vp_to_static = true;
+         pipeline->dynamic_state_mask |= BIT(VK_DYNAMIC_STATE_VIEWPORT);
+      }
+
+      if (!(pipeline->dynamic_state_mask & BIT(VK_DYNAMIC_STATE_SCISSOR))) {
+         pipeline->viewport.set_dynamic_scissor_to_static = true;
+         pipeline->dynamic_state_mask |= BIT(VK_DYNAMIC_STATE_SCISSOR);
+      }
+
+      /* We can use per-view viewports if the last geometry stage doesn't
+       * write its own viewport.
+       */
+      pipeline->viewport.per_view_viewport =
+         !pipeline->program.writes_viewport &&
+         builder->device->physical_device->info->a6xx.has_per_view_viewport;
+
+      /* Fixup GRAS_SU_CNTL and re-emit rast state if necessary. */
+      if (pipeline->viewport.per_view_viewport) {
+         pipeline->rast.gras_su_cntl |= A6XX_GRAS_SU_CNTL_VIEWPORTINDEXINCR;
+
+         if (tu_pipeline_static_state(pipeline, &cs, TU_DYNAMIC_STATE_RAST,
+                                      tu6_rast_size(builder->device))) {
+            tu6_emit_rast(&cs, pipeline->rast.gras_su_cntl,
+                          pipeline->rast.gras_cl_cntl,
+                          pipeline->rast.polygon_mode);
+         }
+      }
    }
 }
 
@@ -5064,6 +5113,8 @@ tu_pipeline_builder_init_graphics(
             subpass->raster_order_attachment_access;
          builder->subpass_feedback_loop_color = subpass->feedback_loop_color;
          builder->subpass_feedback_loop_ds = subpass->feedback_loop_ds;
+         builder->fragment_density_map =
+            pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED;
 
          if (!builder->rasterizer_discard) {
             const uint32_t a = subpass->depth_stencil_attachment.attachment;
