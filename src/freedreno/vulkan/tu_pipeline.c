@@ -273,6 +273,7 @@ struct tu_pipeline_builder
    bool subpass_feedback_loop_color;
    bool subpass_feedback_loop_ds;
    bool feedback_loop_may_involve_textures;
+   bool fragment_density_map;
 
    /* Each library defines at least one piece of state in
     * VkGraphicsPipelineLibraryFlagsEXT, and libraries cannot overlap, so
@@ -3176,6 +3177,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    if (builder->state & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
       keys[MESA_SHADER_FRAGMENT].multiview_mask = builder->multiview_mask;
       keys[MESA_SHADER_FRAGMENT].force_sample_interp = ir3_key.sample_shading;
+      pipeline->fs.fragment_density_map = builder->fragment_density_map;
    }
 
    unsigned char pipeline_sha1[20];
@@ -3895,6 +3897,7 @@ tu_pipeline_builder_parse_libraries(struct tu_pipeline_builder *builder,
       if (library->state &
           VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
          pipeline->ds = library->ds;
+         pipeline->fs = library->fs;
          pipeline->lrz.fs = library->lrz.fs;
          pipeline->lrz.lrz_status |= library->lrz.lrz_status;
          pipeline->lrz.force_late_z |= library->lrz.force_late_z;
@@ -5040,6 +5043,9 @@ tu_pipeline_builder_init_graphics(
             subpass->raster_order_attachment_access;
          builder->subpass_feedback_loop_color = subpass->feedback_loop_color;
          builder->subpass_feedback_loop_ds = subpass->feedback_loop_ds;
+         if (pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+            renderpass_flags |=
+               VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT;
 
          if (!builder->rasterizer_discard) {
             const uint32_t a = subpass->depth_stencil_attachment.attachment;
@@ -5072,6 +5078,9 @@ tu_pipeline_builder_init_graphics(
       builder->subpass_feedback_loop_ds = true;
       builder->feedback_loop_may_involve_textures = true;
    }
+
+   builder->fragment_density_map = renderpass_flags &
+      VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT;
 }
 
 static VkResult
