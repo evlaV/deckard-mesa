@@ -273,6 +273,7 @@ struct tu_pipeline_builder
    bool subpass_feedback_loop_color;
    bool subpass_feedback_loop_ds;
    bool feedback_loop_may_involve_textures;
+   bool fragment_density_map;
 
    /* Each library defines at least one piece of state in
     * VkGraphicsPipelineLibraryFlagsEXT, and libraries cannot overlap, so
@@ -3175,6 +3176,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    if (builder->state & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
       keys[MESA_SHADER_FRAGMENT].multiview_mask = builder->multiview_mask;
       keys[MESA_SHADER_FRAGMENT].force_sample_interp = ir3_key.sample_shading;
+      pipeline->fs.fragment_density_map = builder->fragment_density_map;
    }
 
    unsigned char pipeline_sha1[20];
@@ -3892,6 +3894,7 @@ tu_pipeline_builder_parse_libraries(struct tu_pipeline_builder *builder,
       if (library->state &
           VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
          pipeline->ds = library->ds;
+         pipeline->fs = library->fs;
          pipeline->lrz.fs = library->lrz.fs;
          pipeline->lrz.force_disable_mask |= library->lrz.force_disable_mask;
          pipeline->lrz.force_late_z |= library->lrz.force_late_z;
@@ -4976,6 +4979,23 @@ tu_pipeline_builder_init_graphics(
             const struct tu_subpass *subpass =
                &pass->subpasses[create_info->subpass];
             builder->multiview_mask = subpass->multiview_mask;
+         }
+      }
+
+      /* Get whether a fragment density map attachment exists, which is only
+       * used for FS.
+       */
+      if (builder->state &
+          VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) {
+         if (rendering_info) {
+            builder->fragment_density_map =
+               create_info->flags &
+               VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT;
+         } else {
+            const struct tu_render_pass *pass =
+               tu_render_pass_from_handle(create_info->renderPass);
+            builder->fragment_density_map =
+               pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED;
          }
       }
 

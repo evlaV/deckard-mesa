@@ -4302,6 +4302,15 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       }
    }
 
+   a = cmd->dynamic_pass.fragment_density_map.attachment;
+   if (a != VK_ATTACHMENT_UNUSED) {
+      const VkRenderingFragmentDensityMapAttachmentInfoEXT *fdm_info =
+         vk_find_struct_const(pRenderingInfo->pNext,
+                              RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_INFO_EXT);
+      TU_FROM_HANDLE(tu_image_view, view, fdm_info->imageView);
+      cmd->state.attachments[a] = view;
+   }
+
    if (unlikely(cmd->device->instance->debug_flags & TU_DEBUG_DYNAMIC)) {
       const VkRenderingSelfDependencyInfoMESA *self_dependency =
          vk_find_struct_const(pRenderingInfo->pNext, RENDERING_SELF_DEPENDENCY_INFO_MESA);
