@@ -159,7 +159,7 @@ open_submitqueue(struct fd_pipe *pipe, uint32_t prio)
 {
    struct drm_msm_submitqueue req = {
       .flags = 0,
-      .prio = prio,
+      .prio = 0,
    };
    uint64_t nr_prio = 1;
    int ret;
