@@ -51,6 +51,7 @@ struct tu_shader
 struct tu_shader_key {
    unsigned multiview_mask;
    bool force_sample_interp;
+   bool fragment_density_map;
    enum ir3_wavesize_option api_wavesize, real_wavesize;
 };
 
