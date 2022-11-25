@@ -305,6 +305,9 @@ struct vk_render_pass {
    /** VkRenderPassCreateInfo2::dependencyCount */
    uint32_t dependency_count;
 
+   /** VkRenderPassFragmentDensityMapCreateInfoEXT::fragmentDensityMapAttachment */
+   VkAttachmentReference fragment_density_map;
+
    /** VkRenderPassCreateInfo2::pDependencies */
    struct vk_subpass_dependency *dependencies;
 };
