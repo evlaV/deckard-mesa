@@ -863,6 +863,13 @@ typedef enum
     */
    SYSTEM_VALUE_FRAG_SHADING_RATE,
 
+   /*
+    * Fragment size and invocation count used for
+    * EXT_fragment_invocation_density (Vulkan).
+    */
+   SYSTEM_VALUE_FRAG_SIZE,
+   SYSTEM_VALUE_FRAG_INVOCATION_COUNT,
+
    SYSTEM_VALUE_MAX             /**< Number of values */
 } gl_system_value;
 
