@@ -308,6 +308,9 @@ struct vk_render_pass {
    /** VkRenderPassCreateInfo2::dependencyCount */
    uint32_t dependency_count;
 
+   /** VkRenderPassFragmentDensityMapCreateInfoEXT::fragmentDensityMapAttachment */
+   VkAttachmentReference fragment_density_map;
+
    /** VkRenderPassCreateInfo2::pDependencies */
    struct vk_subpass_dependency *dependencies;
 };
@@ -334,13 +337,14 @@ vk_get_pipeline_rendering_create_info(const VkGraphicsPipelineCreateInfo *info);
  *
  * For render-pass-free drivers, this can be used to get any extra pipeline
  * create flags implied by the render pass.  In particular, a render pass may
- * want to add one or both of the following based on self-dependencies:
+ * want to add one or both of the following:
  *
  *  - VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT
  *  - VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT
+ *  - VK_PIPELINE_CREATE_DEPTH_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT
  *
- * If VkGraphicsPipelineCreateInfo::renderPass is VK_NULL_HANDLE, the feedback
- * loop flags from VkGraphicsPipelineCreateInfo::flags will be returned.
+ * If VkGraphicsPipelineCreateInfo::renderPass is VK_NULL_HANDLE, the relevant
+ * flags from VkGraphicsPipelineCreateInfo::flags will be returned.
  *
  * @param[in]  info  One of the pCreateInfos from vkCreateGraphicsPipelines
  */
