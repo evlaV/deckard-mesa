@@ -254,6 +254,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_pipeline_library = true,
       .EXT_graphics_pipeline_library = true,
       .EXT_post_depth_coverage = true,
+	  .EXT_fragment_density_map = true,
    };
 }
 
@@ -979,6 +980,14 @@ tu_GetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
          features->presentWait = pdevice->vk.supported_extensions.KHR_present_wait;
          break;
       }
+	  case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT: {
+         VkPhysicalDeviceFragmentDensityMapFeaturesEXT *features =
+            (VkPhysicalDeviceFragmentDensityMapFeaturesEXT *)ext;
+         features->fragmentDensityMap = true;
+         features->fragmentDensityMapDynamic = false;
+         features->fragmentDensityMapNonSubsampledImages = true;
+         break;
+      }
 
       default:
          break;
@@ -1448,6 +1457,14 @@ tu_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
          VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *properties =
             (VkPhysicalDeviceExtendedDynamicState3PropertiesEXT *)ext;
          properties->dynamicPrimitiveTopologyUnrestricted = true;
+         break;
+      }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT: {
+         VkPhysicalDeviceFragmentDensityMapPropertiesEXT *properties =
+            (VkPhysicalDeviceFragmentDensityMapPropertiesEXT *)ext;
+         properties->minFragmentDensityTexelSize = (VkExtent2D) { MIN_FDM_TEXEL_SIZE, MIN_FDM_TEXEL_SIZE };
+         properties->maxFragmentDensityTexelSize = (VkExtent2D) { MAX_FDM_TEXEL_SIZE, MAX_FDM_TEXEL_SIZE };
+         properties->fragmentDensityInvocations = false;
          break;
       }
       default:
