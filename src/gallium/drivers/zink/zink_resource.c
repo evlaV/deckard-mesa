@@ -709,7 +709,7 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
           util_format_get_nr_components(srgb) == 4 &&
           !(ici.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT)) {
          mesa_loge("zink: refusing to create possibly-srgb dmabuf due to missing driver support: %s not supported!", util_format_name(srgb));
-         goto fail1;
+         //goto fail1;
       }
       VkExternalMemoryImageCreateInfo emici;
       VkImageDrmFormatModifierExplicitCreateInfoEXT idfmeci;
@@ -1411,7 +1411,7 @@ zink_resource_get_handle(struct pipe_screen *pscreen,
       if (whandle->type == WINSYS_HANDLE_TYPE_KMS && screen->drm_fd == -1) {
          whandle->handle = -1;
       } else {
-         if (!res->obj->exportable) {
+         if (!res->obj->exportable && 0) {
             assert(!res->all_binds); //TODO handle if problematic
             assert(!zink_resource_usage_is_unflushed(res));
             unsigned bind = ZINK_BIND_DMABUF;
