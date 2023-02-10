@@ -111,8 +111,15 @@ fd_fence_destroy(struct pipe_fence_handle *fence)
 
    tc_unflushed_batch_token_reference(&fence->tc_token, NULL);
 
+//OLD PATCH WAS THIS: FLTO PLEASE LOOK HERE
+//+#ifndef TEST_GPU_DRIVER
    if (fence->syncobj)
       drmSyncobjDestroy(fd_device_fd(fence->screen->dev), fence->syncobj);
+//+#else
+//+   if (fence->submit_fence.rptr != &fence->submit_fence.rptr_storage)
+//+      munmap(fence->submit_fence.rptr, 0x1000);
+//+#endif
+
    fd_pipe_del(fence->pipe);
    if (fence->fence)
       fd_fence_del(fence->fence);
@@ -155,7 +162,13 @@ fd_pipe_fence_finish(struct pipe_screen *pscreen, struct pipe_context *pctx,
       return ret == 0;
    }
 
+//OLD PATCH WAS THIS: FLTO PLEASE LOOK HERE
+//function previously was called: fd_fence_finish -- now it is fd_pipe_fence_finish
+//+#ifndef TEST_GPU_DRIVER
    if (fd_pipe_wait_timeout(fence->pipe, fence->fence, timeout))
+//+#else
+//+   if (fd_pipe_wait_timeout(fence->pipe, (struct fd_fence*) fence->submit_fence.rptr, timeout))
+//+#endif
       return false;
 
    return true;
@@ -183,7 +196,15 @@ fence_create(struct fd_context *ctx, struct fd_batch *batch, int fence_fd,
    fence->pipe = fd_pipe_ref(ctx->pipe);
    fence->screen = ctx->screen;
    fence->use_fence_fd = (fence_fd != -1);
+
+//OLD PATCH WAS THIS: FLTO PLEASE LOOK HERE
+//Previously this patch was at the end of this function, now there is another if statement below this code
+// maybe this fd_fence_new thing is something we want to handle for testgpu driver?
+//+#ifndef TEST_GPU_DRIVER
    fence->syncobj = syncobj;
+//+#else
+//+   fence->submit_fence.rptr = syncobj ?: &fence->submit_fence.rptr_storage;
+//+#endif   
 
    if (fence_fd != -1) {
       fence->fence = fd_fence_new(fence->pipe, fence->use_fence_fd);

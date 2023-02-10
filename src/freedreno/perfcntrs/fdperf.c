@@ -200,6 +200,13 @@ flush_ring(void)
    if (!dev.submit)
       return;
 
+//OLD PATCH WAS THIS: FLTO PLEASE LOOK HERE
+//    struct fd_submit_fence fence = {};
+//+#ifdef TEST_GPU_DRIVER  
+//+    fence.rptr = &fence.rptr_storage;
+//+#endif
+//   util_queue_fence_init(&fence.ready);
+
    struct fd_fence *fence = fd_submit_flush(dev.submit, -1, false);
 
    if (!fence)
