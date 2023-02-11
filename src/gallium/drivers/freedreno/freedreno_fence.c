@@ -201,7 +201,7 @@ fence_create(struct fd_context *ctx, struct fd_batch *batch, int fence_fd,
 //Previously this patch was at the end of this function, now there is another if statement below this code
 // maybe this fd_fence_new thing is something we want to handle for testgpu driver?
 //+#ifndef TEST_GPU_DRIVER
-   fence->syncobj = syncobj;
+//   fence->syncobj = syncobj; //this won't work due to syncobj type being different
 //+#else
 //+   fence->submit_fence.rptr = syncobj ?: &fence->submit_fence.rptr_storage;
 //+#endif   
@@ -269,12 +269,14 @@ fd_pipe_fence_server_sync(struct pipe_context *pctx, struct pipe_fence_handle *f
    }
 
 #ifdef TEST_GPU_DRIVER
+#if 0 //this doesn't work due to fence->submit_fence not being a member
    if (fence->submit_fence.rptr != &fence->submit_fence.rptr_storage) {
       uint64_t rptr = *(fence->submit_fence.rptr);
       int fd = ioctl(fd_device_fd(ctx->screen->dev), GPU_IOCTL_CREATE_FENCE, *(fence->submit_fence.rptr));
       assert(fd >= 0);
       sync_accumulate("freedreno", &ctx->in_fence_fd, fd);
    }
+#endif
 #endif
 
    /* if not an external fence, then nothing more to do without preemption: */
@@ -300,7 +302,8 @@ fd_pipe_fence_server_signal(struct pipe_context *pctx,
       drmSyncobjSignal(fd_device_fd(ctx->screen->dev), &fence->syncobj, 1);
    }
 #else
-   *(fence->submit_fence.rptr) = 0; // 0 : always signaled
+   //there is no submit_fence
+   //*(fence->submit_fence.rptr) = 0; // 0 : always signaled
 #endif
 }
 

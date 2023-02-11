@@ -119,8 +119,9 @@ struct fd_submit_fence {
 /* in_fence_fd: -1 for no in-fence, else fence fd
  * out_fence can be NULL if no output fence is required
  */
-int fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
-                    struct fd_submit_fence *out_fence);
+struct fd_fence * fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
+                    bool use_fence_fd);
+
 
 struct fd_ringbuffer;
 
