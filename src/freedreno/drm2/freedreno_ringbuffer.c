@@ -80,9 +80,9 @@ fd_submit_ref(struct fd_submit *submit)
 
 #include "util/libsync.h"
 
-int
+struct fd_fence * 
 fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
-                struct fd_submit_fence *out_fence)
+                bool use_fence_fd)
 {
    uint32_t cmds[32*1024];
    struct fd_ringbuffer ring = {
@@ -128,13 +128,16 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
 
    submit->rptr = wptr;
 
-   if (out_fence) {
-      __atomic_store_n(out_fence->rptr, wptr, __ATOMIC_RELAXED); // atomic store: it may be shared memory
-      if (out_fence->use_fence_fd) {
+   struct fd_fence *out_fence = malloc(sizeof(*out_fence));
+   //GABE: not sure about this atomic_store thing here? //flto please check
+   //if (out_fence) {
+   //   __atomic_store_n(out_fence->rptr, wptr, __ATOMIC_RELAXED); // atomic store: it may be shared memory
+      //if (out_fence->use_fence_fd) {
+      if(use_fence_fd) {
          out_fence->fence_fd = create_fence(submit->pipe->dev, wptr);
          assert(out_fence->fence_fd >= 0);
       }
-   }
+   //}
 
    simple_mtx_lock(&submit->pipe->submit_lock);
 
@@ -144,7 +147,7 @@ fd_submit_flush(struct fd_submit *submit, int in_fence_fd,
 
    simple_mtx_unlock(&submit->pipe->submit_lock);
 
-   return 0;
+   return out_fence;
 }
 
 static bool

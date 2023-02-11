@@ -98,6 +98,15 @@ tu_drm_submitqueue_new(const struct tu_device *dev,
 }
 
 void
+tu_bo_allow_dump(struct tu_device *dev, struct tu_bo *bo)
+{
+   //flto look here
+   //mtx_lock(&dev->bo_mutex);
+   //dev->bo_list[bo->bo_list_idx].flags |= MSM_SUBMIT_BO_DUMP;
+   //mtx_unlock(&dev->bo_mutex);
+}
+
+void
 tu_drm_submitqueue_close(const struct tu_device *dev, uint32_t queue_id)
 {
 }

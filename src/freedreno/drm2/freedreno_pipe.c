@@ -117,6 +117,27 @@ fd_pipe_purge(struct fd_pipe *pipe)
 {
 }
 
+void
+fd_fence_del(struct fd_fence *f)
+{
+ //todo make this do something //flto please check
+}
+
+struct 
+fd_fence *fd_fence_new(struct fd_pipe *pipe, bool use_fence_fd) {
+   //todo make this do something //flto please check
+   return NULL;
+}
+
+/**
+ * Wait until corresponding submit is flushed to kernel
+ */
+void
+fd_fence_flush(struct fd_fence *f)
+{
+ //todo make this do something //flto please check
+}
+
 int
 fd_pipe_get_param(struct fd_pipe *pipe, enum fd_param_id param, uint64_t *value)
 {

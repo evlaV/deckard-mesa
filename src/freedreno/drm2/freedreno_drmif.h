@@ -94,6 +94,11 @@ fd_fence_after(uint32_t a, uint32_t b)
  */
 struct fd_fence {
    uint64_t rptr;
+   /**
+    * Optional dma_fence fd, returned by submit if use_fence_fd is true
+    */
+   int fence_fd;
+   bool use_fence_fd;
 };
 
 /* bo flags: */
@@ -116,6 +121,7 @@ struct fd_fence {
 /* device functions:
  */
 
+
 struct fd_device *fd_device_new(int fd);
 struct fd_device *fd_device_new_dup(int fd);
 struct fd_device *fd_device_open(void);
@@ -123,6 +129,9 @@ struct fd_device *fd_device_ref(struct fd_device *dev);
 void fd_device_purge(struct fd_device *dev);
 void fd_device_del(struct fd_device *dev);
 int fd_device_fd(struct fd_device *dev);
+struct fd_fence *fd_fence_new(struct fd_pipe *pipe, bool use_fence_fd);
+void fd_fence_flush(struct fd_fence *f);
+void fd_fence_del(struct fd_fence *f);
 
 enum fd_version {
    FD_VERSION_MADVISE = 1,             /* kernel supports madvise */
