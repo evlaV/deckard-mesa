@@ -200,11 +200,11 @@ fence_create(struct fd_context *ctx, struct fd_batch *batch, int fence_fd,
 //OLD PATCH WAS THIS: FLTO PLEASE LOOK HERE
 //Previously this patch was at the end of this function, now there is another if statement below this code
 // maybe this fd_fence_new thing is something we want to handle for testgpu driver?
-//+#ifndef TEST_GPU_DRIVER
-//   fence->syncobj = syncobj; //this won't work due to syncobj type being different
-//+#else
-//+   fence->submit_fence.rptr = syncobj ?: &fence->submit_fence.rptr_storage;
-//+#endif   
+#ifndef TEST_GPU_DRIVER
+   fence->syncobj = syncobj; //this won't work due to syncobj type being different
+#else
+//   fence->submit_fence.rptr = syncobj ?: &fence->submit_fence.rptr_storage;
+#endif   
 
    if (fence_fd != -1) {
       fence->fence = fd_fence_new(fence->pipe, fence->use_fence_fd);
