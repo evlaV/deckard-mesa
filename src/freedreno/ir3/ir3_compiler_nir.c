@@ -3846,6 +3846,8 @@ emit_if(struct ir3_context *ctx, nir_if *nif)
       ctx->block->brtype = IR3_BRANCH_COND;
    }
 
+   ctx->block->divergent_condition = nif->condition.ssa->divergent;
+
    emit_cf_list(ctx, &nif->then_list);
    emit_cf_list(ctx, &nif->else_list);
 }

@@ -655,6 +655,8 @@ struct ir3_block {
    struct ir3_instruction *condition;
    struct ir3_block *successors[2];
 
+   bool divergent_condition;
+
    DECLARE_ARRAY(struct ir3_block *, predecessors);
    DECLARE_ARRAY(struct ir3_block *, physical_predecessors);
    DECLARE_ARRAY(struct ir3_block *, physical_successors);
