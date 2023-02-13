@@ -313,8 +313,9 @@ spec@arb_query_buffer_object@coherency@indirect-draw-count-GL_TESS_CONTROL_SHADE
 spec@arb_query_buffer_object@coherency@indirect-draw-count-GL_TESS_EVALUATION_SHADER_INVOCATIONS,Fail
 spec@arb_query_buffer_object@coherency@indirect-draw-count-GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN,Fail
 
-spill-dEQP-VK.subgroups.ballot_broadcast.compute.subgroupbroadcast_bool,Fail
-spill-dEQP-VK.subgroups.ballot_broadcast.compute.subgroupbroadcast_bool_requiredsubgroupsize128,Fail
+# Failing (Color test failed) since wayland platform was enabled in arm builds
+wayland-dEQP-EGL.functional.wide_color.window_888_colorspace_default,Fail
+wayland-dEQP-EGL.functional.wide_color.window_fp16_default_colorspace,Fail
 
 # skqp failure:
 # SRGBReadWritePixels FAILED (7 errors)
