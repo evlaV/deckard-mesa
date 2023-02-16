@@ -51,6 +51,13 @@ clone_with_predicate_dst(struct opt_predicates_ctx *ctx,
 }
 
 static bool
+cat2_2src_needs_scalar_alu(struct ir3_instruction *instr)
+{
+   return (instr->srcs[0]->flags & (IR3_REG_CONST | IR3_REG_SHARED)) &&
+          (instr->srcs[1]->flags & (IR3_REG_CONST | IR3_REG_SHARED));
+}
+
+static bool
 can_write_predicate(struct opt_predicates_ctx *ctx,
                     struct ir3_instruction *instr)
 {
@@ -58,13 +65,14 @@ can_write_predicate(struct opt_predicates_ctx *ctx,
    case OPC_CMPS_S:
    case OPC_CMPS_U:
    case OPC_CMPS_F:
-      return true;
+      return !cat2_2src_needs_scalar_alu(instr);
    case OPC_AND_B:
    case OPC_OR_B:
    case OPC_NOT_B:
    case OPC_XOR_B:
    case OPC_GETBIT_B:
-      return ctx->ir->compiler->bitops_can_write_predicates;
+      return ctx->ir->compiler->bitops_can_write_predicates &&
+             !cat2_2src_needs_scalar_alu(instr);
    default:
       return false;
    }
