@@ -1039,9 +1039,6 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
    struct ir3_compiler *compiler = instr->block->shader->compiler;
    unsigned valid_flags;
 
-   if ((flags & IR3_REG_SHARED) && opc_cat(instr->opc) > 3)
-      return false;
-
    flags = cp_flags(flags);
 
    /* If destination is indirect, then source cannot be.. at least
@@ -1110,9 +1107,28 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
          else
             return flags == 0;
          break;
-      default:
+      default: {
          valid_flags =
             IR3_REG_IMMED | IR3_REG_CONST | IR3_REG_RELATIV | IR3_REG_SHARED;
+
+         /* floating-point conversions when moving from non-shared to shared
+          * seem not to work.
+          */
+         if ((instr->dsts[0]->flags & IR3_REG_SHARED) &&
+             !(flags & (IR3_REG_SHARED | IR3_REG_IMMED | IR3_REG_CONST)) &&
+             (full_type(instr->cat1.src_type) == TYPE_F32 ||
+              full_type(instr->cat1.dst_type) == TYPE_F32))
+            return false;
+
+         /* Conversions seem not to work in shared->shared copies before scalar
+          * ALU is supported.
+          */
+         if (!compiler->has_scalar_alu &&
+             (flags & IR3_REG_SHARED) &&
+             (instr->dsts[0]->flags & IR3_REG_SHARED) &&
+             instr->cat1.src_type != instr->cat1.dst_type)
+            return false;
+      }
       }
       if (flags & ~valid_flags)
          return false;
@@ -1129,6 +1145,12 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
           n == 1 && flags == IR3_REG_IMMED)
          return true;
 
+      /* cat2/cat3 scalar ALU instructions must not have regular sources. */
+      if (instr->dsts[0]->flags & IR3_REG_SHARED) {
+         if (!(flags & (IR3_REG_SHARED | IR3_REG_IMMED | IR3_REG_CONST)))
+            return false;
+      }
+
       if (flags & (IR3_REG_CONST | IR3_REG_IMMED | IR3_REG_SHARED)) {
          unsigned m = n ^ 1;
          /* cannot deal w/ const or shared in both srcs:
@@ -1136,9 +1158,14 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
           */
          if (m < instr->srcs_count) {
             struct ir3_register *reg = instr->srcs[m];
-            if ((flags & (IR3_REG_CONST | IR3_REG_SHARED)) &&
-                (reg->flags & (IR3_REG_CONST | IR3_REG_SHARED)))
-               return false;
+            if (instr->dsts[0]->flags & IR3_REG_SHARED) {
+               if ((flags & IR3_REG_CONST) && (reg->flags & IR3_REG_CONST))
+                  return false;
+            } else {
+               if ((flags & (IR3_REG_CONST | IR3_REG_SHARED)) &&
+                   (reg->flags & (IR3_REG_CONST | IR3_REG_SHARED)))
+                  return false;
+            }
             if ((flags & IR3_REG_IMMED) && reg->flags & (IR3_REG_IMMED))
                return false;
          }
@@ -1177,14 +1204,23 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
       if (flags & ~valid_flags)
          return false;
 
-      if (flags & (IR3_REG_CONST | IR3_REG_SHARED | IR3_REG_RELATIV)) {
+      if (flags & (IR3_REG_CONST | IR3_REG_RELATIV) ||
+          (!(instr->dsts[0]->flags & IR3_REG_SHARED) &&
+           (flags & IR3_REG_SHARED))) {
          /* cannot deal w/ const/shared/relativ in 2nd src: */
          if (n == 1)
             return false;
       }
 
+      if (instr->dsts[0]->flags & IR3_REG_SHARED) {
+         if (!(flags & (IR3_REG_SHARED | IR3_REG_IMMED | IR3_REG_CONST)))
+            return false;
+      }
+
       break;
    case 4:
+      if ((instr->dsts[0]->flags & IR3_REG_SHARED) != (flags & IR3_REG_SHARED))
+         return false;
       /* seems like blob compiler avoids const as src.. */
       /* TODO double check if this is still the case on a4xx */
       if (flags & (IR3_REG_CONST | IR3_REG_IMMED))
@@ -1199,6 +1235,10 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
       break;
    case 6:
       valid_flags = IR3_REG_IMMED;
+
+      if (instr->opc == OPC_STC && n == 1)
+         valid_flags |= IR3_REG_SHARED;
+
       if (flags & ~valid_flags)
          return false;
 
