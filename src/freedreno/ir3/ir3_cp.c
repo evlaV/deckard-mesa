@@ -598,6 +598,13 @@ instr_cp(struct ir3_cp_ctx *ctx, struct ir3_instruction *instr)
       case OPC_CMPS_S:
       case OPC_CMPS_F:
       case OPC_CMPS_U:
+         /* If "cond" is executed on the scalar ALU then it may have a shared
+          * and const src which is illegal on the vector ALU
+          */
+         if ((cond->srcs[0]->flags & (IR3_REG_CONST | IR3_REG_SHARED)) &&
+             (cond->srcs[1]->flags & (IR3_REG_CONST | IR3_REG_SHARED)))
+            break;
+
          instr->opc = cond->opc;
          instr->flags = cond->flags;
          instr->cat2 = cond->cat2;
