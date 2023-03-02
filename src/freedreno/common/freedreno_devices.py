@@ -792,6 +792,7 @@ a7xx_base = A6XXProps(
         has_per_view_viewport = True,
         line_width_min = 1.0,
         line_width_max = 127.5,
+        has_scalar_alu = True,
     )
 
 a7xx_725 = A7XXProps(
