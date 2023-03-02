@@ -501,13 +501,14 @@ ir3_get_predicate(struct ir3_context *ctx, struct ir3_instruction *src)
 
    /* NOTE: only cmps.*.* can write p0.x: */
    struct ir3_instruction *zero =
-         create_immed_typed(b, 0, is_half(src) ? TYPE_U16 : TYPE_U32);
+         create_immed_typed_shared(b, 0, is_half(src) ? TYPE_U16 : TYPE_U32,
+                                   src->dsts[0]->flags & IR3_REG_SHARED);
    cond = ir3_CMPS_S(b, src, 0, zero, 0);
    cond->cat2.condition = IR3_COND_NE;
 
    /* condition always goes in predicate register: */
    cond->dsts[0]->num = regid(REG_P0, 0);
-   cond->dsts[0]->flags &= ~IR3_REG_SSA;
+   cond->dsts[0]->flags &= ~(IR3_REG_SSA | IR3_REG_SHARED);
 
    return cond;
 }
