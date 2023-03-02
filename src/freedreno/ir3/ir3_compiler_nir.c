@@ -2659,6 +2659,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
 
       kill->barrier_class = IR3_BARRIER_EVERYTHING;
       kill->barrier_conflict = IR3_BARRIER_EVERYTHING;
+      kill->srcs[0]->num = regid(REG_P0, 0);
 
       array_insert(ctx->ir, ctx->ir->predicates, kill);
       array_insert(b, b->keeps, kill);
