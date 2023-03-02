@@ -789,6 +789,7 @@ a7xx_base = A6XXProps(
         has_lrz_dir_tracking = True,
         has_per_view_viewport = True,
         supports_ibo_ubwc = True,
+        has_scalar_alu = True,
     )
 
 a7xx_725 = A7XXProps(
