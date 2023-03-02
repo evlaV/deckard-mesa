@@ -4984,6 +4984,8 @@ ir3_compile_shader_nir(struct ir3_compiler *compiler,
 
    ir3_calc_reconvergence(so);
 
+   IR3_PASS(ir, ir3_lower_shared_phis);
+
    do {
       progress = false;
 
@@ -4993,6 +4995,7 @@ ir3_compile_shader_nir(struct ir3_compiler *compiler,
       progress |= IR3_PASS(ir, ir3_cp, so);
       progress |= IR3_PASS(ir, ir3_cse);
       progress |= IR3_PASS(ir, ir3_dce, so);
+      progress |= IR3_PASS(ir, ir3_shared_fold);
    } while (progress);
 
    /* at this point, for binning pass, throw away unneeded outputs:
