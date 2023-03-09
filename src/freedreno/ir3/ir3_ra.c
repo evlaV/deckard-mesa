@@ -1610,7 +1610,7 @@ insert_parallel_copy_instr(struct ra_ctx *ctx, struct ir3_instruction *instr)
       struct ir3_register *reg =
          ir3_dst_create(pcopy, INVALID_REG,
                         entry->interval->interval.reg->flags &
-                        (IR3_REG_HALF | IR3_REG_ARRAY));
+                        (IR3_REG_HALF | IR3_REG_SHARED | IR3_REG_ARRAY));
       reg->size = entry->interval->interval.reg->size;
       reg->wrmask = entry->interval->interval.reg->wrmask;
       assign_reg(pcopy, reg, ra_interval_get_num(entry->interval));
@@ -1621,7 +1621,7 @@ insert_parallel_copy_instr(struct ra_ctx *ctx, struct ir3_instruction *instr)
       struct ir3_register *reg =
          ir3_src_create(pcopy, INVALID_REG,
                         entry->interval->interval.reg->flags &
-                        (IR3_REG_HALF | IR3_REG_ARRAY));
+                        (IR3_REG_HALF | IR3_REG_SHARED | IR3_REG_ARRAY));
       reg->size = entry->interval->interval.reg->size;
       reg->wrmask = entry->interval->interval.reg->wrmask;
       assign_reg(pcopy, reg, ra_physreg_to_num(entry->src, reg->flags));
