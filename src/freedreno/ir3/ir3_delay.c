@@ -63,9 +63,6 @@ ir3_delayslots(struct ir3_compiler *compiler,
    if (is_meta(assigner) || is_meta(consumer))
       return 0;
 
-   if (writes_addr0(assigner) || writes_addr1(assigner))
-      return 6;
-
    if (soft && needs_ss(compiler->has_scalar_alu, assigner, consumer))
       return soft_ss_delay(assigner);
 
@@ -73,6 +70,9 @@ ir3_delayslots(struct ir3_compiler *compiler,
    if (needs_ss(compiler->has_scalar_alu, assigner, consumer) ||
        is_sy_producer(assigner))
       return 0;
+
+   if (writes_addr0(assigner) || writes_addr1(assigner))
+      return 6;
 
    /* Waiting on the scalar ALU usually requires (ss), but on newer gens scalar
     * -> scalar depdendencies where the source and destination register sizes
