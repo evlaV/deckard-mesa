@@ -662,6 +662,8 @@ struct ir3_block {
 
    bool reconvergence_point;
 
+   bool in_early_preamble;
+
    /* Track instructions which do not write a register but other-
     * wise must not be discarded (such as kill, stg, etc)
     */
@@ -1452,6 +1454,14 @@ reg_gpr(struct ir3_register *r)
    return true;
 }
 
+static inline bool
+reg_is_addr1(struct ir3_register *r)
+{
+   if (r->flags & (IR3_REG_CONST | IR3_REG_IMMED))
+      return false;
+   return r->num == regid(REG_A0, 1);
+}
+
 static inline type_t
 half_type(type_t type)
 {
@@ -1947,6 +1957,9 @@ is_ss_producer(struct ir3_instruction *instr)
       if (dst->flags & IR3_REG_SHARED)
          return true;
    }
+
+   if (instr->block->in_early_preamble && writes_addr1(instr))
+      return true;
 
    return is_sfu(instr) || is_local_mem_load(instr);
 }
