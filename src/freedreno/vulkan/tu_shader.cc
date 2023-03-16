@@ -1124,6 +1124,7 @@ tu6_emit_xs(struct tu_cs *cs,
                .fullregfootprint = xs->info.max_reg + 1,
                .branchstack = ir3_shader_branchstack_hw(xs),
                .mergedregs = xs->mergedregs,
+               .earlypreamble = xs->info.early_preamble,
       ));
       break;
    case MESA_SHADER_TESS_CTRL:
@@ -1131,6 +1132,7 @@ tu6_emit_xs(struct tu_cs *cs,
                .halfregfootprint = xs->info.max_half_reg + 1,
                .fullregfootprint = xs->info.max_reg + 1,
                .branchstack = ir3_shader_branchstack_hw(xs),
+               .earlypreamble = xs->info.early_preamble,
       ));
       break;
    case MESA_SHADER_TESS_EVAL:
@@ -1138,6 +1140,7 @@ tu6_emit_xs(struct tu_cs *cs,
                .halfregfootprint = xs->info.max_half_reg + 1,
                .fullregfootprint = xs->info.max_reg + 1,
                .branchstack = ir3_shader_branchstack_hw(xs),
+               .earlypreamble = xs->info.early_preamble,
       ));
       break;
    case MESA_SHADER_GEOMETRY:
@@ -1145,6 +1148,7 @@ tu6_emit_xs(struct tu_cs *cs,
                .halfregfootprint = xs->info.max_half_reg + 1,
                .fullregfootprint = xs->info.max_reg + 1,
                .branchstack = ir3_shader_branchstack_hw(xs),
+               .earlypreamble = xs->info.early_preamble,
       ));
       break;
    case MESA_SHADER_FRAGMENT:
@@ -1158,6 +1162,7 @@ tu6_emit_xs(struct tu_cs *cs,
                /* unknown bit, seems unnecessary */
                .unk24 = true,
                .pixlodenable = xs->need_pixlod,
+               .earlypreamble = xs->info.early_preamble,
                .mergedregs = xs->mergedregs,
       ));
       break;
@@ -1169,6 +1174,7 @@ tu6_emit_xs(struct tu_cs *cs,
                .fullregfootprint = xs->info.max_reg + 1,
                .branchstack = ir3_shader_branchstack_hw(xs),
                .threadsize = thrsz,
+               .earlypreamble = xs->info.early_preamble,
                .mergedregs = xs->mergedregs,
       ));
       break;
