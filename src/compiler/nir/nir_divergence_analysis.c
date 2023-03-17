@@ -357,6 +357,8 @@ visit_intrinsic(nir_shader *shader, nir_intrinsic_instr *instr,
          is_divergent = false;
       else if (stage == MESA_SHADER_FRAGMENT)
          is_divergent = !(options & nir_divergence_single_prim_per_subgroup);
+      else
+         is_divergent = true;
       break;
    case nir_intrinsic_load_fs_input_interp_deltas:
       assert(stage == MESA_SHADER_FRAGMENT);
