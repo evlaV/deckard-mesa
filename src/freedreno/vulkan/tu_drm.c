@@ -1095,8 +1095,8 @@ tu_fill_msm_gem_submit(struct tu_device *dev,
                        struct tu_cs_entry *cs_entry)
 {
    cmd->type = MSM_SUBMIT_CMD_BUF;
-   cmd->submit_idx = cs_entry->bo->bo_list_idx;
-   cmd->submit_offset = cs_entry->offset;
+   cmd->submit_iova_lo = (uint32_t) cs_entry->bo->iova;
+   cmd->submit_iova_hi = cs_entry->bo->iova >> 32;
    cmd->size = cs_entry->size;
    cmd->pad = 0;
    cmd->nr_relocs = 0;

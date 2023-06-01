@@ -75,7 +75,11 @@ msm_bo_cpu_prep(struct fd_bo *bo, struct fd_pipe *pipe, uint32_t op)
 
    get_abs_timeout(&req.timeout, PIPE_TIMEOUT_INFINITE);
 
-   return drmCommandWrite(bo->dev->fd, DRM_MSM_GEM_CPU_PREP, &req, sizeof(req));
+   // cpu_prep can't work without BO list
+   // normal use of GL should not hit path anyway
+   assert(0);
+   return 0;
+   //return drmCommandWrite(bo->dev->fd, DRM_MSM_GEM_CPU_PREP, &req, sizeof(req));
 }
 
 static int

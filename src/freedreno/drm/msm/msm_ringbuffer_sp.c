@@ -69,10 +69,11 @@ flush_submit_list(struct list_head *submit_list)
          to_fd_ringbuffer_sp(submit->primary);
 
       for (unsigned i = 0; i < deferred_primary->u.nr_cmds; i++) {
-         struct fd_bo *ring_bo = deferred_primary->u.cmds[i].ring_bo;
+         uint64_t iova = fd_bo_get_iova(deferred_primary->u.cmds[i].ring_bo) + deferred_primary->offset;
+
          cmds[cmd_idx].type = MSM_SUBMIT_CMD_BUF;
-         cmds[cmd_idx].submit_idx = fd_submit_append_bo(fd_submit, ring_bo);
-         cmds[cmd_idx].submit_offset = submit_offset(ring_bo, deferred_primary->offset);
+         cmds[cmd_idx].submit_iova_lo = (uint32_t) iova;
+         cmds[cmd_idx].submit_iova_hi =  iova >> 32;
          cmds[cmd_idx].size = deferred_primary->u.cmds[i].size;
          cmds[cmd_idx].pad = 0;
          cmds[cmd_idx].nr_relocs = 0;

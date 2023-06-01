@@ -85,6 +85,7 @@ msm_dump_submit(struct drm_msm_gem_submit *req)
       ERROR_MSG("  bos[%d]: handle=%u, flags=%x", i, bo->handle, bo->flags);
    }
    for (unsigned i = 0; i < req->nr_cmds; i++) {
+#if 0
       struct drm_msm_gem_submit_cmd *cmds = U642VOID(req->cmds);
       struct drm_msm_gem_submit_cmd *cmd = &cmds[i];
       struct drm_msm_gem_submit_reloc *relocs = U642VOID(cmd->relocs);
@@ -98,6 +99,7 @@ msm_dump_submit(struct drm_msm_gem_submit *req)
             j, r->submit_offset, r->or, r->shift, r->reloc_idx,
             (uint64_t)r->reloc_offset);
       }
+#endif
    }
 }
 

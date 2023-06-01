@@ -304,6 +304,11 @@ msm_submit_flush(struct fd_submit *submit, int in_fence_fd, bool use_fence_fd)
 
       assert(i < nr_cmds);
 
+      // can't do relocs without BO list
+      // a6xx driver shouldn't be hitting this path anyway
+      assert(0);
+
+#if 0
       // TODO handle relocs:
       if (ring->flags & _FD_RINGBUFFER_OBJECT) {
 
@@ -339,6 +344,7 @@ msm_submit_flush(struct fd_submit *submit, int in_fence_fd, bool use_fence_fd)
             i++;
          }
       }
+#endif
    }
 
    struct fd_fence *out_fence = fd_fence_new(submit->pipe, use_fence_fd);

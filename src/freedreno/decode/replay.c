@@ -297,8 +297,8 @@ device_submit_cmdstreams(struct device *dev)
 
       struct drm_msm_gem_submit_cmd *submit_cmd = &cmds[idx];
       submit_cmd->type = MSM_SUBMIT_CMD_BUF;
-      submit_cmd->submit_idx = bo_idx;
-      submit_cmd->submit_offset = cmd->iova - cmdstream_buf->iova;
+      submit_cmd->submit_iova_lo = (uint32_t) cmd->iova;
+      submit_cmd->submit_iova_hi = (uint32_t) cmd->iova >> 32;
       submit_cmd->size = cmd->size;
       submit_cmd->pad = 0;
       submit_cmd->nr_relocs = 0;
