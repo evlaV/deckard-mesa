@@ -349,7 +349,8 @@ zink_blit(struct pipe_context *pctx,
       util_blitter_blit(ctx->blitter, info);
    }
    ctx->blitting = false;
-end:
+
+end: ;
 }
 
 /* similar to radeonsi */
