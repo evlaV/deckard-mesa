@@ -438,8 +438,8 @@ vk_drm_syncobj_get_type(int drm_fd)
    uint64_t cap;
    err = drmGetCap(drm_fd, DRM_CAP_SYNCOBJ_TIMELINE, &cap);
    if (err == 0 && cap != 0) {
-      type.get_value = vk_drm_syncobj_get_value;
-      type.features |= VK_SYNC_FEATURE_TIMELINE;
+      //type.get_value = vk_drm_syncobj_get_value;
+      //type.features |= VK_SYNC_FEATURE_TIMELINE;
    }
 
    err = drmSyncobjDestroy(drm_fd, syncobj);
