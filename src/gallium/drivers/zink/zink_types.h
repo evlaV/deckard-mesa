@@ -604,7 +604,6 @@ struct zink_batch_state {
    struct util_dynarray wait_semaphores; //external wait semaphores
    struct util_dynarray wait_semaphore_stages; //external wait semaphores
    struct util_dynarray fd_wait_semaphores; //dmabuf wait semaphores
-   struct util_dynarray fd_wait_semaphore_stages; //dmabuf wait semaphores
 
    struct {
       struct util_dynarray pipelines;

@@ -789,7 +789,7 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
    bool need_dedicated = false;
    bool shared = templ->bind & PIPE_BIND_SHARED;
 #if !defined(_WIN32)
-   VkExternalMemoryHandleTypeFlags export_types = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+   VkExternalMemoryHandleTypeFlags export_types = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 #else
    VkExternalMemoryHandleTypeFlags export_types = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 #endif
@@ -810,7 +810,7 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
    if (needs_export) {
       if (whandle && whandle->type == ZINK_EXTERNAL_MEMORY_HANDLE) {
 #if !defined(_WIN32)
-         external = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+         external = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 #else
          external = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 #endif
@@ -1723,7 +1723,7 @@ zink_resource_get_handle(struct pipe_screen *pscreen,
          if (whandle->type == WINSYS_HANDLE_TYPE_FD)
             fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
          else
-            fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+            fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
          VkResult result = VKSCR(GetMemoryFdKHR)(screen->dev, &fd_info, &fd);
          if (result != VK_SUCCESS) {
             mesa_loge("ZINK: vkGetMemoryFdKHR failed");

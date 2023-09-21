@@ -345,7 +345,6 @@ create_batch_state(struct zink_context *ctx)
    util_dynarray_init(&bs->dgc.pipelines, NULL);
    util_dynarray_init(&bs->dgc.layouts, NULL);
    util_dynarray_init(&bs->wait_semaphore_stages, NULL);
-   util_dynarray_init(&bs->fd_wait_semaphore_stages, NULL);
    util_dynarray_init(&bs->zombie_samplers, NULL);
    util_dynarray_init(&bs->dead_framebuffers, NULL);
    util_dynarray_init(&bs->unref_resources, NULL);
@@ -534,77 +533,67 @@ post_submit(void *data, void *gdata, int thread_index)
    memset(&bs->buffer_indices_hashlist, -1, sizeof(bs->buffer_indices_hashlist));
 }
 
-typedef enum {
-   ZINK_SUBMIT_WAIT_FD,
-   ZINK_SUBMIT_CMDBUF,
-   ZINK_SUBMIT_SIGNAL,
-   ZINK_SUBMIT_MAX
-} zink_submit;
-
 static void
 submit_queue(void *data, void *gdata, int thread_index)
 {
    struct zink_batch_state *bs = data;
    struct zink_context *ctx = bs->ctx;
    struct zink_screen *screen = zink_screen(ctx->base.screen);
-   VkSubmitInfo si[ZINK_SUBMIT_MAX] = {0};
-   VkSubmitInfo *submit = si;
-   int num_si = ZINK_SUBMIT_MAX;
+   VkSubmitInfo si;
+   VkSemaphore wait_semaphore[256];
+   VkPipelineStageFlags wait_stage[256];
+   VkSemaphore signal_semaphore[256];
+   uint64_t signal_value[256];
+
    while (!bs->fence.batch_id)
       bs->fence.batch_id = (uint32_t)p_atomic_inc_return(&screen->curr_batch);
    bs->usage.usage = bs->fence.batch_id;
    bs->usage.unflushed = false;
 
    uint64_t batch_id = bs->fence.batch_id;
-   for (unsigned i = 0; i < ARRAY_SIZE(si); i++)
-      si[i].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-   si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount = util_dynarray_num_elements(&bs->fd_wait_semaphores, VkSemaphore);
-   si[ZINK_SUBMIT_WAIT_FD].pWaitSemaphores = bs->fd_wait_semaphores.data;
-   while (util_dynarray_num_elements(&bs->fd_wait_semaphore_stages, VkPipelineStageFlags) < si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount) {
-      VkPipelineStageFlags mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-      util_dynarray_append(&bs->fd_wait_semaphore_stages, VkPipelineStageFlags, mask);
-   }
-   assert(util_dynarray_num_elements(&bs->fd_wait_semaphores, VkSemaphore) <= util_dynarray_num_elements(&bs->fd_wait_semaphore_stages, VkPipelineStageFlags));
-   si[ZINK_SUBMIT_WAIT_FD].pWaitDstStageMask = bs->fd_wait_semaphore_stages.data;
-
-   if (si[ZINK_SUBMIT_WAIT_FD].waitSemaphoreCount == 0) {
-      num_si--;
-      submit++;
-   }
-
-   /* then the real submit */
-   si[ZINK_SUBMIT_CMDBUF].waitSemaphoreCount = util_dynarray_num_elements(&bs->wait_semaphores, VkSemaphore);
-   si[ZINK_SUBMIT_CMDBUF].pWaitSemaphores = bs->wait_semaphores.data;
-   si[ZINK_SUBMIT_CMDBUF].pWaitDstStageMask = bs->wait_semaphore_stages.data;
-   si[ZINK_SUBMIT_CMDBUF].commandBufferCount = bs->has_barriers ? 2 : 1;
    VkCommandBuffer cmdbufs[2] = {
       bs->barrier_cmdbuf,
       bs->cmdbuf,
    };
-   si[ZINK_SUBMIT_CMDBUF].pCommandBuffers = bs->has_barriers ? cmdbufs : &cmdbufs[1];
-   /* assorted signal submit from wsi/externals */
-   si[ZINK_SUBMIT_CMDBUF].signalSemaphoreCount = util_dynarray_num_elements(&bs->signal_semaphores, VkSemaphore);
-   si[ZINK_SUBMIT_CMDBUF].pSignalSemaphores = bs->signal_semaphores.data;
 
-   /* then the signal submit with the timeline (fence) semaphore */
-   VkSemaphore signals[3];
-   si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount = !!bs->signal_semaphore;
-   signals[0] = bs->signal_semaphore;
-   si[ZINK_SUBMIT_SIGNAL].pSignalSemaphores = signals;
+   si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+   si.pWaitSemaphores = wait_semaphore;
+   si.pWaitDstStageMask = wait_stage;
+   si.waitSemaphoreCount = 0;
+   si.pSignalSemaphores = signal_semaphore;
+   si.signalSemaphoreCount = 0;
+   si.commandBufferCount = bs->has_barriers ? 2 : 1;
+   si.pCommandBuffers = bs->has_barriers ? cmdbufs : &cmdbufs[1];
+
+   uint32_t count;
+
+   count = util_dynarray_num_elements(&bs->fd_wait_semaphores, VkSemaphore);
+   memcpy(&wait_semaphore[si.waitSemaphoreCount], bs->fd_wait_semaphores.data, count * sizeof(VkSemaphore));
+   for (uint32_t i = 0; i < count; i++)
+      wait_stage[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+   si.waitSemaphoreCount += count;
+
+   count = util_dynarray_num_elements(&bs->wait_semaphores, VkSemaphore);
+   memcpy(&wait_semaphore[si.waitSemaphoreCount], bs->wait_semaphores.data, count * sizeof(VkSemaphore));
+   memcpy(&wait_stage[si.waitSemaphoreCount], bs->wait_semaphore_stages.data, count * sizeof(VkPipelineStageFlags));
+   si.waitSemaphoreCount += count;
+
+   signal_value[0] = batch_id;
    VkTimelineSemaphoreSubmitInfo tsi = {0};
-   uint64_t signal_values[2] = {0};
    tsi.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-   si[ZINK_SUBMIT_SIGNAL].pNext = &tsi;
-   tsi.pSignalSemaphoreValues = signal_values;
-   signal_values[si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount] = batch_id;
-   signals[si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount++] = screen->sem;
-   tsi.signalSemaphoreValueCount = si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount;
+   tsi.pSignalSemaphoreValues = signal_value;
+   si.pNext = &tsi;
 
-   if (bs->present)
-      signals[si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount++] = bs->present;
-   tsi.signalSemaphoreValueCount = si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount;
+   signal_semaphore[si.signalSemaphoreCount++] = screen->sem;
+   if (bs->signal_semaphore)
+      signal_semaphore[si.signalSemaphoreCount++] = bs->signal_semaphore;
+   count = util_dynarray_num_elements(&bs->signal_semaphores, VkSemaphore);
+   memcpy(&signal_semaphore[si.signalSemaphoreCount], bs->signal_semaphores.data, count * sizeof(VkSemaphore));
+   si.signalSemaphoreCount += count;
+   tsi.signalSemaphoreValueCount = si.signalSemaphoreCount;
 
+   assert(si.signalSemaphoreCount <= 256 && si.waitSemaphoreCount <= 256); // XXX: this assert is too late
 
    VkResult result = VKSCR(EndCommandBuffer)(bs->cmdbuf);
    if (result != VK_SUCCESS) {
@@ -631,11 +620,8 @@ submit_queue(void *data, void *gdata, int thread_index)
       }
    }
 
-   if (!si[ZINK_SUBMIT_SIGNAL].signalSemaphoreCount)
-      num_si--;
-
    simple_mtx_lock(&screen->queue_lock);
-   result = VKSCR(QueueSubmit)(screen->queue, num_si, submit, VK_NULL_HANDLE);
+   result = VKSCR(QueueSubmit)(screen->queue, 1, &si, VK_NULL_HANDLE);
    if (result != VK_SUCCESS) {
       mesa_loge("ZINK: vkQueueSubmit failed (%s)", vk_Result_to_str(result));
       bs->is_device_lost = true;
