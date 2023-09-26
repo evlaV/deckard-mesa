@@ -3034,6 +3034,47 @@ zink_screen_get_fd(struct pipe_screen *pscreen)
    return screen->drm_fd;
 }
 
+#include <sys/ioctl.h>
+
+static VkResult
+blob_GetMemoryFdKHR(VkDevice device, const VkMemoryGetFdInfoKHR *info, int *p_fd)
+{
+   static int device_fd;
+
+   #define GSL_DEVICE_3D 1
+   if (device_fd == 0) {
+      int (*gsl_device_open)(uint32_t device_id, uint32_t flags);
+      void *libgsl = dlopen("libgsl.so", RTLD_LAZY);
+      assert(libgsl);
+      gsl_device_open = dlsym(libgsl, "gsl_device_open");
+      assert(gsl_device_open);
+
+      device_fd = gsl_device_open(GSL_DEVICE_3D, 0);
+      assert(device_fd);
+
+      dlclose(libgsl);
+      // XXX dup() then call gsl_device_close, and close device_fd when done
+   }
+
+   typedef struct {
+      void *hostptr;
+      uint64_t gpuaddr;
+      uint64_t size;
+      uint64_t flags;
+      void *priv;
+   } gsl_memdesc_t;
+   gsl_memdesc_t *memdesc = *(void**) ((void*)info->memory + 0x120);
+   struct drm_prime_handle handle = {
+      .handle = *(uint32_t*) (memdesc->priv + 4),
+      .flags = DRM_RDWR | DRM_CLOEXEC,
+      .fd = -1,
+   };
+   int ret = ioctl(device_fd - 1, DRM_IOCTL_PRIME_HANDLE_TO_FD, &handle);
+   assert(!ret);
+   *p_fd = handle.fd;
+   return VK_SUCCESS;
+}
+
 static struct zink_screen *
 zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev_major, int64_t dev_minor)
 {
@@ -3449,6 +3490,9 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
                   (u_trace_is_enabled(U_TRACE_TYPE_PERFETTO) || u_trace_is_enabled(U_TRACE_TYPE_MARKERS));
 
    screen->frame_marker_emitted = zink_screen_debug_marker_begin(screen, "frame");
+
+   if (!strcmp(screen->info.props.deviceName, "Adreno (TM) 740"))
+      screen->vk.GetMemoryFdKHR = blob_GetMemoryFdKHR;
 
    return screen;
 

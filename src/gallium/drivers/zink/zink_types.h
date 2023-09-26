@@ -1516,6 +1516,8 @@ struct zink_screen {
       unsigned z16_unscaled_bias;
       unsigned z24_unscaled_bias;
    } driver_workarounds;
+
+   int device_fd;
 };
 
 static inline struct zink_screen *

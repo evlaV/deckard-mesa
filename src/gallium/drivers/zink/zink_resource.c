@@ -65,8 +65,6 @@
 
 #define ZINK_EXTERNAL_MEMORY_HANDLE 999
 
-
-
 struct zink_debug_mem_entry {
    uint32_t count;
    uint64_t size;
@@ -1106,10 +1104,10 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
          info2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
          info2.pNext = NULL;
          info2.image = obj->image;
-         VkMemoryDedicatedRequirements ded;
-         ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
-         ded.pNext = NULL;
-         req2.pNext = &ded;
+         //VkMemoryDedicatedRequirements ded;
+         //ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+         //ded.pNext = NULL;
+         req2.pNext = NULL; //&ded;
          VkImagePlaneMemoryRequirementsInfo plane;
          plane.sType = VK_STRUCTURE_TYPE_IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO;
          plane.pNext = NULL;
@@ -1126,7 +1124,7 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
             offset += req2.memoryRequirements.size;
             reqs.size += req2.memoryRequirements.size;
             reqs.memoryTypeBits |= req2.memoryRequirements.memoryTypeBits;
-            need_dedicated |= ded.prefersDedicatedAllocation || ded.requiresDedicatedAllocation;
+            //need_dedicated |= ded.prefersDedicatedAllocation || ded.requiresDedicatedAllocation;
          }
       } else {
          VKSCR(GetImageMemoryRequirements)(screen->dev, obj->image, &reqs);
@@ -1183,13 +1181,14 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
       mai.pNext = &ded_alloc_info;
    }
 
-   VkExportMemoryAllocateInfo emai;
+   // blob hack: no export memory info (note: turnip doesn't care about not having this)
+   //VkExportMemoryAllocateInfo emai;
    if ((templ->bind & ZINK_BIND_VIDEO) || ((templ->bind & PIPE_BIND_SHARED) && shared) || (templ->bind & ZINK_BIND_DMABUF)) {
-      emai.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
-      emai.handleTypes = export_types;
+      //emai.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+      //emai.handleTypes = export_types;
 
-      emai.pNext = mai.pNext;
-      mai.pNext = &emai;
+      //emai.pNext = mai.pNext;
+      //mai.pNext = &emai;
       obj->exportable = true;
    }
 
@@ -1212,6 +1211,8 @@ resource_object_create(struct zink_screen *screen, const struct pipe_resource *t
 
       imfi.pNext = mai.pNext;
       mai.pNext = &imfi;
+
+      assert(strcmp(screen->info.props.deviceName, "Adreno (TM) 740")); // XXX handle blob case
    }
 #else
    VkImportMemoryWin32HandleInfoKHR imfi = {
@@ -1279,7 +1280,7 @@ retry:
          continue;
 
       mai.memoryTypeIndex = screen->heap_map[heap][i];
-      obj->bo = zink_bo(zink_bo_create(screen, reqs.size, alignment, heap, mai.pNext ? ZINK_ALLOC_NO_SUBALLOC : 0, mai.memoryTypeIndex, mai.pNext));
+      obj->bo = zink_bo(zink_bo_create(screen, reqs.size, alignment, heap, obj->exportable ? ZINK_ALLOC_NO_SUBALLOC : 0, mai.memoryTypeIndex, mai.pNext));
       if (!obj->bo) {
          if (heap == ZINK_HEAP_DEVICE_LOCAL_VISIBLE) {
             /* demote BAR allocations to a different heap on failure to avoid oom */
@@ -1724,6 +1725,7 @@ zink_resource_get_handle(struct pipe_screen *pscreen,
             fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
          else
             fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
          VkResult result = VKSCR(GetMemoryFdKHR)(screen->dev, &fd_info, &fd);
          if (result != VK_SUCCESS) {
             mesa_loge("ZINK: vkGetMemoryFdKHR failed");
