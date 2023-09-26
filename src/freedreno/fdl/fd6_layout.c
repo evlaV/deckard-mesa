@@ -229,7 +229,7 @@ fdl6_layout(struct fdl_layout *layout, enum pipe_format format,
        * The pitch is already sufficiently aligned, but height
        * may not be. note this only matters if last level is linear
        */
-      if (level == mip_levels - 1)
+      if (level == mip_levels - 1 && !explicit_layout)
          nblocksy = align(nblocksy, 4);
 
       slice->offset = offset + layout->size;
