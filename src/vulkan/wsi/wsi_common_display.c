@@ -105,6 +105,7 @@ enum plane_property {
    SRC_W,
    SRC_H,
    FB_ID,
+   IN_FENCE_FD,
    PLANE_PROPERTY_MAX,
 };
 
@@ -200,6 +201,7 @@ find_properties(struct wsi_display_connector *connector, uint32_t type)
          PROPERTY(ACTIVE);
          break;
       case DRM_MODE_OBJECT_PLANE:
+         PROPERTY(IN_FENCE_FD);
          PROPERTY(FB_ID);
          PROPERTY(CRTC_ID);
          PROPERTY(CRTC_X);
@@ -250,6 +252,7 @@ struct wsi_display_image {
    uint32_t                     buffer[4];
    uint64_t                     flip_sequence;
    uint64_t                     present_id;
+   int fence_fd;
 };
 
 struct wsi_display_swapchain {
@@ -1291,6 +1294,7 @@ wsi_display_image_init(struct wsi_swapchain *drv_chain,
    image->chain = chain;
    image->state = WSI_IMAGE_IDLE;
    image->fb_id = 0;
+   image->fence_fd = -1;
 
    int ret = drmModeAddFB2WithModifiers(wsi->fd,
                            create_info->imageExtent.width,
@@ -1334,7 +1338,7 @@ wsi_display_image_finish(struct wsi_swapchain *drv_chain,
    wsi_destroy_image(&chain->base, &image->base);
 }
 
-static VkResult
+VkResult
 wsi_display_swapchain_destroy(struct wsi_swapchain *drv_chain,
                               const VkAllocationCallbacks *allocator)
 {
@@ -2146,6 +2150,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    }
 
    const uint32_t *prop = connector->plane_property;
+   drmModeAtomicAddProperty(req, plane_id, prop[IN_FENCE_FD], image->fence_fd);
    drmModeAtomicAddProperty(req, plane_id, prop[FB_ID], image->fb_id);
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_ID], crtc_id);
    drmModeAtomicAddProperty(req, plane_id, prop[SRC_X], 0);
@@ -2268,6 +2273,15 @@ wsi_display_queue_present(struct wsi_swapchain *drv_chain,
 
    image->flip_sequence = ++chain->flip_sequence;
    image->state = WSI_IMAGE_QUEUED;
+
+   if (image->fence_fd >= 0)
+      close(image->fence_fd);
+   result = chain->base.wsi->GetFenceFdKHR(drv_chain->device, &(VkFenceGetFdInfoKHR) {
+      .sType = VK_STRUCTURE_TYPE_FENCE_GET_FD_INFO_KHR,
+      .fence = drv_chain->fences[image_index],
+      .handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+   }, &image->fence_fd);
+   assert(result == VK_SUCCESS);
 
    result = _wsi_display_queue_next(drv_chain);
    if (result != VK_SUCCESS)
