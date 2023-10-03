@@ -236,6 +236,10 @@ wsi_win32_surface_destroy(VkIcdSurfaceBase *icd_surface, VkInstance _instance,
                           const VkAllocationCallbacks *pAllocator);
 
 VkResult
+wsi_display_swapchain_destroy(struct wsi_swapchain *drv_chain,
+                              const VkAllocationCallbacks *allocator);
+
+VkResult
 wsi_swapchain_init(const struct wsi_device *wsi,
                    struct wsi_swapchain *chain,
                    VkDevice device,
