@@ -195,6 +195,7 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(GetImageDrmFormatModifierPropertiesEXT);
    WSI_GET_CB(GetImageMemoryRequirements);
    WSI_GET_CB(GetImageSubresourceLayout);
+   WSI_GET_CB(GetFenceFdKHR);
    if (!wsi->sw)
       WSI_GET_CB(GetMemoryFdKHR);
    WSI_GET_CB(GetPhysicalDeviceFormatProperties);
@@ -1407,7 +1408,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             if (result != VK_SUCCESS)
                goto fail_present;
          }
-      } else {
+      } else if (swapchain->destroy != wsi_display_swapchain_destroy) { // khr display consumes the fence
          MESA_TRACE_SCOPE("throttle");
          result =
             wsi->WaitForFences(device, 1, &swapchain->fences[image_index],
