@@ -890,6 +890,66 @@ add_gpus([
         ],
     ))
 
+add_gpus([
+        GPUId(750),
+    ], A6xxGPUInfo(
+        CHIP.A7XX,
+        a6xx_gen4,
+        num_ccu = 6,
+        tile_align_w = 64,
+        tile_align_h = 32,
+        num_vsc_pipes = 32,
+        cs_shared_mem_size = 32 * 1024,
+        wave_granularity = 2,
+        fibers_per_sp = 128 * 2 * 16,
+        magic_regs = dict(
+            # PC_POWER_CNTL = 7,
+            TPL1_DBG_ECO_CNTL = 0x11100000,
+            GRAS_DBG_ECO_CNTL = 0x00004800,
+            SP_CHICKEN_BITS = 0x10000400,
+            # UCHE_CLIENT_PF = 0x00000084,
+            PC_MODE_CNTL = 0x00003f1f,
+            SP_DBG_ECO_CNTL = 0x10000000,
+            RB_DBG_ECO_CNTL = 0x00000001,
+            RB_DBG_ECO_CNTL_blit = 0x00000001,  # is it even needed?
+            # HLSQ_DBG_ECO_CNTL = 0x0,
+            RB_UNKNOWN_8E01 = 0x0,
+            VPC_DBG_ECO_CNTL = 0x02000000,
+            UCHE_UNKNOWN_0E12 = 0x40000000
+        ),
+        raw_magic_regs = [
+            [A6XXRegs.REG_A6XX_UCHE_CACHE_WAYS, 0x00000000],
+            [A6XXRegs.REG_A6XX_TPL1_UNKNOWN_B602, 0x000c0700],
+            [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E10, 0x00000000],
+            [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000080],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE08, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE09, 0x00431800],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE0A, 0x00800000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE6C, 0x00000000],
+            [A6XXRegs.REG_A6XX_PC_DBG_ECO_CNTL, 0x00100000],
+            [A6XXRegs.REG_A7XX_PC_UNKNOWN_9E24, 0x01585600],
+            [A6XXRegs.REG_A7XX_VFD_UNKNOWN_A600, 0x00008000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE06, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE6A, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE6B, 0x00000080],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AE73, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AB02, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AB01, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_AB22, 0x00000000],
+            [A6XXRegs.REG_A7XX_SP_UNKNOWN_B310, 0x00000000],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8120, 0x09510840],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8121, 0x00000a62],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8009, 0x00000000],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_800A, 0x00000000],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_800B, 0x00000000],
+            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_800C, 0x00000000],
+
+            [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_SIZE, 0x00020000],
+            [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_BASE, 0x00240000],
+            [A6XXRegs.REG_A6XX_PC_ATTR_BUF_GMEM_SIZE, 0x00020000],
+        ],
+    ))
+
 template = """\
 /* Copyright (C) 2021 Google, Inc.
  *

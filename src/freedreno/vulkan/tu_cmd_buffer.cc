@@ -543,6 +543,7 @@ tu6_emit_render_cntl<A7XX>(struct tu_cmd_buffer *cmd,
    tu_cs_emit_regs(
       cs, A7XX_RB_RENDER_CNTL(.binning = binning, .raster_mode = TYPE_TILED,
                               .raster_direction = LR_TB));
+   tu_cs_emit_regs(cs, A7XX_GRAS_SU_RENDER_CNTL(.binning = binning));
 }
 
 static void
@@ -1650,9 +1651,9 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_regs(cs,
                      A7XX_RB_UNKNOWN_8812(0x3ff)); // all buffers in sysmem
       tu_cs_emit_regs(cs,
-                   A7XX_RB_UNKNOWN_88E5(0x50120004));
+                   A7XX_RB_UNKNOWN_88E5(0xf0060000));
       tu_cs_emit_regs(cs,
-                   A7XX_RB_UNKNOWN_8E06(0x2080000));
+                   A7XX_RB_UNKNOWN_8E06(0x02082000));
 
       /* These three have something to do with lrz/depth */
       tu_cs_emit_regs(cs, A7XX_GRAS_UNKNOWN_8007(0x0));
