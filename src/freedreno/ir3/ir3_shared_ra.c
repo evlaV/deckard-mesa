@@ -928,6 +928,11 @@ handle_normal_instr(struct ra_ctx *ctx, struct ir3_instruction *instr)
    ra_foreach_dst (dst, instr)
       handle_dst(ctx, instr, dst);
 
+   ra_foreach_dst(dst, instr) {
+      if (!(dst->flags & IR3_REG_SHARED))
+         continue;
+   }
+
    ra_foreach_src (src, instr)
       handle_src_late(ctx, instr, src);
 }
