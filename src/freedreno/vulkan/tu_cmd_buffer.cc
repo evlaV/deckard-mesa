@@ -403,6 +403,7 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
    tu_cs_emit_pkt4(cs, REG_A6XX_RB_DEPTH_BUFFER_INFO, 6);
    tu_cs_emit(cs, RB_DEPTH_BUFFER_INFO(CHIP,
                      .depth_format = fmt,
+                     .readonlydepth = !attachment->render_depth,
                      .tilemode = TILE6_3,
                      .losslesscompen = iview->view.ubwc_enabled,
                      ).value);
@@ -413,7 +414,9 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
    tu_cs_emit(cs, tu_attachment_gmem_offset(cmd, attachment, 0));
 
    tu_cs_emit_regs(cs,
-                   A6XX_GRAS_SU_DEPTH_BUFFER_INFO(.depth_format = fmt));
+                   A6XX_GRAS_SU_DEPTH_BUFFER_INFO(
+                      .depth_format = fmt,
+                      .readonlydepth = !attachment->render_depth));
 
    tu_cs_emit_pkt4(cs, REG_A6XX_RB_DEPTH_FLAG_BUFFER_BASE, 3);
    tu_cs_image_flag_ref(cs, &iview->view, 0);
@@ -424,6 +427,7 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
       tu_cs_emit_pkt4(cs, REG_A6XX_RB_STENCIL_INFO, 6);
       tu_cs_emit(cs, RB_STENCIL_INFO(CHIP,
                         .separate_stencil = true,
+                        .readonlystencil = !attachment->render_stencil,
                         .tilemode = TILE6_3,
                         ).value);
       if (attachment->format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
@@ -435,7 +439,8 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
       }
    } else {
       tu_cs_emit_regs(cs,
-                     RB_STENCIL_INFO(CHIP, 0));
+                     RB_STENCIL_INFO(CHIP,
+                        .readonlystencil = !attachment->render_stencil));
    }
 }
 
