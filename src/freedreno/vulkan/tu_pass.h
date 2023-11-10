@@ -98,6 +98,9 @@ struct tu_render_pass_attachment
    bool load_stencil;
    bool store_stencil;
 
+   bool render_depth;
+   bool render_stencil;
+
    bool cond_load_allowed;
    bool cond_store_allowed;
 
