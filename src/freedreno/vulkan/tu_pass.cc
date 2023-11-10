@@ -867,6 +867,8 @@ tu_CreateRenderPass2(VkDevice _device,
 
       att->first_subpass_idx = VK_SUBPASS_EXTERNAL;
       att->last_subpass_idx = 0;
+      att->render_depth = vk_format_has_depth(att->format);
+      att->render_stencil = vk_format_has_stencil(att->format);
    }
    uint32_t subpass_attachment_count = 0;
    struct tu_subpass_attachment *p;
@@ -1161,6 +1163,11 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
                info->pDepthAttachment->storeOp : VK_ATTACHMENT_STORE_OP_NONE_EXT,
             (info->pStencilAttachment && info->pStencilAttachment->imageView) ?
                info->pStencilAttachment->storeOp : VK_ATTACHMENT_STORE_OP_NONE_EXT);
+
+         att->render_depth = info->pDepthAttachment &&
+            info->pDepthAttachment->imageView;
+         att->render_stencil = info->pStencilAttachment &&
+            info->pStencilAttachment->imageView;
 
          subpass->samples = (VkSampleCountFlagBits) view->image->layout->nr_samples;
 
