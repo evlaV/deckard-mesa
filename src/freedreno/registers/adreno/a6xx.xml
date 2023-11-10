@@ -3114,7 +3114,7 @@ to upconvert to 32b float internally?
 	<!-- duplicates RB_DEPTH_BUFFER_INFO: -->
 	<reg32 offset="0x8098" name="GRAS_SU_DEPTH_BUFFER_INFO" usage="rp_blit">
 		<bitfield name="DEPTH_FORMAT" low="0" high="2" type="a6xx_depth_format"/>
-		<bitfield name="UNK3" pos="3"/>
+		<bitfield name="READONLYDEPTH" pos="3" type="boolean"/>
 	</reg32>
 
 	<reg32 offset="0x8099" name="GRAS_SU_CONSERVATIVE_RAS_CNTL" usage="cmd">
@@ -3708,12 +3708,14 @@ to upconvert to 32b float internally?
 	<!-- duplicates GRAS_SU_DEPTH_BUFFER_INFO: -->
 	<reg32 offset="0x8872" name="RB_DEPTH_BUFFER_INFO" variants="A6XX" usage="rp_blit">
 		<bitfield name="DEPTH_FORMAT" low="0" high="2" type="a6xx_depth_format"/>
-		<bitfield name="UNK3" low="3" high="4"/>
+		<bitfield name="READONLYDEPTH" pos="3" type="boolean"/>
+		<bitfield name="UNK4" pos="4" type="boolean"/>
 	</reg32>
 	<!-- first 4 bits duplicates GRAS_SU_DEPTH_BUFFER_INFO -->
 	<reg32 offset="0x8872" name="RB_DEPTH_BUFFER_INFO" variants="A7XX-" usage="rp_blit">
 		<bitfield name="DEPTH_FORMAT" low="0" high="2" type="a6xx_depth_format"/>
-		<bitfield name="UNK3" low="3" high="4"/>
+		<bitfield name="READONLYDEPTH" pos="3" type="boolean"/>
+		<bitfield name="UNK4" pos="4" type="boolean"/>
 		<bitfield name="TILEMODE" low="5" high="6" type="a6xx_tile_mode"/>
 		<bitfield name="LOSSLESSCOMPEN" pos="7" type="boolean"/>
 	</reg32>
@@ -3750,11 +3752,11 @@ to upconvert to 32b float internally?
 	</reg32>
 	<reg32 offset="0x8881" name="RB_STENCIL_INFO" variants="A6XX" usage="rp_blit">
 		<bitfield name="SEPARATE_STENCIL" pos="0" type="boolean"/>
-		<bitfield name="UNK1" pos="1" type="boolean"/>
+		<bitfield name="READONLYSTENCIL" pos="1" type="boolean"/>
 	</reg32>
 	<reg32 offset="0x8881" name="RB_STENCIL_INFO" variants="A7XX-" usage="rp_blit">
 		<bitfield name="SEPARATE_STENCIL" pos="0" type="boolean"/>
-		<bitfield name="UNK1" pos="1" type="boolean"/>
+		<bitfield name="READONLYSTENCIL" pos="1" type="boolean"/>
 		<bitfield name="TILEMODE" low="2" high="3" type="a6xx_tile_mode"/>
 	</reg32>
 	<reg32 offset="0x8882" name="RB_STENCIL_BUFFER_PITCH" low="0" high="11" shr="6" type="uint" usage="rp_blit"/>
