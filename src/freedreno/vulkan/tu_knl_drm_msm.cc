@@ -917,7 +917,7 @@ tu_queue_submit_locked(struct tu_queue *queue, struct tu_queue_submit *submit)
       sprintf(path, "%.5d.rd", p_atomic_inc_return(&submit_idx));
       int rd = open(path, O_CLOEXEC | O_WRONLY | O_CREAT | O_TRUNC, 0777);
       if (rd >= 0) {
-         rd_write_section(rd, RD_CHIP_ID, &device->physical_device->dev_id.chip_id, 4);
+         rd_write_section(rd, RD_CHIP_ID, &device->physical_device->dev_id.chip_id, 8);
 
          rd_write_section(rd, RD_CMD, "tu-dump", 8);
 
