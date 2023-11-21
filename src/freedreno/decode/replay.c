@@ -173,6 +173,8 @@ struct cmdstream {
 struct device {
    int fd;
 
+   uint32_t queue_id;
+
    struct rb_tree buffers;
    struct util_vma_heap vma;
 
@@ -363,6 +365,15 @@ device_create()
       dev->has_set_iova = true;
    }
 
+   struct drm_msm_submitqueue req_queue = {
+      .flags = 0,
+      .prio = 0,
+   };
+   drmCommandWriteRead(dev->fd, DRM_MSM_SUBMITQUEUE_NEW, &req_queue, sizeof(req_queue));
+   dev->queue_id = req_queue.id;
+
+
+
    if (ret) {
       printf("MSM_INFO_SET_IOVA is not supported!\n");
 
@@ -481,7 +492,7 @@ device_submit_cmdstreams(struct device *dev)
 
    struct drm_msm_gem_submit submit_req = {
       .flags = MSM_PIPE_3D0,
-      .queueid = 0,
+      .queueid = dev->queue_id,
       .bos = (uint64_t)(uintptr_t)bo_list,
       .nr_bos = bo_count,
       .cmds = (uint64_t)(uintptr_t)cmds,
@@ -506,7 +517,7 @@ device_submit_cmdstreams(struct device *dev)
     */
    struct drm_msm_wait_fence wait_req = {
       .fence = submit_req.fence,
-      .queueid = 0,
+      .queueid = dev->queue_id,
    };
    get_abs_timeout(&wait_req.timeout, 1000000000);
 
