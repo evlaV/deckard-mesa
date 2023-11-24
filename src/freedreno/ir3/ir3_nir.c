@@ -750,6 +750,9 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
        !(ir3_shader_debug & IR3_DBG_NOPREAMBLE))
       progress |= OPT(s, ir3_nir_opt_preamble, so);
 
+   if (so->compiler->load_shader_consts_via_preamble)
+      progress |= OPT(s, ir3_nir_lower_driver_params_to_ubo, so);
+
    if (!so->binning_pass)
       OPT_V(s, ir3_nir_analyze_ubo_ranges, so);
 
@@ -842,6 +845,140 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
       ir3_setup_const_state(s, so, ir3_const_state(so));
 }
 
+bool
+ir3_get_driver_param_info(const nir_shader *shader, nir_intrinsic_instr *intr,
+                          struct dirver_param_info *param_info)
+{
+   param_info->size = nir_intrinsic_dest_components(intr);
+
+   switch (intr->intrinsic) {
+   case nir_intrinsic_load_base_workgroup_id: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_BASE_GROUP_X;
+      break;
+   }
+   case nir_intrinsic_load_num_workgroups: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_NUM_WORK_GROUPS_X;
+      break;
+   }
+   case nir_intrinsic_load_workgroup_size: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_LOCAL_GROUP_SIZE_X;
+      break;
+   }
+   case nir_intrinsic_load_subgroup_size: {
+      assert(shader->info.stage == MESA_SHADER_COMPUTE ||
+             shader->info.stage == MESA_SHADER_FRAGMENT);
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      if (shader->info.stage == MESA_SHADER_COMPUTE) {
+         param_info->offset = IR3_DP_CS_SUBGROUP_SIZE;
+      } else {
+         param_info->offset = IR3_DP_FS_SUBGROUP_SIZE;
+      }
+      break;
+   }
+   case nir_intrinsic_load_subgroup_id_shift_ir3: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_SUBGROUP_ID_SHIFT;
+      break;
+   }
+   case nir_intrinsic_load_work_dim: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_WORK_DIM;
+      break;
+   }
+   case nir_intrinsic_load_base_vertex:
+   case nir_intrinsic_load_first_vertex: {
+      param_info->type = IR3_UBO_IDX_VS_PARAMS;
+      param_info->offset = IR3_DP_VTXID_BASE;
+      break;
+   }
+   case nir_intrinsic_load_is_indexed_draw:
+      param_info->type = IR3_UBO_IDX_VS_PARAMS;
+      param_info->offset = IR3_DP_IS_INDEXED_DRAW;
+      break;
+   case nir_intrinsic_load_base_instance:
+      param_info->type = IR3_UBO_IDX_VS_PARAMS;
+      param_info->offset = IR3_DP_INSTID_BASE;
+      break;
+   case nir_intrinsic_load_user_clip_plane:
+      param_info->type = IR3_UBO_IDX_VS_PARAMS;
+      param_info->offset = IR3_DP_UCP0_X;
+      uint32_t idx = nir_intrinsic_ucp_id(intr);
+      param_info->size =(idx + 1) * 4;
+      break;
+   case nir_intrinsic_load_tess_level_outer_default: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_HS_DEFAULT_OUTER_LEVEL_X;
+      break;
+   }
+   case nir_intrinsic_load_tess_level_inner_default: {
+      param_info->type = IR3_UBO_IDX_DRIVER_PARAMS;
+      param_info->offset = IR3_DP_HS_DEFAULT_INNER_LEVEL_X;
+      break;
+   }
+   case nir_intrinsic_load_frag_size_ir3:
+   case nir_intrinsic_load_frag_offset_ir3: {
+      param_info->type = IR3_UBO_IDX_FRAG_FDM;
+      param_info->offset = intr->intrinsic == nir_intrinsic_load_frag_size_ir3 ?
+         IR3_DP_FS_FRAG_SIZE : IR3_DP_FS_FRAG_OFFSET;
+      param_info->size = 2 + (nir_intrinsic_range(intr) - 1) * 4;
+      break;
+   }
+   case nir_intrinsic_load_frag_invocation_count: {
+      param_info->type = IR3_UBO_IDX_FRAG_FDM;
+      param_info->offset = IR3_DP_FS_FRAG_INVOCATION_COUNT;
+      break;
+   }
+   case nir_intrinsic_load_primitive_location_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_MAP;
+      param_info->offset = nir_intrinsic_driver_location(intr);
+      break;
+   }
+   case nir_intrinsic_load_vs_primitive_stride_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 0;
+      break;
+   }
+   case nir_intrinsic_load_vs_vertex_stride_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 1;
+      break;
+   }
+   case nir_intrinsic_load_hs_patch_stride_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 2;
+      break;
+   }
+   case nir_intrinsic_load_patch_vertices_in: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 3;
+      break;
+   }
+   case nir_intrinsic_load_tess_param_base_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 4;
+      break;
+   }
+   case nir_intrinsic_load_tess_factor_base_ir3: {
+      param_info->type = IR3_UBO_IDX_PRIMITIVE_PARAM;
+      param_info->offset = 6;
+      break;
+   }
+   case nir_intrinsic_load_descriptor_dyn_offset_ir3: {
+      param_info->type = IR3_UBO_IDX_DYNAMIC_OFFSETS;
+      param_info->offset = nir_intrinsic_base(intr);
+      break;
+   }
+
+   default:
+      return false;
+   }
+
+   return true;
+}
+
 static void
 ir3_nir_scan_driver_consts(struct ir3_compiler *compiler, nir_shader *shader, struct ir3_const_state *layout)
 {
@@ -875,83 +1012,18 @@ ir3_nir_scan_driver_consts(struct ir3_compiler *compiler, nir_shader *shader, st
                   layout->image_dims.count += 3; /* three const per */
                }
                break;
-            case nir_intrinsic_load_base_vertex:
-            case nir_intrinsic_load_first_vertex:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_VTXID_BASE + 1);
-               break;
-            case nir_intrinsic_load_is_indexed_draw:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_IS_INDEXED_DRAW + 1);
-               break;
-            case nir_intrinsic_load_base_instance:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_INSTID_BASE + 1);
-               break;
-            case nir_intrinsic_load_user_clip_plane:
-               idx = nir_intrinsic_ucp_id(intr);
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_UCP0_X + (idx + 1) * 4);
-               break;
-            case nir_intrinsic_load_num_workgroups:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_NUM_WORK_GROUPS_Z + 1);
-               break;
-            case nir_intrinsic_load_workgroup_id:
-               if (!compiler->has_shared_regfile) {
-                  layout->num_driver_params =
-                     MAX2(layout->num_driver_params, IR3_DP_WORKGROUP_ID_Z + 1);
-               }
-               break;
-            case nir_intrinsic_load_workgroup_size:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_LOCAL_GROUP_SIZE_Z + 1);
-               break;
-            case nir_intrinsic_load_base_workgroup_id:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_BASE_GROUP_Z + 1);
-               break;
-            case nir_intrinsic_load_subgroup_size: {
-               assert(shader->info.stage == MESA_SHADER_COMPUTE ||
-                      shader->info.stage == MESA_SHADER_FRAGMENT);
-               enum ir3_driver_param size = shader->info.stage == MESA_SHADER_COMPUTE ?
-                  IR3_DP_CS_SUBGROUP_SIZE : IR3_DP_FS_SUBGROUP_SIZE;
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, size + 1);
-               break;
-            }
-            case nir_intrinsic_load_subgroup_id_shift_ir3:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_SUBGROUP_ID_SHIFT + 1);
-               break;
-            case nir_intrinsic_load_draw_id:
-               layout->num_driver_params =
-                  MAX2(layout->num_driver_params, IR3_DP_DRAWID + 1);
-               break;
-            case nir_intrinsic_load_tess_level_outer_default:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_HS_DEFAULT_OUTER_LEVEL_W + 1);
-               break;
-            case nir_intrinsic_load_tess_level_inner_default:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_HS_DEFAULT_INNER_LEVEL_Y + 1);
-               break;
-            case nir_intrinsic_load_frag_size_ir3:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_FS_FRAG_SIZE + 2 +
-                                                (nir_intrinsic_range(intr) - 1) * 4);
-               break;
-            case nir_intrinsic_load_frag_offset_ir3:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_FS_FRAG_OFFSET + 2 +
-                                                (nir_intrinsic_range(intr) - 1) * 4);
-               break;
-            case nir_intrinsic_load_frag_invocation_count:
-               layout->num_driver_params = MAX2(layout->num_driver_params,
-                                                IR3_DP_FS_FRAG_INVOCATION_COUNT + 1);
-               break;
             default:
                break;
+            }
+
+            struct dirver_param_info param_info;
+            if (ir3_get_driver_param_info(shader, intr, &param_info)) {
+               layout->num_driver_params =
+                  MAX2(layout->num_driver_params,
+                       param_info.offset + param_info.size);
+               layout->driver_param_size[param_info.type] =
+                  MAX2(layout->driver_param_size[param_info.type],
+                       param_info.offset + param_info.size);
             }
          }
       }
@@ -997,7 +1069,7 @@ ir3_setup_const_state(nir_shader *nir, struct ir3_shader_variant *v,
       const_state->preamble_size;
    unsigned ptrsz = ir3_pointer_size(compiler);
 
-   if (const_state->num_ubos > 0) {
+   if (const_state->num_ubos > 0 && compiler->gen < 6) {
       const_state->offsets.ubo = constoff;
       constoff += align(const_state->num_ubos * ptrsz, 4) / 4;
    }
@@ -1013,7 +1085,9 @@ ir3_setup_const_state(nir_shader *nir, struct ir3_shader_variant *v,
       constoff += align(v->cs.req_input_mem, 4) / 4;
    }
 
-   if (const_state->num_driver_params > 0) {
+   if (const_state->num_driver_params > 0 &&
+       (!compiler->load_shader_consts_via_preamble ||
+        v->type == MESA_SHADER_VERTEX)) {
       /* num_driver_params in dwords.  we only need to align to vec4s for the
        * common case of immediate constant uploads, but for indirect dispatch
        * the constants may also be indirect and so we have to align the area in
@@ -1033,12 +1107,34 @@ ir3_setup_const_state(nir_shader *nir, struct ir3_shader_variant *v,
       const_state->offsets.driver_param = constoff;
 
       constoff += align(const_state->num_driver_params / 4, upload_unit);
+   } else {
+      const_state->offsets.driver_param = -1;
    }
 
    if ((v->type == MESA_SHADER_VERTEX) && (compiler->gen < 5) &&
        v->stream_output.num_outputs > 0) {
       const_state->offsets.tfbo = constoff;
       constoff += align(IR3_MAX_SO_BUFFERS * ptrsz, 4) / 4;
+   }
+
+   if (!compiler->load_shader_consts_via_preamble) {
+      switch (v->type) {
+      case MESA_SHADER_TESS_CTRL:
+      case MESA_SHADER_TESS_EVAL:
+         const_state->offsets.primitive_param = constoff;
+         constoff += 2;
+
+         const_state->offsets.primitive_map = constoff;
+         break;
+      case MESA_SHADER_GEOMETRY:
+         const_state->offsets.primitive_param = constoff;
+         constoff += 1;
+
+         const_state->offsets.primitive_map = constoff;
+         break;
+      default:
+         break;
+      }
    }
 
    switch (v->type) {
@@ -1048,17 +1144,9 @@ ir3_setup_const_state(nir_shader *nir, struct ir3_shader_variant *v,
       break;
    case MESA_SHADER_TESS_CTRL:
    case MESA_SHADER_TESS_EVAL:
-      const_state->offsets.primitive_param = constoff;
-      constoff += 2;
-
-      const_state->offsets.primitive_map = constoff;
       constoff += DIV_ROUND_UP(v->input_size, 4);
       break;
    case MESA_SHADER_GEOMETRY:
-      const_state->offsets.primitive_param = constoff;
-      constoff += 1;
-
-      const_state->offsets.primitive_map = constoff;
       constoff += DIV_ROUND_UP(v->input_size, 4);
       break;
    default:

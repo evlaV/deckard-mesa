@@ -1281,6 +1281,9 @@ system_value("subgroup_id_shift_ir3", 1)
 intrinsic("load_frag_coord_unscaled_ir3", dest_comp=4,
           flags=[CAN_ELIMINATE, CAN_REORDER], bit_sizes=[32])
 
+# System value for a single dynamic offset into descriptor set.
+system_value("descriptor_dyn_offset_ir3", 1, indices=[BASE])
+
 # IR3-specific intrinsics for tessellation control shaders.  cond_end_ir3 end
 # the shader when src0 is false and is used to narrow down the TCS shader to
 # just thread 0 before writing out tessellation levels.

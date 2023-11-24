@@ -42,6 +42,8 @@ bool ir3_nir_lower_load_barycentric_at_sample(nir_shader *shader);
 bool ir3_nir_lower_load_barycentric_at_offset(nir_shader *shader);
 bool ir3_nir_lower_push_consts_to_preamble(nir_shader *nir,
                                            struct ir3_shader_variant *v);
+bool ir3_nir_lower_driver_params_to_ubo(nir_shader *nir,
+                                        struct ir3_shader_variant *v);
 bool ir3_nir_move_varying_inputs(nir_shader *shader);
 int ir3_nir_coord_offset(nir_def *ssa);
 bool ir3_nir_lower_tex_prefetch(nir_shader *shader);
@@ -85,6 +87,16 @@ bool ir3_nir_lower_preamble(nir_shader *nir, struct ir3_shader_variant *v);
 nir_def *ir3_nir_try_propagate_bit_shift(nir_builder *b,
                                              nir_def *offset,
                                              int32_t shift);
+
+struct dirver_param_info {
+   enum ir3_const_data_ubo_type type;
+   uint32_t offset;
+   uint32_t size;
+};
+
+bool ir3_get_driver_param_info(const nir_shader *shader,
+                               nir_intrinsic_instr *intr,
+                               struct dirver_param_info *param_info);
 
 static inline nir_intrinsic_instr *
 ir3_bindless_resource(nir_src src)

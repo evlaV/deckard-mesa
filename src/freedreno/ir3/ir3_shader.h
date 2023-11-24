@@ -154,6 +154,17 @@ enum ir3_push_consts_type {
    IR3_PUSH_CONSTS_SHARED_PREAMBLE,
 };
 
+enum ir3_const_data_ubo_type {
+   IR3_UBO_IDX_CONSTS = 0,
+   IR3_UBO_IDX_DRIVER_PARAMS,
+   IR3_UBO_IDX_VS_PARAMS,
+   IR3_UBO_IDX_PRIMITIVE_MAP,
+   IR3_UBO_IDX_PRIMITIVE_PARAM,
+   IR3_UBO_IDX_FRAG_FDM,
+   IR3_UBO_IDX_DYNAMIC_OFFSETS,
+   IR3_UBO_IDX_COUNT,
+};
+
 /**
  * Describes the layout of shader consts in the const register file.
  *
@@ -187,7 +198,10 @@ struct ir3_const_state {
    unsigned num_driver_params; /* scalar */
 
    /* UBO that should be mapped to the NIR shader's constant_data (or -1). */
-   int32_t constant_data_ubo;
+   int32_t constant_data_ubo_idx[IR3_UBO_IDX_COUNT];
+   int32_t driver_param_size[IR3_UBO_IDX_COUNT];
+
+   int32_t constant_data_dynamic_offsets;
 
    struct {
       /* user const start at zero */
@@ -222,6 +236,25 @@ struct ir3_const_state {
    struct ir3_ubo_analysis_state ubo_state;
    enum ir3_push_consts_type push_consts_type;
 };
+
+static inline int32_t
+ir3_const_state_alloc_ubo(struct ir3_const_state *const_state,
+                          enum ir3_const_data_ubo_type type,
+                          uint32_t end)
+{
+   /* Pick a UBO index to use as our constant data.  Skip UBO 0 since that's
+    * reserved for gallium's cb0.
+    */
+   if (const_state->constant_data_ubo_idx[type] == -1) {
+      if (const_state->num_ubos == 0)
+         const_state->num_ubos++;
+      const_state->constant_data_ubo_idx[type] = const_state->num_ubos++;
+   }
+   const_state->driver_param_size[type] =
+      MAX2(const_state->driver_param_size[type], end);
+
+   return const_state->constant_data_ubo_idx[type];
+}
 
 /**
  * A single output for vertex transform feedback.
@@ -511,6 +544,9 @@ struct ir3_shader_options {
 
    uint32_t push_consts_base;
    uint32_t push_consts_dwords;
+
+   uint32_t dynamic_offset_const_base;
+   uint32_t dynamic_offset_const_dwords;
 };
 
 /**

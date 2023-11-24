@@ -302,6 +302,8 @@ alloc_variant(struct ir3_shader *shader, const struct ir3_shader_key *key,
 
    if (!v->binning_pass) {
       v->const_state = rzalloc_size(v, sizeof(*v->const_state));
+      for (uint32_t i = 0; i < IR3_UBO_IDX_COUNT; i++)
+         v->const_state->constant_data_ubo_idx[i] = -1;
       v->const_state->push_consts_type = shader->options.push_consts_type;
    }
 
