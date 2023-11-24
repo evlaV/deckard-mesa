@@ -2693,6 +2693,78 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
                  load->push_consts.dst_base + load->push_consts.src_size, 4));
       break;
    }
+   case nir_intrinsic_copy_driver_params_to_uniform_ir3: {
+      unsigned offset = nir_intrinsic_base(intr);
+      unsigned base =
+         const_state->offsets.driver_param * 4 + offset;
+      unsigned size = nir_intrinsic_range(intr);
+
+      struct ir3_instruction *addr1 = ir3_get_addr1(ctx,  base);
+
+      struct ir3_instruction *state_offset = ir3_get_src(ctx, &intr->src[0])[0];
+      struct ir3_instruction *ldc =
+         ir3_LDC_K(b, state_offset, 0, create_immed(b, offset / 4), 0);
+      ldc->cat6.iim_val = size;
+      ldc->barrier_class = ldc->barrier_conflict = IR3_BARRIER_CONST_W;
+
+      ir3_instr_set_address(ldc, addr1);
+
+      array_insert(b, b->keeps, ldc);
+      break;
+   }
+   case nir_intrinsic_copy_prim_locs_to_uniform_ir3: {
+      unsigned offset = nir_intrinsic_base(intr);
+      unsigned base = primitive_map + offset;
+      unsigned size = nir_intrinsic_range(intr);
+
+      struct ir3_instruction *addr1 = ir3_get_addr1(ctx,  base);
+
+      struct ir3_instruction *state_offset = ir3_get_src(ctx, &intr->src[0])[0];
+      struct ir3_instruction *ldc =
+         ir3_LDC_K(b, state_offset, 0, create_immed(b, offset / 4), 0);
+      ldc->cat6.iim_val = size;
+      ldc->barrier_class = ldc->barrier_conflict = IR3_BARRIER_CONST_W;
+
+      ir3_instr_set_address(ldc, addr1);
+
+      array_insert(b, b->keeps, ldc);
+      break;
+   }
+   case nir_intrinsic_copy_prim_params_to_uniform_ir3: {
+      unsigned offset = nir_intrinsic_base(intr);
+      unsigned base = primitive_param + offset;
+      unsigned size = nir_intrinsic_range(intr);
+
+      struct ir3_instruction *addr1 = ir3_get_addr1(ctx,  base);
+
+      struct ir3_instruction *state_offset = ir3_get_src(ctx, &intr->src[0])[0];
+      struct ir3_instruction *ldc =
+         ir3_LDC_K(b, state_offset, 0, create_immed(b, offset / 4), 0);
+      ldc->cat6.iim_val = size;
+      ldc->barrier_class = ldc->barrier_conflict = IR3_BARRIER_CONST_W;
+
+      ir3_instr_set_address(ldc, addr1);
+
+      array_insert(b, b->keeps, ldc);
+      break;
+   }
+   case nir_intrinsic_copy_dyn_offsets_to_uniform_ir3: {
+      unsigned base = nir_intrinsic_base(intr);
+      unsigned size = nir_intrinsic_range(intr);
+
+      struct ir3_instruction *addr1 = ir3_get_addr1(ctx,  base);
+
+      struct ir3_instruction *state_offset = ir3_get_src(ctx, &intr->src[0])[0];
+      struct ir3_instruction *ldc =
+         ir3_LDC_K(b, state_offset, 0, create_immed(b, 0), 0);
+      ldc->cat6.iim_val = size;
+      ldc->barrier_class = ldc->barrier_conflict = IR3_BARRIER_CONST_W;
+
+      ir3_instr_set_address(ldc, addr1);
+
+      array_insert(b, b->keeps, ldc);
+      break;
+   }
    default:
       ir3_context_error(ctx, "Unhandled intrinsic type: %s\n",
                         nir_intrinsic_infos[intr->intrinsic].name);

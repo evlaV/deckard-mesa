@@ -752,6 +752,12 @@ a7xx_740 = A7XXProps(
         has_event_write_sample_count = True,
     )
 
+a7xx_750 = A7XXProps(
+        has_event_write_sample_count = True,
+        load_inline_uniforms_via_preamble_ldgk = True,
+        load_shader_consts_via_preamble = True,
+    )
+
 a730_magic_regs = dict(
         TPL1_DBG_ECO_CNTL = 0x1000000,
         GRAS_DBG_ECO_CNTL = 0x800,
@@ -892,9 +898,11 @@ add_gpus([
 
 add_gpus([
         GPUId(750),
+        GPUId(chip_id=0x43051401, name="FD750"),
+        GPUId(chip_id=0x7090000, name="FD750"),
     ], A6xxGPUInfo(
         CHIP.A7XX,
-        a6xx_gen4,
+        [a7xx_base, a7xx_750],
         num_ccu = 6,
         tile_align_w = 64,
         tile_align_h = 32,
@@ -947,6 +955,11 @@ add_gpus([
             [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_SIZE, 0x00020000],
             [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_BASE, 0x00240000],
             [A6XXRegs.REG_A6XX_PC_ATTR_BUF_GMEM_SIZE, 0x00020000],
+
+            [0x930a, 0],
+            [0x960a, 1],
+            [0xaa02, 0],
+            [0xaa03, 0],
         ],
     ))
 

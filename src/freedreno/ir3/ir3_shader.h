@@ -189,6 +189,11 @@ struct ir3_const_state {
    /* UBO that should be mapped to the NIR shader's constant_data (or -1). */
    int32_t constant_data_ubo;
 
+   int32_t constant_data_driver_params;
+   int32_t constant_data_primitive_map;
+   int32_t constant_data_primitive_param;
+   int32_t constant_data_dynamic_offsets;
+
    struct {
       /* user const start at zero */
       unsigned ubo;
@@ -511,6 +516,9 @@ struct ir3_shader_options {
 
    uint32_t push_consts_base;
    uint32_t push_consts_dwords;
+
+   uint32_t dynamic_offset_const_base;
+   uint32_t dynamic_offset_const_dwords;
 };
 
 /**

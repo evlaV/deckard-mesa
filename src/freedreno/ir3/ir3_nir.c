@@ -705,9 +705,11 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
     * straddling loads.  Align everything to vec4 to avoid that, though we
     * could theoretically do better.
     */
-   OPT_V(s, nir_opt_large_constants, glsl_get_vec4_size_align_bytes,
-         32 /* bytes */);
-   OPT_V(s, ir3_nir_lower_load_constant, so);
+   if (!so->compiler->load_shader_consts_via_preamble) {
+      OPT_V(s, nir_opt_large_constants, glsl_get_vec4_size_align_bytes,
+            32 /* bytes */);
+      OPT_V(s, ir3_nir_lower_load_constant, so);
+   }
 
    /* Lower large temporaries to scratch, which in Qualcomm terms is private
     * memory, to avoid excess register pressure. This should happen after
@@ -743,11 +745,13 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
        !(ir3_shader_debug & IR3_DBG_NOPREAMBLE))
       progress |= OPT(s, ir3_nir_opt_preamble, so);
 
-   if (!so->binning_pass)
+   if (!so->binning_pass && !so->compiler->load_shader_consts_via_preamble)
       OPT_V(s, ir3_nir_analyze_ubo_ranges, so);
 
    progress |= OPT(s, ir3_nir_lower_ubo_loads, so);
 
+   if (so->compiler->load_shader_consts_via_preamble)
+      progress |= OPT(s, ir3_nir_lower_driver_param_load_to_preamble, so);
    if (so->shader_options.push_consts_type == IR3_PUSH_CONSTS_SHARED_PREAMBLE)
       progress |= OPT(s, ir3_nir_lower_push_consts_to_preamble, so);
 

@@ -1177,6 +1177,7 @@ tu6_emit_xs(struct tu_cs *cs,
    unsigned immediate_size = tu_xs_get_immediates_packet_size_dwords(xs);
 
    if (immediate_size > 0) {
+      assert(!cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble);
       tu_cs_emit_pkt7(cs, tu6_stage2opcode(stage), 3 + immediate_size);
       tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(base) |
                  CP_LOAD_STATE6_0_STATE_TYPE(ST6_CONSTANTS) |
@@ -1211,6 +1212,7 @@ tu6_emit_xs(struct tu_cs *cs,
       const struct ir3_ubo_analysis_state *ubo_state = &const_state->ubo_state;
 
       for (int i = 0; i < ubo_state->num_enabled; i++) {
+         assert(!cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble);
          if (ubo_state->range[i].ubo.block != const_state->constant_data_ubo ||
              ubo_state->range[i].ubo.bindless) {
             continue;
@@ -1239,6 +1241,7 @@ tu6_emit_xs(struct tu_cs *cs,
       size = MAX2(MIN2(size + base, xs->constlen) - base, 0);
 
       if (size > 0) {
+         assert(!cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble);
          tu_cs_emit_pkt7(cs, tu6_stage2opcode(stage), 3 + 4);
          tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(base) |
                     CP_LOAD_STATE6_0_STATE_TYPE(ST6_CONSTANTS) |
@@ -2319,6 +2322,8 @@ tu_shader_create(struct tu_device *dev,
       .push_consts_type = shader->const_state.push_consts.type,
       .push_consts_base = shader->const_state.push_consts.lo,
       .push_consts_dwords = shader->const_state.push_consts.dwords,
+      .dynamic_offset_const_base = shader->const_state.dynamic_offset_loc,
+      .dynamic_offset_const_dwords = DIV_ROUND_UP(dev->physical_device->usable_sets, 4),
    };
 
    struct ir3_shader *ir3_shader =
