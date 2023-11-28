@@ -1529,6 +1529,9 @@ r3d_run(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                   CP_DRAW_INDX_OFFSET_0_VIS_CULL(IGNORE_VISIBILITY));
    tu_cs_emit(cs, 1); /* instance count */
    tu_cs_emit(cs, 2); /* vertex count */
+
+   if (cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble)
+      tu_cs_emit_wfi(cs);
 }
 
 static void
@@ -1540,6 +1543,9 @@ r3d_run_vis(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                   CP_DRAW_INDX_OFFSET_0_VIS_CULL(USE_VISIBILITY));
    tu_cs_emit(cs, 1); /* instance count */
    tu_cs_emit(cs, 2); /* vertex count */
+
+   if (cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble)
+      tu_cs_emit_wfi(cs);
 }
 
 template <chip CHIP>
