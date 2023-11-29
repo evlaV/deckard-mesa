@@ -59,6 +59,7 @@ struct ir3_legalize_state {
    regmask_t needs_ss_war; /* write after read */
    regmask_t needs_sy;
    bool needs_ss_for_const;
+   bool needs_sy_for_const;
 };
 
 struct ir3_legalize_block_data {
@@ -75,6 +76,16 @@ apply_ss(struct ir3_instruction *instr,
    regmask_init(&state->needs_ss_war, mergedregs);
    regmask_init(&state->needs_ss, mergedregs);
    state->needs_ss_for_const = false;
+}
+
+static inline void
+apply_sy(struct ir3_instruction *instr,
+         struct ir3_legalize_state *state,
+         bool mergedregs)
+{
+   instr->flags |= IR3_INSTR_SY;
+   regmask_init(&state->needs_sy, mergedregs);
+   state->needs_sy_for_const = false;
 }
 
 /* We want to evaluate each block from the position of any other
@@ -122,6 +133,7 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
                  &pstate->needs_ss_war);
       regmask_or(&state->needs_sy, &state->needs_sy, &pstate->needs_sy);
       state->needs_ss_for_const |= pstate->needs_ss_for_const;
+      state->needs_sy_for_const |= pstate->needs_sy_for_const;
    }
 
    /* We need to take phsyical-only edges into account when tracking shared
@@ -176,9 +188,7 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
 
       if ((last_n && is_barrier(last_n)) || n->opc == OPC_SHPE) {
          apply_ss(n, state, mergedregs);
-
-         n->flags |= IR3_INSTR_SY;
-         regmask_init(&state->needs_sy, mergedregs);
+         apply_sy(n, state, mergedregs);
          last_input_needs_ss = false;
       }
 
@@ -211,12 +221,15 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
             }
 
             if (regmask_get(&state->needs_sy, reg)) {
-               n->flags |= IR3_INSTR_SY;
-               regmask_init(&state->needs_sy, mergedregs);
+               apply_sy(n, state, mergedregs);
             }
-         } else if ((reg->flags & IR3_REG_CONST) && state->needs_ss_for_const) {
-            apply_ss(n, state, mergedregs);
-            last_input_needs_ss = false;
+         } else if ((reg->flags & IR3_REG_CONST)) {
+            if (state->needs_ss_for_const) {
+               apply_ss(n, state, mergedregs);
+               last_input_needs_ss = false;
+            } else if (state->needs_sy_for_const) {
+               apply_sy(n, state, mergedregs);
+            }
          }
       }
 
@@ -293,6 +306,8 @@ legalize_block(struct ir3_legalize_ctx *ctx, struct ir3_block *block)
          }
       } else if (n->opc == OPC_PUSH_CONSTS_LOAD_MACRO) {
          state->needs_ss_for_const = true;
+      } else if (n->opc == OPC_CONSTS_LOAD_MACRO) {
+         state->needs_sy_for_const = true;
       }
 
       if (is_ssbo(n->opc) || is_global_a3xx_atomic(n->opc) ||
@@ -421,7 +436,7 @@ static void
 apply_push_consts_load_macro(struct ir3_legalize_ctx *ctx,
                              struct ir3_block *block)
 {
-   foreach_instr (n, &block->instr_list) {
+   foreach_instr_safe (n, &block->instr_list) {
       if (n->opc == OPC_PUSH_CONSTS_LOAD_MACRO) {
          struct ir3_instruction *stsc = ir3_instr_create(block, OPC_STSC, 0, 2);
          ir3_instr_move_after(stsc, n);
@@ -440,7 +455,27 @@ apply_push_consts_load_macro(struct ir3_legalize_ctx *ctx,
          }
 
          list_delinit(&n->node);
-         break;
+      } else if (n->opc == OPC_CONSTS_LOAD_MACRO) {
+         struct ir3_instruction *mov = ir3_instr_create(block, OPC_MOV, 1, 1);
+         ir3_instr_move_after(mov, n);
+         ir3_src_create(mov, 0, IR3_REG_IMMED | IR3_REG_HALF | IR3_REG_R)
+            ->iim_val = n->preamble_consts.dst_offset;
+         ir3_dst_create(mov, regid(REG_A0, 1), IR3_REG_HALF);
+         mov->cat1.src_type = TYPE_U16;
+         mov->cat1.dst_type = TYPE_U16;
+         mov->flags |= IR3_INSTR_SS;
+
+         struct ir3_instruction *nop = ir3_NOP(block);
+         ir3_instr_move_after(nop, mov);
+         nop->flags |= IR3_INSTR_SS;
+
+         struct ir3_instruction *ldc_k = ir3_instr_create(block, OPC_LDC_K, 0, 2);
+         ir3_instr_move_after(ldc_k, nop);
+         ir3_src_create(ldc_k, 0, IR3_REG_IMMED)->iim_val = n->preamble_consts.state_offset;
+         ir3_src_create(ldc_k, 0, IR3_REG_IMMED)->iim_val = n->preamble_consts.src_offset;
+         ldc_k->cat6.iim_val = n->preamble_consts.size;
+
+         list_delinit(&n->node);
       } else if (!is_meta(n)) {
          break;
       }

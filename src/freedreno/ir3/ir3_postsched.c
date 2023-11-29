@@ -692,7 +692,7 @@ sched_block(struct ir3_postsched_ctx *ctx, struct ir3_block *block)
          schedule(ctx, instr);
 
    foreach_instr_safe (instr, &ctx->unscheduled_list)
-      if (instr->opc == OPC_PUSH_CONSTS_LOAD_MACRO)
+      if (instr->opc == OPC_PUSH_CONSTS_LOAD_MACRO || instr->opc == OPC_CONSTS_LOAD_MACRO)
          schedule(ctx, instr);
 
    while (!list_is_empty(&ctx->unscheduled_list)) {

@@ -449,6 +449,11 @@ struct ir3_instruction {
          unsigned src_base, src_size;
          unsigned dst_base;
       } push_consts;
+
+      struct {
+         unsigned state_offset, src_offset, size;
+         unsigned dst_offset;
+      } preamble_consts;
       struct {
          uint64_t value;
       } raw;

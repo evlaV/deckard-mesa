@@ -182,7 +182,7 @@ print_instr_name(struct log_stream *stream, struct ir3_instruction *instr,
       }
 
       if (instr->opc != OPC_MOVMSK && instr->opc != OPC_SCAN_MACRO &&
-          instr->opc != OPC_PUSH_CONSTS_LOAD_MACRO) {
+          instr->opc != OPC_PUSH_CONSTS_LOAD_MACRO && instr->opc != OPC_CONSTS_LOAD_MACRO) {
          mesa_log_stream_printf(stream, ".%s%s",
                                 type_name(instr->cat1.src_type),
                                 type_name(instr->cat1.dst_type));

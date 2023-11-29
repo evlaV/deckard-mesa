@@ -136,6 +136,8 @@ typedef enum {
     */
    OPC_PUSH_CONSTS_LOAD_MACRO = _OPC(1, 59),
 
+   OPC_CONSTS_LOAD_MACRO = _OPC(1, 60),
+
    /* category 2: */
    OPC_ADD_F           = _OPC(2, 0),
    OPC_MIN_F           = _OPC(2, 1),
