@@ -3719,7 +3719,7 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
     * sysmem, and we generally assume that GMEM renderpasses leave their
     * results in sysmem, so we need to flush manually here.
     */
-   tu_emit_event_write<CHIP>(cmd, cs, FD_CCU_FLUSH_COLOR);
+   tu_emit_event_write<CHIP>(cmd, cs, CHIP > A6XX ? FD_CCU_FLUSH_BLIT_CACHE : FD_CCU_FLUSH_COLOR);
 }
 
 template <chip CHIP>
@@ -3999,6 +3999,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
          }
       }
    } else {
+      /* A7XX TODO: Fix D24S8 MSAA resolves using the 2D blits */
       if (!cmd->state.pass->has_fdm) {
          r2d_coords(cs, render_area->offset, render_area->offset,
                     render_area->extent);
