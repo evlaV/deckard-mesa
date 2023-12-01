@@ -5439,19 +5439,15 @@ tu_emit_compute_driver_params(struct tu_cmd_buffer *cmd,
 
          assert(num_consts <= ARRAY_SIZE(driver_params));
 
-         /* HACK: Quick hack to emit driver params in-place and aligned. */
-         tu_cs_emit_pkt7(cs, CP_NOP, 16);
-         iova = tu_cs_get_cur_iova(cs);
-         uint32_t pad = (16 - (iova % 16)) / 4;
-         for (unsigned i = 0; i < pad; i++)
-            tu_cs_emit(cs, 0);
-         for (unsigned i = 0; i < num_consts; i++)
-            tu_cs_emit(cs, driver_params[i]);
-         iova += pad * sizeof(uint32_t);
-         assert(iova % 16 == 0);
-         for (unsigned i = 0; i < (16 - pad - num_consts); i++)
-            tu_cs_emit(cs, 0);
-
+         struct tu_cs_memory consts;
+         uint32_t consts_vec4 = DIV_ROUND_UP(num_consts, 4);
+         VkResult result = tu_cs_alloc(&cmd->sub_cs, consts_vec4, 4, &consts);
+         if (result != VK_SUCCESS) {
+            vk_command_buffer_set_error(&cmd->vk, result);
+            return;
+         }
+         memcpy(consts.map, driver_params, num_consts * sizeof(uint32_t));
+         iova = consts.iova;
       } else if (direct_indirect_load) {
          iova = info->indirect->iova + info->indirect_offset;
       } else {

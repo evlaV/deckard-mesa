@@ -411,29 +411,18 @@ tu6_emit_dynamic_offset(struct tu_cs *cs,
    if (!xs || shader->const_state.dynamic_offset_loc == UINT32_MAX)
       return;
 
-   // assert(!cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble);
-
    if (cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble) {
       const struct ir3_const_state *const_state = ir3_const_state(xs);
 
-      uint32_t total_size = phys_dev->usable_sets + 4;
-      tu_cs_emit_pkt7(cs, CP_NOP, total_size);
-      uint64_t iova = tu_cs_get_cur_iova(cs);
-      uint32_t pad = (16 - (iova % 16)) / 4;
-      for (unsigned i = 0; i < pad; i++)
-         tu_cs_emit(cs, 0);
-
+      uint32_t offsets[MAX_SETS];
       for (unsigned i = 0; i < phys_dev->usable_sets; i++) {
          unsigned dynamic_offset_start =
             builder->layout.set[i].dynamic_offset_start / (A6XX_TEX_CONST_DWORDS * 4);
-         // tu_cs_emit(cs, i < builder->layout.num_sets ? dynamic_offset_start : 0);
-         tu_cs_emit(cs, 0);
+         offsets[i] = i < builder->layout.num_sets ? dynamic_offset_start : 0;
       }
 
-      iova += pad * sizeof(uint32_t);
-      assert(iova % 16 == 0);
-      for (unsigned i = 0; i < (total_size - pad - phys_dev->usable_sets); i++)
-         tu_cs_emit(cs, 0);
+      /* A7XX TODO: Emit data via sub_cs instead of NOP */
+      uint64_t iova = tu_cs_emit_data_nop(cs, offsets, phys_dev->usable_sets, 4);
 
       tu_cs_emit_pkt7(cs, tu6_stage2opcode(xs->type), 5);
       tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(const_state->constant_data_dynamic_offsets) |
@@ -617,7 +606,6 @@ tu6_emit_const(struct tu_cs *cs, uint32_t opcode, enum tu_geom_consts_type type,
                enum a6xx_state_block block, uint32_t offset,
                uint32_t size, const uint32_t *dwords) {
    assert(size % 4 == 0);
-   // assert(!cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble);
    dwords = (uint32_t *)&((uint8_t *)dwords)[offset];
 
    if (block == SB6_VS_SHADER || !cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble) {
@@ -642,7 +630,6 @@ tu6_emit_const(struct tu_cs *cs, uint32_t opcode, enum tu_geom_consts_type type,
 
       tu_cs_emit(cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
       tu_cs_emit(cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
-      // dwords = (uint32_t *)&((uint8_t *)dwords)[offset];
 
       tu_cs_emit_array(cs, dwords, size);
    } else {
@@ -653,24 +640,13 @@ tu6_emit_const(struct tu_cs *cs, uint32_t opcode, enum tu_geom_consts_type type,
          break;
       case TU_CONSTS_PRIMITIVE_PARAM:
          base = const_state->constant_data_primitive_param;
-         // unreachable("TU_CONSTS_PRIMITIVE_PARAM");
          break;
       default:
          unreachable("bad consts type");
       }
 
-      uint32_t total_size = size + 4;
-      tu_cs_emit_pkt7(cs, CP_NOP, total_size);
-      uint64_t iova = tu_cs_get_cur_iova(cs);
-      uint32_t pad = (16 - (iova % 16)) / 4;
-      for (unsigned i = 0; i < pad; i++)
-         tu_cs_emit(cs, 0);
-      tu_cs_emit_array(cs, dwords, size);
-
-      iova += pad * sizeof(uint32_t);
-      assert(iova % 16 == 0);
-      for (unsigned i = 0; i < (total_size - pad - size); i++)
-         tu_cs_emit(cs, 0);
+      /* A7XX TODO: Emit data via sub_cs instead of NOP */
+      uint64_t iova = tu_cs_emit_data_nop(cs, dwords, size, 4);
 
       tu_cs_emit_pkt7(cs, opcode, 5);
       tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(base) |
