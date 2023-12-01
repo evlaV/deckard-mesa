@@ -1529,9 +1529,6 @@ r3d_run(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                   CP_DRAW_INDX_OFFSET_0_VIS_CULL(IGNORE_VISIBILITY));
    tu_cs_emit(cs, 1); /* instance count */
    tu_cs_emit(cs, 2); /* vertex count */
-
-   if (cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble)
-      tu_cs_emit_wfi(cs);
 }
 
 static void
@@ -1543,9 +1540,6 @@ r3d_run_vis(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                   CP_DRAW_INDX_OFFSET_0_VIS_CULL(USE_VISIBILITY));
    tu_cs_emit(cs, 1); /* instance count */
    tu_cs_emit(cs, 2); /* vertex count */
-
-   if (cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble)
-      tu_cs_emit_wfi(cs);
 }
 
 template <chip CHIP>
@@ -1906,12 +1900,13 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
               blit_param, false, dst_image->layout[0].ubwc,
               (VkSampleCountFlagBits) dst_image->layout[0].nr_samples);
 
-   if (ops == &r3d_ops<CHIP>) {
-      const float coords[] = { info->dstOffsets[0].x, info->dstOffsets[0].y,
+   const float coords_3d[] = { info->dstOffsets[0].x, info->dstOffsets[0].y,
                                info->srcOffsets[0].x, info->srcOffsets[0].y,
                                info->dstOffsets[1].x, info->dstOffsets[1].y,
                                info->srcOffsets[1].x, info->srcOffsets[1].y };
-      r3d_coords_raw(cs, coords);
+
+   if (ops == &r3d_ops<CHIP>) {
+      r3d_coords_raw(cs, coords_3d);
    } else {
       tu_cs_emit_regs(cs,
          A6XX_GRAS_2D_DST_TL(.x = MIN2(info->dstOffsets[0].x, info->dstOffsets[1].x),
@@ -1939,6 +1934,11 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
    }
 
    for (uint32_t i = 0; i < layers; i++) {
+      if (i > 0 && ops == &r3d_ops<CHIP> &&
+          cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble) {
+         r3d_coords_raw(cs, coords_3d);
+      }
+
       if (z_scale) {
          float t = ((float) i + 0.5f) / (float) layers;
          r3d_coord_z(cs, t * (src1_z - src0_z) + src0_z);
@@ -3524,6 +3524,9 @@ load_3d_blit(struct tu_cmd_buffer *cmd,
             .view = att->clear_views ? i : 0,
          };
          tu_create_fdm_bin_patchpoint(cmd, cs, 1 + 3 + 8, fdm_apply_load_coords, state);
+      } else if (i > 0 && cs->device->physical_device->info->a7xx.load_shader_consts_via_preamble) {
+         r3d_coords(cs, (VkOffset2D) { 0, 0 }, (VkOffset2D) { 0, 0 },
+                    (VkExtent2D) { fb->width, fb->height });
       }
 
       r3d_dst_gmem(cmd, cs, iview, att, separate_stencil, i);
