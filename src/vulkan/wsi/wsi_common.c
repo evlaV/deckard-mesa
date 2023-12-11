@@ -1375,7 +1375,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       vk_find_struct_const(pPresentInfo->pNext, SWAPCHAIN_PRESENT_FENCE_INFO_EXT);
    const VkSwapchainPresentModeInfoEXT *present_mode_info =
       vk_find_struct_const(pPresentInfo->pNext, SWAPCHAIN_PRESENT_MODE_INFO_EXT);
-
+   const struct queue_present_cac_plane_adjust_info_valve *cacplaneadjust =
+      vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_CAC_PLANE_ADJUST_INFO_VALVE);
+	  
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
       VK_FROM_HANDLE(wsi_swapchain, swapchain, pPresentInfo->pSwapchains[i]);
       uint32_t image_index = pPresentInfo->pImageIndices[i];
@@ -1565,6 +1567,19 @@ wsi_common_queue_present(const struct wsi_device *wsi,
          result = wsi_signal_present_id_timeline(swapchain, queue, present_id, present_fence);
          if (result != VK_SUCCESS)
             goto fail_present;
+      }
+
+      if(cacplaneadjust) {
+         result = swapchain->cac_plane_adjust(swapchain, image_index,
+                           cacplaneadjust->plane_index, 
+                           cacplaneadjust->src_x,
+                           cacplaneadjust->src_y,
+                           cacplaneadjust->src_width,
+                           cacplaneadjust->src_height,
+                           cacplaneadjust->dst_x,
+                           cacplaneadjust->dst_y,
+                           cacplaneadjust->dst_width,
+                           cacplaneadjust->dst_height);
       }
 
       result = swapchain->queue_present(swapchain, image_index, present_id, region);
