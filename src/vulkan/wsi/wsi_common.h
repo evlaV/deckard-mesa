@@ -45,6 +45,34 @@ extern const struct vk_device_entrypoint_table wsi_device_entrypoints;
 
 #include <util/list.h>
 
+/* This is guaranteed to not collide with anything because it's in the
+ * VK_KHR_swapchain namespace but not actually used by the extension.
+ */
+#define VK_STRUCTURE_TYPE_WSI_IMAGE_CREATE_INFO_MESA (VkStructureType)1000001002
+#define VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA (VkStructureType)1000001003
+#define VK_STRUCTURE_TYPE_WSI_SURFACE_SUPPORTED_COUNTERS_MESA (VkStructureType)1000001005
+#define VK_STRUCTURE_TYPE_WSI_MEMORY_SIGNAL_SUBMIT_INFO_MESA (VkStructureType)1000001006
+
+#define VK_STRUCTURE_TYPE_WSI_IMAGE_CREATE_INFO_MESA_cast struct wsi_image_create_info
+#define VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA_cast struct wsi_memory_allocate_info
+#define VK_STRUCTURE_TYPE_WSI_SURFACE_SUPPORTED_COUNTERS_MESA_cast struct wsi_surface_supported_counters
+#define VK_STRUCTURE_TYPE_WSI_MEMORY_SIGNAL_SUBMIT_INFO_MESA_cast struct wsi_memory_signal_submit_info
+
+
+struct wsi_memory_allocate_info {
+    VkStructureType sType;
+    const void *pNext;
+    bool implicit_sync;
+};
+
+
+/* To be chained into VkSubmitInfo */
+struct wsi_memory_signal_submit_info {
+    VkStructureType sType;
+    const void *pNext;
+    VkDeviceMemory memory;
+};
+
 struct wsi_interface;
 struct vk_instance;
 struct vk_queue;

@@ -2997,6 +2997,7 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_Y], 0);
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], mode->hdisplay);
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], mode->vdisplay);
+   drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
 
    if ( cac_enabled()) drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
 

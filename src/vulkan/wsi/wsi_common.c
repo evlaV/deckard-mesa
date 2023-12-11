@@ -1779,6 +1779,24 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       if (results[i] != VK_SUCCESS && results[i] != VK_SUBOPTIMAL_KHR)
          continue;
 
+         if(cacplaneadjust) {
+         result = swapchain->cac_plane_adjust(swapchain, image_index,
+                           cacplaneadjust->plane_index, 
+                           cacplaneadjust->src_x,
+                           cacplaneadjust->src_y,
+                           cacplaneadjust->src_width,
+                           cacplaneadjust->src_height,
+                           cacplaneadjust->dst_x,
+                           cacplaneadjust->dst_y,
+                           cacplaneadjust->dst_width,
+                           cacplaneadjust->dst_height);
+      }
+
+      result = swapchain->queue_present(swapchain, image_index, present_id, region);
+      if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+         goto fail_present;
+
+
       if (wsi->set_memory_ownership) {
          VkDeviceMemory mem = swapchain->get_wsi_image(swapchain, image_index)->memory;
          wsi->set_memory_ownership(swapchain->device, mem, false);
