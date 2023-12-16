@@ -19,6 +19,7 @@
 #include "tu_descriptor_set.h"
 #include "tu_pipeline.h"
 #include "tu_lrz.h"
+#include <initializer_list>
 
 nir_shader *
 tu_spirv_to_nir(struct tu_device *dev,
