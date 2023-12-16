@@ -2945,13 +2945,13 @@ to upconvert to 32b float internally?
 	<reg32 offset="0x9307" name="VPC_POLYGON_MODE2" variants="A7XX-" usage="rp_blit">
 		<bitfield name="MODE" low="0" high="1" type="a6xx_polygon_mode"/>
 	</reg32>
-	<reg32 offset="0x9308" name="VPC_ATTR_BUF_GMEM_SIZE">
+	<reg32 offset="0x9308" name="VPC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="rp_blit">
 		<bitfield name="VPCBUFSIZEGMEM" low="0" high="31"/>
 	</reg32>
-	<reg32 offset="0x9309" name="VPC_ATTR_BUF_GMEM_BASE">
+	<reg32 offset="0x9309" name="VPC_ATTR_BUF_GMEM_BASE" variants="A7XX-" usage="rp_blit">
 		<bitfield name="VPCBUFBASEGMEM" low="0" high="31"/>
 	</reg32>
-	<reg32 offset="0x9b09" name="PC_ATTR_BUF_GMEM_SIZE">
+	<reg32 offset="0x9b09" name="PC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="rp_blit">
 		<bitfield name="SIZE" low="0" high="31"/>
 	</reg32>
 
@@ -3798,6 +3798,32 @@ to upconvert to 32b float internally?
 
 	<reg32 offset="0xaa01" name="SP_UNKNOWN_AA01" type="uint" variants="A7XX-" usage="cmd"/>
 
+	<reg32 offset="0xaa02" name="SP_PS_ALIASED_COMPONENTS_CONTROL" variants="A7XX-" usage="cmd">
+		<bitfield name="ENABLED" pos="0" type="boolean"/>
+	</reg32>
+	<reg32 offset="0xaa03" name="SP_PS_ALIASED_COMPONENTS" variants="A7XX-" usage="cmd">
+		<doc>
+			Specify for which components the output color should be read
+			from alias, e.g. for:
+
+				alias.1.b32.0 r3.x, c8.x
+				alias.1.b32.0 r2.x, c4.x
+				alias.1.b32.0 r1.x, c4.x
+				alias.1.b32.0 r0.x, c0.x
+
+			the SP_PS_ALIASED_COMPONENTS would be 0x00001111
+		</doc>
+
+		<bitfield name="RT0" low="0" high="3"/>
+		<bitfield name="RT1" low="4" high="7"/>
+		<bitfield name="RT2" low="8" high="11"/>
+		<bitfield name="RT3" low="12" high="15"/>
+		<bitfield name="RT4" low="16" high="19"/>
+		<bitfield name="RT5" low="20" high="23"/>
+		<bitfield name="RT6" low="24" high="27"/>
+		<bitfield name="RT7" low="28" high="31"/>
+	</reg32>
+
 	<!--
                 This enum is probably similar in purpose to SNORMMODE on a3xx,
                 minus the snorm stuff, i.e. it controls what happens with an
@@ -4052,9 +4078,12 @@ to upconvert to 32b float internally?
 	<!-- Used in VK_KHR_fragment_shading_rate -->
 	<reg32 offset="0xa9ad" name="HLSQ_UNKNOWN_A9AD" variants="A7XX-"/>
 
-	<reg32 offset="0xa9ae" name="HLSQ_UNKNOWN_A9AE" variants="A7XX-" usage="cmd">
-		<bitfield name="UNK0" low="0" high="7" type="uint"/>
+	<reg32 offset="0xa9ae" name="HLSQ_UNKNOWN_A9AE" variants="A7XX-" usage="rp_blit">
+		<bitfield name="SYSVAL_REGS_COUNT" low="0" high="7" type="uint"/>
+		<!-- UNK8 is set on a730/a740 -->
 		<bitfield name="UNK8" pos="8" type="boolean"/>
+		<!-- UNK9 is set on a750 -->
+		<bitfield name="UNK9" pos="9" type="boolean"/>
 	</reg32>
 
 	<reg32 offset="0xb820" name="HLSQ_LOAD_STATE_GEOM_CMD"/>

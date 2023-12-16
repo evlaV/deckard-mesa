@@ -210,6 +210,8 @@ struct fd_dev_info {
 
       bool load_inline_uniforms_via_preamble_ldgk;
       bool load_shader_consts_via_preamble;
+
+      bool has_gmem_vpc_attr_buf;
    } a7xx;
 };
 

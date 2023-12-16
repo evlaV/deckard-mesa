@@ -63,13 +63,13 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 		Invalidates depth attachment data from the CCU.  We assume this
 		happens in the last stage.
 	</doc>
-	<value name="PC_CCU_INVALIDATE_DEPTH" value="24" variants="A5XX-"/>
+	<value name="PC_CCU_INVALIDATE_DEPTH" value="24" variants="A5XX-A6XX"/>
 
 	<doc>
 		Invalidates color attachment data from the CCU.  We assume this
 		happens in the last stage.
 	</doc>
-	<value name="PC_CCU_INVALIDATE_COLOR" value="25" variants="A5XX-"/>
+	<value name="PC_CCU_INVALIDATE_COLOR" value="25" variants="A5XX-A6XX"/>
 
 	<doc>
 		Flushes the small cache used by CP_EVENT_WRITE::BLIT (which,
@@ -81,20 +81,20 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 		Flushes depth attachment data from the CCU.  We assume this
 		happens in the last stage.
 	</doc>
-	<value name="PC_CCU_FLUSH_DEPTH_TS" value="28" variants="A5XX-"/>
+	<value name="PC_CCU_FLUSH_DEPTH_TS" value="28" variants="A5XX-A6XX"/>
 
 	<doc>
 		Flushes color attachment data from the CCU.  We assume this
 		happens in the last stage.
 	</doc>
-	<value name="PC_CCU_FLUSH_COLOR_TS" value="29" variants="A5XX-"/>
+	<value name="PC_CCU_FLUSH_COLOR_TS" value="29" variants="A5XX-A6XX"/>
 
 	<doc>
 		2D blit to resolve GMEM to system memory (skipping CCU) at the
 		end of a render pass.  Compare to CP_BLIT's BLIT_OP_SCALE for
 		more general blitting.
 	</doc>
-	<value name="BLIT" value="30" variants="A5XX-"/>
+	<value name="BLIT" value="30" variants="A5XX-A6XX"/>
 
 	<doc>
 		Clears based on GRAS_LRZ_CNTL configuration, could clear
@@ -324,7 +324,7 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 	<doc>fetch state sub-blocks and initiate shader code DMAs</doc>
 	<value name="CP_SET_STATE" value="0x25"/>
 	<doc>load constant into chip and to memory</doc>
-	<value name="CP_SET_CONSTANT" value="0x2d"/>
+	<value name="CP_SET_CONSTANT" value="0x2d" variants="A2XX"/>
 	<doc>load sequencer instruction memory (pointer-based)</doc>
 	<value name="CP_IM_LOAD" value="0x27"/>
 	<doc>load sequencer instruction memory (code embedded in packet)</doc>
@@ -573,6 +573,8 @@ xsi:schemaLocation="http://nouveau.freedesktop.org/ rules-ng.xsd">
 	<value name="CP_WAIT_TWO_REGS" value="0x70" variants="A6XX"/>
 	<value name="CP_MEMCPY" value="0x75" variants="A6XX-"/>
 	<value name="CP_SET_BIN_DATA5_OFFSET" value="0x2e" variants="A6XX-"/>
+	<!-- A750+, set in place of CP_SET_BIN_DATA5_OFFSET but has different values -->
+	<value name="CP_SET_UNK_BIN_DATA" value="0x2d" variants="A7XX-"/>
 	<doc>
                 Write CP_CONTEXT_SWITCH_*_INFO from CP to the following dwords,
                 and forcibly switch to the indicated context.

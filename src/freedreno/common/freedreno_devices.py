@@ -766,6 +766,7 @@ a7xx_750 = A7XXProps(
         has_event_write_sample_count = True,
         load_inline_uniforms_via_preamble_ldgk = True,
         load_shader_consts_via_preamble = True,
+        has_gmem_vpc_attr_buf = True,
     )
 
 a730_magic_regs = dict(
@@ -914,7 +915,7 @@ add_gpus([
         CHIP.A7XX,
         [a7xx_base, a7xx_750],
         num_ccu = 6,
-        tile_align_w = 64,
+        tile_align_w = 96,
         tile_align_h = 32,
         num_vsc_pipes = 32,
         cs_shared_mem_size = 32 * 1024,
@@ -936,6 +937,8 @@ add_gpus([
             UCHE_UNKNOWN_0E12 = 0x40000000
         ),
         raw_magic_regs = [
+            [A6XXRegs.REG_A6XX_TPL1_UNKNOWN_B602, 0xc0700],
+
             [A6XXRegs.REG_A6XX_UCHE_CACHE_WAYS, 0x00000000],
             [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E10, 0x00000000],
             [A6XXRegs.REG_A7XX_UCHE_UNKNOWN_0E11, 0x00000080],
@@ -961,14 +964,10 @@ add_gpus([
             [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_800B, 0x00000000],
             [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_800C, 0x00000000],
 
-            [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_SIZE, 0x00020000],
-            [A6XXRegs.REG_A6XX_VPC_ATTR_BUF_GMEM_BASE, 0x00240000],
-            [A6XXRegs.REG_A6XX_PC_ATTR_BUF_GMEM_SIZE, 0x00020000],
-
             [0x930a, 0],
             [0x960a, 1],
-            [0xaa02, 0],
-            [0xaa03, 0],
+            [A6XXRegs.REG_A7XX_SP_PS_ALIASED_COMPONENTS_CONTROL, 0],
+            [A6XXRegs.REG_A7XX_SP_PS_ALIASED_COMPONENTS, 0],
         ],
     ))
 

@@ -258,6 +258,13 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
 
    uint32_t color_offset_hi = color_offset >> 21;
    color_offset &= 0x1fffff;
+
+   uint32_t depth_offset = gmem ? 0
+                                : dev->physical_device->ccu_depth_offset_bypass;
+
+   uint32_t depth_offset_hi = depth_offset >> 21;
+   depth_offset &= 0x1fffff;
+
    enum a6xx_ccu_cache_size cache_size = !gmem ? CCU_CACHE_SIZE_FULL :
       (a6xx_ccu_cache_size)(dev->physical_device->info->a6xx.gmem_ccu_color_cache_fraction);
    bool concurrent_resolve = dev->physical_device->info->a6xx.concurrent_resolve;
@@ -269,13 +276,30 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
          .concurrent_resolve = concurrent_resolve,
       ));
       tu_cs_emit_regs(cs, A7XX_RB_CCU_CNTL2(
-         .depth_offset_hi = 0,
+         .depth_offset_hi = depth_offset_hi,
          .color_offset_hi = color_offset_hi,
          .depth_cache_size = CCU_CACHE_SIZE_FULL,
-         .depth_offset = 0,
+         .depth_offset = depth_offset,
          .color_cache_size = cache_size,
          .color_offset = color_offset
       ));
+
+      if (dev->physical_device->info->a7xx.has_gmem_vpc_attr_buf) {
+         tu_cs_emit_regs(cs,
+            A7XX_VPC_ATTR_BUF_GMEM_SIZE(
+                  .vpcbufsizegmem =
+                     gmem ? dev->physical_device->vpc_attr_buf_size_gmem
+                          : dev->physical_device->vpc_attr_buf_size_bypass),
+            A7XX_VPC_ATTR_BUF_GMEM_BASE(
+                  .vpcbufbasegmem =
+                     gmem ? dev->physical_device->vpc_attr_buf_offset_gmem
+                          : dev->physical_device->vpc_attr_buf_offset_bypass), );
+         tu_cs_emit_regs(cs,
+            A7XX_PC_ATTR_BUF_GMEM_SIZE(
+                  .size =
+                     gmem ? dev->physical_device->vpc_attr_buf_size_gmem
+                          : dev->physical_device->vpc_attr_buf_size_bypass), );
+      }
    } else {
       tu_cs_emit_regs(cs, A6XX_RB_CCU_CNTL(
          .gmem_fast_clear_disable =
@@ -1702,7 +1726,7 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_regs(cs,
                      A7XX_RB_UNKNOWN_8812(0x3ff)); // all buffers in sysmem
       tu_cs_emit_regs(cs,
-                   A7XX_RB_UNKNOWN_8E06(0x02082000));
+                   A7XX_RB_UNKNOWN_8E06(0x2080000));
 
       /* These three have something to do with lrz/depth */
       tu_cs_emit_regs(cs, A7XX_GRAS_UNKNOWN_8007(0x0));
