@@ -629,8 +629,12 @@ lower_inline_ubo(nir_builder *b, nir_intrinsic_instr *intrin, void *cb_data)
    for (unsigned i = 0; i < const_state->num_inline_ubos; i++) {
       if (const_state->ubos[i].base == binding.desc_set &&
           const_state->ubos[i].offset == binding_layout->offset) {
-         base = const_state->ubos[i].const_offset_vec4 * 4;
          use_load = const_state->ubos[i].push_address;
+         if (use_load && const_state->ubos[i].size_vec4 == 0) {
+            base = const_state->inline_ubo_addrs_const_offset_vec4 * 4 + i * 2;
+         } else {
+            base = const_state->ubos[i].const_offset_vec4 * 4;
+         }
          break;
       }
    }
@@ -833,6 +837,9 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
 
          assert(const_state->num_inline_ubos < ARRAY_SIZE(const_state->ubos));
          unsigned size_vec4 = push_address ? 1 : DIV_ROUND_UP(binding->size, 16);
+         if (push_address && dev->physical_device->info->a7xx.load_inline_uniforms_via_preamble_ldgk)
+            size_vec4 = 0;
+
          const_state->ubos[const_state->num_inline_ubos++] = (struct tu_inline_ubo) {
             .base = set,
             .offset = binding->offset,
@@ -843,6 +850,12 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
 
          reserved_consts_vec4 += align(size_vec4, dev->compiler->const_upload_unit);
       }
+   }
+
+   if (const_state->num_inline_ubos > 0 &&
+       dev->physical_device->info->a7xx.load_inline_uniforms_via_preamble_ldgk) {
+      const_state->inline_ubo_addrs_const_offset_vec4 = reserved_consts_vec4;
+      reserved_consts_vec4 += align(const_state->num_inline_ubos * 2, dev->compiler->const_upload_unit);
    }
 
    *reserved_consts_vec4_out = reserved_consts_vec4;
@@ -2402,7 +2415,7 @@ tu_shader_create(struct tu_device *dev,
 
    ir3_finalize_nir(dev->compiler, nir);
 
-   const struct ir3_shader_options options = {
+   struct ir3_shader_options options = {
       .num_reserved_user_consts = reserved_consts_vec4,
       .api_wavesize = key->api_wavesize,
       .real_wavesize = key->real_wavesize,
@@ -2411,7 +2424,14 @@ tu_shader_create(struct tu_device *dev,
       .push_consts_dwords = shader->const_state.push_consts.dwords,
       .dynamic_offset_const_base = shader->const_state.dynamic_offset_loc,
       .dynamic_offset_const_dwords = DIV_ROUND_UP(dev->physical_device->usable_sets, 4),
+      .inline_uniform_addresses_const_base = shader->const_state.inline_ubo_addrs_const_offset_vec4 * 4,
+      .inline_uniform_addresses_count = shader->const_state.num_inline_ubos,
    };
+
+   for (uint32_t i = 0; i < shader->const_state.num_inline_ubos; i++) {
+      options.inline_ubos[i].const_offset_vec4 = shader->const_state.ubos[i].const_offset_vec4;
+      options.inline_ubos[i].size_vec4 = shader->const_state.ubos[i].size_vec4;
+   }
 
    struct ir3_shader *ir3_shader =
       ir3_shader_from_nir(dev->compiler, nir, &options, &so_info);

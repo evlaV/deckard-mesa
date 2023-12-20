@@ -454,6 +454,90 @@ apply_push_consts_load_macro(struct ir3_legalize_ctx *ctx,
    }
 }
 
+/* We don't deal nicely with dependencies on loads in const file, so
+ * in order to prevent incorrect reorderings - emit the inline uniforms
+ * loading manually:
+ *  1) Load addresses of inline uniform buffers via ldc.k
+ *  2) Mov addresses into shared regs
+ *  3) Load all inline uniforms 4 dwords at a time via ldg.k
+ */
+static void
+load_inline_uniforms(struct ir3_legalize_ctx *ctx,
+                     struct ir3_block *preamble)
+{
+   struct ir3_shader_options *options = &ctx->so->shader_options;
+   if (options->inline_uniform_addresses_count == 0)
+      return;
+
+   struct ir3_const_state *const_state = ir3_const_state(ctx->so);
+   uint32_t base_reg = 49;
+
+   struct ir3_instruction *mov = ir3_instr_create(preamble, OPC_MOV, 1, 1);
+   ir3_instr_move_before_block(mov, preamble);
+   ir3_src_create(mov, 0, IR3_REG_IMMED | IR3_REG_HALF | IR3_REG_R)->iim_val =
+      options->inline_uniform_addresses_const_base;
+   ir3_dst_create(mov, regid(REG_A0, 1), IR3_REG_HALF);
+   mov->cat1.src_type = TYPE_U16;
+   mov->cat1.dst_type = TYPE_U16;
+
+   struct ir3_instruction *nop = ir3_NOP(preamble);
+   ir3_instr_move_after(nop, mov);
+   nop->repeat = 5;
+
+   uint32_t addresses_vec4 =
+      DIV_ROUND_UP(options->inline_uniform_addresses_count * 2, 4);
+
+   struct ir3_instruction *ldc_k = ir3_instr_create(preamble, OPC_LDC_K, 0, 2);
+   ir3_instr_move_after(ldc_k, nop);
+   ir3_src_create(ldc_k, 0, IR3_REG_IMMED)->iim_val =
+      const_state->constant_data_ubo_idx[IR3_UBO_IDX_INLINE_UNIFORMS];
+   ir3_src_create(ldc_k, 0, IR3_REG_IMMED)->iim_val = 0;
+   ldc_k->cat6.iim_val = addresses_vec4;
+
+   struct ir3_instruction *last_instr = ldc_k;
+   for (uint32_t i = 0; i < addresses_vec4; i++) {
+      struct ir3_instruction *mov = ir3_instr_create(preamble, OPC_MOV, 1, 1);
+      ir3_instr_move_after(mov, last_instr);
+      ir3_src_create(mov, options->inline_uniform_addresses_const_base + i * 4,
+                     IR3_REG_CONST | IR3_REG_R);
+      ir3_dst_create(mov, regid(base_reg + i, 0), 0);
+      mov->cat1.src_type = TYPE_U32;
+      mov->cat1.dst_type = TYPE_U32;
+      mov->repeat = 3;
+      if (i == 0)
+         mov->flags |= IR3_INSTR_SY;
+
+      last_instr = mov;
+   }
+
+   struct ir3_instruction *nop2 = ir3_NOP(preamble);
+   ir3_instr_move_after(nop2, last_instr);
+   nop2->flags |= IR3_INSTR_SS;
+
+   struct ir3_instruction *nop3 = ir3_NOP(preamble);
+   ir3_instr_move_after(nop3, nop2);
+   nop3->flags |= IR3_INSTR_SY;
+
+   for (uint32_t i = 0; i < options->inline_uniform_addresses_count; i++) {
+      if (!options->inline_ubos[i].size_vec4)
+         continue;
+
+      for (uint32_t j = 0; j < options->inline_ubos[i].size_vec4; j++) {
+         struct ir3_instruction *ldgk =
+            ir3_instr_create(preamble, OPC_LDG_K, 0, 4);
+         ir3_instr_move_after(ldgk, nop2);
+
+         ir3_src_create(ldgk, 0, IR3_REG_IMMED)->iim_val =
+            options->inline_ubos[i].const_offset_vec4 * 4 + j * 4;
+         ir3_src_create(ldgk, regid(base_reg + i / 2, (i % 2) * 2), IR3_REG_SHARED);
+         ir3_src_create(ldgk, 0, IR3_REG_IMMED)->iim_val = j * 16;
+         ir3_src_create(ldgk, 0, IR3_REG_IMMED)->iim_val = 1;
+
+         ldgk->cat6.type = TYPE_U32;
+      }
+   }
+}
+
 /* NOTE: branch instructions are always the last instruction(s)
  * in the block.  We take advantage of this as we resolve the
  * branches, since "if (foo) break;" constructs turn into
@@ -1231,6 +1315,7 @@ ir3_legalize(struct ir3 *ir, struct ir3_shader_variant *so, int *max_bary)
    foreach_block (block, &ir->block_list) {
       if (block->brtype == IR3_BRANCH_GETONE) {
          apply_push_consts_load_macro(ctx, block->successors[0]);
+         load_inline_uniforms(ctx, block->successors[0]);
          break;
       }
    }

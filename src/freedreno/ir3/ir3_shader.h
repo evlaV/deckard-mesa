@@ -162,6 +162,7 @@ enum ir3_const_data_ubo_type {
    IR3_UBO_IDX_PRIMITIVE_PARAM,
    IR3_UBO_IDX_FRAG_FDM,
    IR3_UBO_IDX_DYNAMIC_OFFSETS,
+   IR3_UBO_IDX_INLINE_UNIFORMS,
    IR3_UBO_IDX_COUNT,
 };
 
@@ -547,6 +548,17 @@ struct ir3_shader_options {
 
    uint32_t dynamic_offset_const_base;
    uint32_t dynamic_offset_const_dwords;
+
+   uint32_t inline_uniform_addresses_const_base;
+   uint32_t inline_uniform_addresses_count;
+
+   struct {
+      /* Push it to this location in the const file, in vec4s */
+      unsigned const_offset_vec4;
+
+      /* How much to push */
+      unsigned size_vec4;
+   } inline_ubos[7];
 };
 
 /**
