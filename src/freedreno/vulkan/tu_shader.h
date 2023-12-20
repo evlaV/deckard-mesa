@@ -49,6 +49,8 @@ struct tu_const_state
    uint32_t dynamic_offset_loc;
    unsigned num_inline_ubos;
    struct tu_inline_ubo ubos[MAX_INLINE_UBOS];
+   /* Push inline ubo address to this location in const file */
+   unsigned inline_ubo_addrs_const_offset_vec4;
 };
 
 struct tu_shader

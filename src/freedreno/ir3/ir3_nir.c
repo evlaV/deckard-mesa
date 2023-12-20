@@ -758,6 +758,14 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
 
    progress |= OPT(s, ir3_nir_lower_ubo_loads, so);
 
+   if (so->compiler->load_inline_uniforms_via_preamble_ldgk &&
+       so->shader_options.inline_uniform_addresses_count != 0) {
+      ir3_const_state_alloc_ubo(
+         ir3_const_state(so), IR3_UBO_IDX_INLINE_UNIFORMS,
+         so->shader_options.inline_uniform_addresses_count * 2);
+      nir_shader_get_preamble(s);
+   }
+
    if (so->shader_options.push_consts_type == IR3_PUSH_CONSTS_SHARED_PREAMBLE)
       progress |= OPT(s, ir3_nir_lower_push_consts_to_preamble, so);
 
