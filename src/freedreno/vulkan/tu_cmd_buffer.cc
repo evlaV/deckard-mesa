@@ -312,6 +312,9 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
 
       tu_cs_emit_regs(cs, A6XX_RB_STENCIL_INFO(0));
 
+      tu_cs_emit_regs(cs, A6XX_RB_STENCIL_CONTROL());
+      tu_cs_emit_regs(cs, A6XX_GRAS_SU_STENCIL_CNTL());
+
       return;
    }
 
@@ -357,6 +360,9 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
       tu_cs_emit_regs(cs,
                      A6XX_RB_STENCIL_INFO(0));
    }
+
+   tu_cs_emit_regs(cs, A6XX_RB_STENCIL_CONTROL());
+   tu_cs_emit_regs(cs, A6XX_GRAS_SU_STENCIL_CNTL());
 }
 
 static void
