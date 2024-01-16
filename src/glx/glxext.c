@@ -895,6 +895,8 @@ __glXInitialize(Display * dpy)
    /* Set the logger before the *CreateDisplay functions. */
    loader_set_logger(glx_message);
 
+   zink = false; //gabe
+
    /*
     ** Initialize the direct rendering per display data and functions.
     ** Note: This _must_ be done before calling any other DRI routines
