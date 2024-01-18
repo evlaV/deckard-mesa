@@ -799,6 +799,7 @@ a7xx_750 = A7XXProps(
         has_gmem_vpc_attr_buf = True,
         sysmem_vpc_attr_buf_size = 0x20000,
         gmem_vpc_attr_buf_size = 0xc000,
+        rectlist_repl_s_t_swapped_quirk = True,
     )
 
 a730_magic_regs = dict(

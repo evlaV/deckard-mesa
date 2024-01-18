@@ -873,7 +873,12 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
 
    /* REPL_MODE for varying with RECTLIST (2 vertices only) */
    tu_cs_emit_regs(cs, A6XX_VPC_VARYING_INTERP_MODE(0, 0));
-   tu_cs_emit_regs(cs, A6XX_VPC_VARYING_PS_REPL_MODE(0, 2 << 2 | 1 << 0));
+
+   uint32_t repl_mode = PS_REPL_T << 2 | PS_REPL_S << 0;
+   if (cmd->device->physical_device->info->a7xx.rectlist_repl_s_t_swapped_quirk)
+      repl_mode = PS_REPL_S << 2 | PS_REPL_T << 0;
+
+   tu_cs_emit_regs(cs, A6XX_VPC_VARYING_PS_REPL_MODE(0, repl_mode));
 
    tu6_emit_vs<CHIP>(cs, vs, 0);
    tu6_emit_hs<CHIP>(cs, NULL);

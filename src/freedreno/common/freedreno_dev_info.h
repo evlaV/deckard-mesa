@@ -220,6 +220,12 @@ struct fd_dev_info {
       /* Size of buffer in gmem for VPC attributes */
       uint32_t sysmem_vpc_attr_buf_size;
       uint32_t gmem_vpc_attr_buf_size;
+
+      /* PS_REPL_S and PS_REPL_T are swapped(?) for DI_PT_RECTLIST primtype.
+       * Found due to failure of:
+       *   dEQP-VK.image.host_image_copy.linear.image_to_image_copy.*r16_sfloat
+       */
+      bool rectlist_repl_s_t_swapped_quirk;
    } a7xx;
 };
 
