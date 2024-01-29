@@ -381,6 +381,7 @@ a6xx_gen3 = A6XXProps(
         lrz_track_quirk = True,
         has_per_view_viewport = True,
         has_scalar_alu = True,
+        has_early_preamble = True,
     )
 
 a6xx_gen4 = A6XXProps(
@@ -405,6 +406,7 @@ a6xx_gen4 = A6XXProps(
         has_lrz_dir_tracking = True,
         has_per_view_viewport = True,
         has_scalar_alu = True,
+        has_early_preamble = True,
     )
 
 a6xx_a690_quirk = A6XXProps(
@@ -782,6 +784,7 @@ a7xx_base = A6XXProps(
         has_lrz_dir_tracking = True,
         has_per_view_viewport = True,
         has_scalar_alu = True,
+        has_early_preamble = True,
     )
 
 a7xx_725 = A7XXProps(
