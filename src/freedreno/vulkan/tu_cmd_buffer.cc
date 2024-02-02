@@ -439,11 +439,21 @@ tu6_emit_zs(struct tu_cmd_buffer *cmd,
    }
 }
 
+// vksubpass_begin_info_valve extension to allow overriding srgb_cntl for a subpass
+#define VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO_VALVE  (VkStructureType) 1000109099
+#define VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO_VALVE_cast struct vksubpass_begin_info_valve
+struct vksubpass_begin_info_valve {
+   VkStructureType                   sType;
+   const void*                       pNext;
+   uint32_t srgb_cntl;
+};
+
 template <chip CHIP>
 static void
 tu6_emit_mrt(struct tu_cmd_buffer *cmd,
              const struct tu_subpass *subpass,
-             struct tu_cs *cs)
+             struct tu_cs *cs,
+             const struct vksubpass_begin_info_valve *info)
 {
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
 
@@ -519,9 +529,9 @@ tu6_emit_mrt(struct tu_cmd_buffer *cmd,
    }
 
    tu_cs_emit_regs(cs,
-                   A6XX_RB_SRGB_CNTL(.dword = subpass->srgb_cntl));
+                   A6XX_RB_SRGB_CNTL(.dword = info ? info->srgb_cntl : subpass->srgb_cntl));
    tu_cs_emit_regs(cs,
-                   A6XX_SP_SRGB_CNTL(.dword = subpass->srgb_cntl));
+                   A6XX_SP_SRGB_CNTL(.dword = info ? info->srgb_cntl : subpass->srgb_cntl));
 
    unsigned layers = MAX2(fb->layers, util_logbase2(subpass->multiview_mask) + 1);
    tu_cs_emit_regs(cs, A6XX_GRAS_MAX_LAYER_INDEX(layers - 1));
@@ -4443,7 +4453,7 @@ tu7_emit_subpass_clear(struct tu_cmd_buffer *cmd)
  */
 template <chip CHIP>
 static void
-tu_emit_subpass_begin(struct tu_cmd_buffer *cmd)
+tu_emit_subpass_begin(struct tu_cmd_buffer *cmd, const struct vksubpass_begin_info_valve *info)
 {
    tu_fill_render_pass_state(&cmd->state.vk_rp, cmd->state.pass, cmd->state.subpass);
 
@@ -4454,7 +4464,7 @@ tu_emit_subpass_begin(struct tu_cmd_buffer *cmd)
    }
 
    tu6_emit_zs<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs);
-   tu6_emit_mrt<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs);
+   tu6_emit_mrt<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs, info);
    tu6_emit_render_cntl<CHIP>(cmd, cmd->state.subpass, &cmd->draw_cs, false);
 
    tu_set_input_attachments(cmd, cmd->state.subpass);
@@ -4534,7 +4544,7 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
    cmd->trace_renderpass_start = u_trace_end_iterator(&cmd->trace);
 
    tu_emit_renderpass_begin(cmd);
-   tu_emit_subpass_begin<CHIP>(cmd);
+   tu_emit_subpass_begin<CHIP>(cmd, vk_find_struct_const(pSubpassBeginInfo->pNext, SUBPASS_BEGIN_INFO_VALVE));
 
    if (pass->has_fdm)
       cmd->patchpoints_ctx = ralloc_parent(NULL);
@@ -4669,7 +4679,7 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
 
    if (!resuming) {
       tu_emit_renderpass_begin(cmd);
-      tu_emit_subpass_begin<CHIP>(cmd);
+      tu_emit_subpass_begin<CHIP>(cmd, NULL); //gabe: no subpassinfo avail here?
    }
 
    if (suspending && !resuming) {
@@ -4774,7 +4784,7 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
    if (cmd->state.subpass->feedback_invalidate)
       cmd->state.renderpass_cache.flush_bits |= TU_CMD_FLAG_CACHE_INVALIDATE;
 
-   tu_emit_subpass_begin<CHIP>(cmd);
+   tu_emit_subpass_begin<CHIP>(cmd, vk_find_struct_const(pSubpassBeginInfo->pNext, SUBPASS_BEGIN_INFO_VALVE));
 }
 TU_GENX(tu_CmdNextSubpass2);
 
