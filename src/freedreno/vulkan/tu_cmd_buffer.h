@@ -475,6 +475,10 @@ struct tu_cmd_state
     */
    enum tu_gmem_layout gmem_layout;
 
+   /* Override the current subpass'es srgb_cntl. */
+   bool override_srgb_cntl;
+   uint32_t srgb_cntl;
+
    const struct tu_render_pass *pass;
    const struct tu_subpass *subpass;
    const struct tu_framebuffer *framebuffer;
