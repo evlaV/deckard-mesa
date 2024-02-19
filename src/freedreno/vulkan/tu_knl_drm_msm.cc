@@ -1656,6 +1656,9 @@ tu_knl_drm_msm_load(struct tu_instance *instance,
       goto fail;
    }
 
+   // Certains kernels report the wrong GMEM base for the A740 as 1M rather than 16M.
+   device->gmem_base = 0x1000000;
+
    device->has_set_iova = !tu_drm_get_va_prop(device, &device->va_start,
                                               &device->va_size);
    device->has_lazy_bos = device->has_set_iova;
