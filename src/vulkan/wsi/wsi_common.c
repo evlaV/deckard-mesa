@@ -1410,7 +1410,9 @@ wsi_common_queue_present(const struct wsi_device *wsi,
             if (result != VK_SUCCESS)
                goto fail_present;
          }
-      } else if (swapchain->destroy != wsi_display_swapchain_destroy) { // khr display consumes the fence
+      }
+#if !DETECT_OS_ANDROID
+      else if (swapchain->destroy != wsi_display_swapchain_destroy) { // khr display consumes the fence
          MESA_TRACE_SCOPE("throttle");
          result =
             wsi->WaitForFences(device, 1, &swapchain->fences[image_index],
@@ -1418,6 +1420,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
          if (result != VK_SUCCESS)
             goto fail_present;
       }
+#endif
 
       result = wsi->ResetFences(device, 1, &swapchain->fences[image_index]);
       if (result != VK_SUCCESS)
