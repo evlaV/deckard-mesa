@@ -45,6 +45,7 @@ static const struct debug_control tu_debug_options[] = {
    { "hiprio", TU_DEBUG_HIPRIO },
    { "noconcurrentresolves", TU_DEBUG_NO_CONCURRENT_RESOLVES },
    { "noconcurrentunresolves", TU_DEBUG_NO_CONCURRENT_UNRESOLVES },
+   { "preempt", TU_DEBUG_PREEMPT },
    { NULL, 0 }
 };
 
