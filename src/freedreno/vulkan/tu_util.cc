@@ -51,6 +51,7 @@ static const struct debug_control tu_debug_options[] = {
    { "perfcraw", TU_DEBUG_PERFCRAW },
    { "fdmoffset", TU_DEBUG_FDM_OFFSET },
    { "check_cmd_buffer_status", TU_DEBUG_CHECK_CMD_BUFFER_STATUS },
+   { "preempt", TU_DEBUG_PREEMPT },
    { NULL, 0 }
 };
 
