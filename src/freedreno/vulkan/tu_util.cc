@@ -43,6 +43,7 @@ static const struct debug_control tu_debug_options[] = {
    { "noconform", TU_DEBUG_NOCONFORM },
    { "rd", TU_DEBUG_RD },
    { "hiprio", TU_DEBUG_HIPRIO },
+   { "preempt", TU_DEBUG_PREEMPT },
    { NULL, 0 }
 };
 

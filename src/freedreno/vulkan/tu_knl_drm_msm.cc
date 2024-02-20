@@ -241,8 +241,11 @@ msm_submitqueue_new(struct tu_device *dev,
       //.flags = dev->physical_device->info->chip >= 7 &&
       //   dev->physical_device->has_preemption ?
       //   MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0,
-      .prio = priority,
+      .prio = 0,
    };
+   // note: drm/msm has 3 priorities per ring, so 2nd ring starts at prio=3
+   if (TU_DEBUG(PREEMPT))
+      req.prio = 3;
 
    int ret = drmCommandWriteRead(dev->fd,
                                  DRM_MSM_SUBMITQUEUE_NEW, &req, sizeof(req));
