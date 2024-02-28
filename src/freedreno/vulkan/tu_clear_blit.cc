@@ -1722,7 +1722,7 @@ tu6_clear_lrz(struct tu_cmd_buffer *cmd,
               struct tu_image *image,
               const VkClearValue *value)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
 
    /* It is assumed that LRZ cache is invalidated at this point for
     * the writes here to become visible to LRZ.
@@ -1760,7 +1760,7 @@ tu6_dirty_lrz_fc(struct tu_cmd_buffer *cmd,
                  struct tu_cs *cs,
                  struct tu_image *image)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    VkClearValue clear = {};
    clear.color.uint32[0] = 0xffffffff;
 
@@ -1846,7 +1846,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
                const VkImageBlit2 *info,
                VkFilter filter)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
    bool z_scale = false;
    uint32_t layers = info->dstOffsets[1].z - info->dstOffsets[0].z;
@@ -2045,7 +2045,7 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
       copy_format(dst_image->vk.format, info->imageSubresource.aspectMask);
    enum pipe_format dst_format =
       copy_format(dst_image->vk.format, info->imageSubresource.aspectMask);
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
 
    /* special case for buffer to stencil */
    if (dst_image->vk.format == VK_FORMAT_D24_UNORM_S8_UINT &&
@@ -2137,7 +2137,7 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
       copy_format(src_image->vk.format, info->imageSubresource.aspectMask);
    enum pipe_format src_format =
       copy_format(src_image->vk.format, info->imageSubresource.aspectMask);
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
 
    if (src_image->vk.format == VK_FORMAT_D24_UNORM_S8_UINT &&
        info->imageSubresource.aspectMask == VK_IMAGE_ASPECT_STENCIL_BIT) {
@@ -2243,7 +2243,7 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
                        struct tu_image *dst_image,
                        const VkImageCopy2 *info)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
 
    if (dst_image->layout[0].nr_samples > 1)
@@ -2473,7 +2473,7 @@ copy_buffer(struct tu_cmd_buffer *cmd,
             uint64_t size,
             uint32_t block_size)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
    enum pipe_format format = block_size == 4 ? PIPE_FORMAT_R32_UINT : PIPE_FORMAT_R8_UNORM;
    uint64_t blocks = size / block_size;
@@ -2551,7 +2551,7 @@ tu_CmdFillBuffer(VkCommandBuffer commandBuffer,
 {
    TU_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    TU_FROM_HANDLE(tu_buffer, buffer, dstBuffer);
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
 
    fillSize = vk_buffer_range(&buffer->vk, dstOffset, fillSize);
@@ -2591,7 +2591,7 @@ tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
    TU_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    TU_FROM_HANDLE(tu_image, src_image, pResolveImageInfo->srcImage);
    TU_FROM_HANDLE(tu_image, dst_image, pResolveImageInfo->dstImage);
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
 
    enum pipe_format src_format =
@@ -2647,7 +2647,7 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
                bool src_separate_ds,
                bool dst_separate_ds)
 {
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
 
    trace_start_sysmem_resolve(&cmd->trace, cs, vk_dst_format);
 
@@ -2745,7 +2745,7 @@ clear_image(struct tu_cmd_buffer *cmd,
       assert(range->baseArrayLayer == 0);
    }
 
-   const struct blit_ops *ops = image->layout[0].nr_samples > 1 ? &r3d_ops<CHIP> : &r2d_ops<CHIP>;
+   const struct blit_ops *ops = image->layout[0].nr_samples > 1 ? &r3d_ops<CHIP> : &r3d_ops<CHIP>;
 
    ops->setup(cmd, cs, format, format, aspect_mask, 0, true, image->layout[0].ubwc,
               (VkSampleCountFlagBits) image->layout[0].nr_samples);
@@ -3282,7 +3282,7 @@ clear_sysmem_attachment(struct tu_cmd_buffer *cmd,
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
    const struct tu_image_view *iview = cmd->state.attachments[a];
    const uint32_t clear_views = cmd->state.pass->attachments[a].clear_views;
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct blit_ops *ops = &r3d_ops<CHIP>;
    const VkClearValue *value = &cmd->state.clear_values[a];
    if (cmd->state.pass->attachments[a].samples > 1)
       ops = &r3d_ops<CHIP>;
