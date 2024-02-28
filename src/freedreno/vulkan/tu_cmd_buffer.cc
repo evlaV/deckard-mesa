@@ -2073,6 +2073,8 @@ tu6_init_static_regs(struct tu_device *dev, struct tu_cs *cs)
                         ? A6XX_TPL1_DBG_ECO_CNTL1_TP_UBWC_FLAG_HINT
                         : 0);
             break;
+         case REG_A6XX_UCHE_CLIENT_PF:
+            continue;
       }
 
       tu_cs_emit_write_reg(cs, magic_reg.reg, value);
