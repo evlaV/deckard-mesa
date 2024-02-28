@@ -2119,6 +2119,8 @@ tu6_init_static_regs(struct tu_device *dev, struct tu_cs *cs)
                         ? A6XX_SP_CHICKEN_BITS_EOLM_ENABLE
                         : 0);
             break;
+         case REG_A6XX_UCHE_CLIENT_PF:
+            continue;
       }
 
       tu_cs_emit_write_reg(cs, magic_reg.reg, value);
