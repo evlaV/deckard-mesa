@@ -2338,6 +2338,7 @@ dri2_init_screen(struct dri_screen *screen, bool driver_name_is_inferred)
    struct pipe_screen *pscreen = NULL;
 
    (void) mtx_init(&screen->opencl_func_mutex, mtx_plain);
+   screen->has_opencl_func_mutex = true;
 
 #ifdef HAVE_LIBDRM
    if (pipe_loader_drm_probe_fd(&screen->dev, screen->fd, false))

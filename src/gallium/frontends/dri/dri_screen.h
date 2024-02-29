@@ -124,6 +124,7 @@ struct dri_screen
    const __DRIextension *screen_extensions[14];
 
    /* OpenCL interop */
+   bool has_opencl_func_mutex;
    mtx_t opencl_func_mutex;
    opencl_dri_event_add_ref_t opencl_dri_event_add_ref;
    opencl_dri_event_release_t opencl_dri_event_release;
