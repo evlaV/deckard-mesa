@@ -29,19 +29,13 @@ struct PACKED query_slot {
    uint64_t available;
 };
 
-struct PACKED occlusion_slot_value {
-   /* Seems sample counters are placed to be 16-byte aligned
-    * even though this query needs an 8-byte slot. */
-   uint64_t value;
-   uint64_t _padding;
-};
-
 struct PACKED occlusion_query_slot {
-   struct query_slot common;
-   uint64_t result;
-
-   struct occlusion_slot_value begin;
-   struct occlusion_slot_value end;
+   uint64_t avail;
+   uint64_t pad0;
+   uint64_t start;
+   uint64_t acc;
+   uint64_t end;
+   uint64_t pad1;
 };
 
 struct PACKED timestamp_query_slot {
@@ -516,7 +510,9 @@ get_query_pool_results(struct tu_device *device,
          if (available) {
             uint64_t *result;
 
-            if (pool->type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
+            if (pool->type == VK_QUERY_TYPE_OCCLUSION) {
+               result = (uint64_t *) ((char *) pool->bo->map + pool->stride * query + 24);
+            } else if (pool->type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
                uint32_t stat_idx = statistics_index(&statistics);
                result = query_result_addr(pool, query, uint64_t, stat_idx);
             } else if (pool->type == VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR) {
@@ -653,7 +649,9 @@ emit_copy_query_pool_results(struct tu_cmd_buffer *cmdbuf,
       for (uint32_t k = 0; k < result_count; k++) {
          uint64_t result_iova;
 
-         if (pool->type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
+         if (pool->type == VK_QUERY_TYPE_OCCLUSION) {
+            result_iova = occlusion_query_iova(pool, query, acc);
+         } else if (pool->type == VK_QUERY_TYPE_PIPELINE_STATISTICS) {
             uint32_t stat_idx = statistics_index(&statistics);
             result_iova = query_result_iova(pool, query, uint64_t, stat_idx);
          } else if (pool->type == VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR) {
@@ -842,14 +840,14 @@ emit_begin_occlusion_query(struct tu_cmd_buffer *cmdbuf,
     */
    struct tu_cs *cs = cmdbuf->state.pass ? &cmdbuf->draw_cs : &cmdbuf->cs;
 
-   uint64_t begin_iova = occlusion_query_iova(pool, query, begin);
+   uint64_t iova = occlusion_query_iova(pool, query, start);
 
    tu_cs_emit_regs(cs,
                    A6XX_RB_SAMPLE_COUNT_CONTROL(.copy = true));
 
    if (!cmdbuf->device->physical_device->info->a7xx.has_event_write_sample_count) {
       tu_cs_emit_regs(cs,
-                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = begin_iova));
+                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = iova));
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
       tu_cs_emit(cs, ZPASS_DONE);
       if (CHIP == A7XX) {
@@ -861,7 +859,7 @@ emit_begin_occlusion_query(struct tu_cmd_buffer *cmdbuf,
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
       tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
                                        .write_sample_count = true).value);
-      tu_cs_emit_qw(cs, begin_iova);
+      tu_cs_emit_qw(cs, iova);
    }
 }
 
@@ -1147,11 +1145,10 @@ emit_end_occlusion_query(struct tu_cmd_buffer *cmdbuf,
    struct tu_cs *cs = pass ? &cmdbuf->draw_cs : &cmdbuf->cs;
 
    uint64_t available_iova = query_available_iova(pool, query);
-   uint64_t begin_iova = occlusion_query_iova(pool, query, begin);
-   uint64_t end_iova = occlusion_query_iova(pool, query, end);
-   uint64_t result_iova = query_result_iova(pool, query, uint64_t, 0);
+   uint64_t iova = occlusion_query_iova(pool, query, start);
+
    tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
-   tu_cs_emit_qw(cs, end_iova);
+   tu_cs_emit_qw(cs, iova+16);
    tu_cs_emit_qw(cs, 0xffffffffffffffffull);
 
    tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
@@ -1161,7 +1158,7 @@ emit_end_occlusion_query(struct tu_cmd_buffer *cmdbuf,
 
    if (!cmdbuf->device->physical_device->info->a7xx.has_event_write_sample_count) {
       tu_cs_emit_regs(cs,
-                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = end_iova));
+                        A6XX_RB_SAMPLE_COUNT_ADDR(.qword = iova));
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
       tu_cs_emit(cs, ZPASS_DONE);
       if (CHIP == A7XX) {
@@ -1172,28 +1169,17 @@ emit_end_occlusion_query(struct tu_cmd_buffer *cmdbuf,
    } else {
       /* A7XX TODO: Calculate (end - begin) via ZPASS_DONE. */
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 3);
-      tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
-                                       .write_sample_count = true).value);
-      tu_cs_emit_qw(cs, end_iova);
+      tu_cs_emit(cs, 0x7000 | ZPASS_DONE);
+      tu_cs_emit_qw(cs, iova);
    }
 
    tu_cs_emit_pkt7(cs, CP_WAIT_REG_MEM, 6);
    tu_cs_emit(cs, CP_WAIT_REG_MEM_0_FUNCTION(WRITE_NE) |
                   CP_WAIT_REG_MEM_0_POLL(POLL_MEMORY));
-   tu_cs_emit_qw(cs, end_iova);
+   tu_cs_emit_qw(cs, iova+16);
    tu_cs_emit(cs, CP_WAIT_REG_MEM_3_REF(0xffffffff));
    tu_cs_emit(cs, CP_WAIT_REG_MEM_4_MASK(~0));
    tu_cs_emit(cs, CP_WAIT_REG_MEM_5_DELAY_LOOP_CYCLES(16));
-
-   /* result (dst) = result (srcA) + end (srcB) - begin (srcC) */
-   tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);
-   tu_cs_emit(cs, CP_MEM_TO_MEM_0_DOUBLE | CP_MEM_TO_MEM_0_NEG_C);
-   tu_cs_emit_qw(cs, result_iova);
-   tu_cs_emit_qw(cs, result_iova);
-   tu_cs_emit_qw(cs, end_iova);
-   tu_cs_emit_qw(cs, begin_iova);
-
-   tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
 
    if (pass)
       /* Technically, queries should be tracked per-subpass, but here we track
