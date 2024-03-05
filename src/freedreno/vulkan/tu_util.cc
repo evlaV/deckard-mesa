@@ -54,6 +54,8 @@ tu_env_init_once(void)
     tu_env.debug = parse_debug_string(os_get_option("TU_DEBUG"),
             tu_debug_options);
 
+   tu_env.debug |= TU_DEBUG_SYSMEM;
+
    if (TU_DEBUG(STARTUP))
       mesa_logi("TU_DEBUG=0x%x", tu_env.debug);
 
