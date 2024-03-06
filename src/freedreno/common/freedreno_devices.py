@@ -1108,6 +1108,7 @@ add_gpus([
 add_gpus([
         GPUId(chip_id=0x43051401, name="FD750"), # KGSL, no speedbin data
         GPUId(chip_id=0xffff43051401, name="FD750"), # Default no-speedbin fallback
+        GPUId(chip_id=0x7090000, name="FD750"),
     ], A6xxGPUInfo(
         CHIP.A7XX,
         [a7xx_base, a7xx_750],
