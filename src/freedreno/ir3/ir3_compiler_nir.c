@@ -5299,6 +5299,16 @@ ir3_compile_shader_nir(struct ir3_compiler *compiler,
       }
    }
 
+   /* Having non-zero clip/cull mask and not writting corresponding regs
+    * leads to GPU fault.
+    */
+   if (ctx->so->clip_mask != 0 &&
+       ir3_find_output_regid(ctx->so, VARYING_SLOT_CLIP_DIST0) == regid(63, 0))
+      ctx->so->clip_mask = 0;
+   if (ctx->so->cull_mask != 0 &&
+       ir3_find_output_regid(ctx->so, VARYING_SLOT_CLIP_DIST1) == regid(63, 0))
+      ctx->so->cull_mask = 0;
+
    if (ctx->astc_srgb)
       fixup_astc_srgb(ctx);
 
