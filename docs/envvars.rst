@@ -38,6 +38,14 @@ LibGL environment variables
 
    disable DRI3 if set to ``true``.
 
+.. envvar:: LIBGL_KOPPER_DISABLE
+
+   disable vulkan swapchains with zink if set to ``true``.
+
+.. envvar:: LIBGL_KOPPER_DRI2
+
+   disable DRI3 with zink if set to ``true``.
+
 Core Mesa environment variables
 -------------------------------
 
