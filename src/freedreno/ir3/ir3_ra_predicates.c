@@ -49,11 +49,14 @@ struct ra_predicates_ctx {
    struct ir3_liveness *liveness;
    struct block_liveness *blocks_liveness;
 
-   /* True once we spilled a register. This allows us to postpone the
+   /* True once we reloaded a register. This allows us to postpone the
     * calculation of SSA uses and instruction counting until the first time we
-    * need to spill. This is useful since spilling is rare in general.
+    * need to reload. This is useful since reloading is rare in general. Note
+    * that we have to calculate SSA uses before reloading the first time since
+    * afterwards, the uses will refer to a reloaded def instead of the original
+    * one.
     */
-   bool spilled;
+   bool reloaded;
 };
 
 static bool
@@ -177,12 +180,6 @@ static void
 spill(struct ra_predicates_ctx *ctx, struct block_liveness *live,
       struct ir3_instruction *spill_location)
 {
-   if (!ctx->spilled) {
-      ir3_count_instructions_ra(ctx->ir);
-      ir3_find_ssa_uses_for(ctx->ir, ctx, is_predicate_use);
-      ctx->spilled = true;
-   }
-
    unsigned furthest_first_use = 0;
    unsigned spill_reg = ~0;
 
@@ -273,6 +270,12 @@ static struct live_def *
 reload(struct ra_predicates_ctx *ctx, struct block_liveness *live,
        struct ir3_register *def, struct ir3_instruction *use)
 {
+   if (!ctx->reloaded) {
+      ir3_count_instructions_ra(ctx->ir);
+      ir3_find_ssa_uses_for(ctx->ir, ctx, is_predicate_use);
+      ctx->reloaded = true;
+   }
+
    if (!has_free_regs(ctx, live))
       spill(ctx, live, use);
 
