@@ -1735,6 +1735,55 @@ copy_format(VkFormat vk_format, VkImageAspectFlags aspect_mask)
    }
 }
 
+/* While image blit/copies don't have the same incoherency issue between
+ * themselves as buffers, there is an issue with UBWC + IBO stores, where
+ * store via UCHE may flush stale data even though UCHE supposed to
+ * track dirtiness at byte granularity.
+ */
+template <chip CHIP>
+static void
+handle_image_unaligned_store(struct tu_cmd_buffer *cmd,
+                            struct tu_image *dst_image,
+                            uint32_t x, uint32_t y,
+                            uint32_t extent_width, uint32_t extent_height,
+                            uint32_t mipLevel,
+                            bool *unaligned_store)
+{
+   if (*unaligned_store)
+      return;
+
+   uint32_t dst_width = u_minify(dst_image->layout[0].width0, mipLevel);
+   uint32_t dst_height = u_minify(dst_image->layout[0].height0, mipLevel);
+   if ((x == 0 && y == 0 && extent_width == dst_width &&
+        extent_width == dst_height)) {
+      return;
+   }
+
+   if (dst_image->layout[0].ubwc &&
+       cmd->device->physical_device->info->a7xx.supports_ibo_ubwc) {
+      tu_emit_cache_flush<CHIP>(cmd);
+      tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_CACHE_FLUSH);
+   }
+   *unaligned_store = true;
+}
+
+/* Image copies/blits happen via CCU which doesn't have byte level dirtiness,
+ * so we have to manually handle synchronization for unaligned writes.
+ * For this we have to ensure that CCU will be flushes before UCHE.
+ */
+template <chip CHIP>
+static void
+after_image_unaligned_buffer_store(struct tu_cmd_buffer *cmd,
+                                   bool unaligned_store)
+{
+   if (!unaligned_store)
+      return;
+
+   tu_flush_for_access(&cmd->state.cache,
+                        TU_ACCESS_CCU_COLOR_INCOHERENT_WRITE,
+                        TU_ACCESS_NONE);
+}
+
 /* Copies/fills/updates for buffers are happening through CCU but need
  * additional synchronization when write range is not aligned to 64 bytes.
  * Because dst buffer access uses either R8_UNORM or R32_UINT and they are not
@@ -1912,7 +1961,8 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
                struct tu_image *src_image,
                struct tu_image *dst_image,
                const VkImageBlit2 *info,
-               VkFilter filter)
+               VkFilter filter,
+               bool *unaligned_store)
 {
    const struct blit_ops *ops = &r2d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
@@ -1986,6 +2036,11 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
                   dst_image->vk.format,
                   layers);
 
+   handle_image_unaligned_store<CHIP>(
+      cmd, dst_image, info->dstOffsets[0].x, info->dstOffsets[0].y,
+      info->dstOffsets[1].x, info->dstOffsets[1].y,
+      info->dstSubresource.mipLevel, unaligned_store);
+
    ops->setup(cmd, cs, src_format, dst_format, info->dstSubresource.aspectMask,
               blit_param, false, dst_image->layout[0].ubwc,
               (VkSampleCountFlagBits) dst_image->layout[0].nr_samples);
@@ -2048,6 +2103,7 @@ tu_CmdBlitImage2(VkCommandBuffer commandBuffer,
    TU_FROM_HANDLE(tu_image, src_image, pBlitImageInfo->srcImage);
    TU_FROM_HANDLE(tu_image, dst_image, pBlitImageInfo->dstImage);
 
+   bool unaligned_store = false;
    for (uint32_t i = 0; i < pBlitImageInfo->regionCount; ++i) {
       /* can't blit both depth and stencil at once with D32_S8
        * TODO: more advanced 3D blit path to support it instead?
@@ -2058,17 +2114,21 @@ tu_CmdBlitImage2(VkCommandBuffer commandBuffer,
          u_foreach_bit(b, region.dstSubresource.aspectMask) {
             region.srcSubresource.aspectMask = BIT(b);
             region.dstSubresource.aspectMask = BIT(b);
-            tu6_blit_image<CHIP>(cmd, src_image, dst_image, &region, pBlitImageInfo->filter);
+            tu6_blit_image<CHIP>(cmd, src_image, dst_image, &region,
+                                 pBlitImageInfo->filter, &unaligned_store);
          }
          continue;
       }
-      tu6_blit_image<CHIP>(cmd, src_image, dst_image, pBlitImageInfo->pRegions + i,
-                     pBlitImageInfo->filter);
+      tu6_blit_image<CHIP>(cmd, src_image, dst_image,
+                           pBlitImageInfo->pRegions + i,
+                           pBlitImageInfo->filter, &unaligned_store);
    }
 
    if (dst_image->lrz_height) {
       tu_disable_lrz<CHIP>(cmd, &cmd->cs, dst_image);
    }
+
+   after_image_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
 }
 TU_GENX(tu_CmdBlitImage2);
 
@@ -2103,7 +2163,8 @@ static void
 tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
                         struct tu_buffer *src_buffer,
                         struct tu_image *dst_image,
-                        const VkBufferImageCopy2 *info)
+                        const VkBufferImageCopy2 *info,
+                        bool *unaligned_store)
 {
    struct tu_cs *cs = &cmd->cs;
    uint32_t layers = MAX2(info->imageExtent.depth,
@@ -2138,6 +2199,11 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
 
    uint32_t pitch = src_width * util_format_get_blocksize(src_format);
    uint32_t layer_size = src_height * pitch;
+
+   handle_image_unaligned_store<CHIP>(
+      cmd, dst_image, offset.x, offset.y,
+      extent.width, extent.height,
+      info->imageSubresource.mipLevel, unaligned_store);
 
    ops->setup(cmd, cs, src_format, dst_format,
               info->imageSubresource.aspectMask, blit_param, false, dst_image->layout[0].ubwc,
@@ -2180,13 +2246,17 @@ tu_CmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
    TU_FROM_HANDLE(tu_image, dst_image, pCopyBufferToImageInfo->dstImage);
    TU_FROM_HANDLE(tu_buffer, src_buffer, pCopyBufferToImageInfo->srcBuffer);
 
+   bool unaligned_store = false;
    for (unsigned i = 0; i < pCopyBufferToImageInfo->regionCount; ++i)
       tu_copy_buffer_to_image<CHIP>(cmd, src_buffer, dst_image,
-                              pCopyBufferToImageInfo->pRegions + i);
+                              pCopyBufferToImageInfo->pRegions + i,
+                              &unaligned_store);
 
    if (dst_image->lrz_height) {
       tu_disable_lrz<CHIP>(cmd, &cmd->cs, dst_image);
    }
+
+   after_image_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
 }
 TU_GENX(tu_CmdCopyBufferToImage2);
 
@@ -2319,7 +2389,8 @@ static void
 tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
                        struct tu_image *src_image,
                        struct tu_image *dst_image,
-                       const VkImageCopy2 *info)
+                       const VkImageCopy2 *info,
+                       bool *unaligned_store)
 {
    const struct blit_ops *ops = &r2d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
@@ -2334,6 +2405,11 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
    uint32_t layers_to_copy = MAX2(info->extent.depth,
                                   vk_image_subresource_layer_count(&src_image->vk,
                                                                    &info->srcSubresource));
+
+   handle_image_unaligned_store<CHIP>(
+      cmd, dst_image, dst_offset.x, dst_offset.y,
+      extent.width, extent.height,
+      info->dstSubresource.mipLevel, unaligned_store);
 
    /* From the Vulkan 1.2.140 spec, section 19.3 "Copying Data Between
     * Images":
@@ -2522,24 +2598,27 @@ tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
    TU_FROM_HANDLE(tu_image, src_image, pCopyImageInfo->srcImage);
    TU_FROM_HANDLE(tu_image, dst_image, pCopyImageInfo->dstImage);
 
+   bool unaligned_store = false;
    for (uint32_t i = 0; i < pCopyImageInfo->regionCount; ++i) {
       if (src_image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
          VkImageCopy2 info = pCopyImageInfo->pRegions[i];
          u_foreach_bit(b, info.dstSubresource.aspectMask) {
             info.srcSubresource.aspectMask = BIT(b);
             info.dstSubresource.aspectMask = BIT(b);
-            tu_copy_image_to_image<CHIP>(cmd, src_image, dst_image, &info);
+            tu_copy_image_to_image<CHIP>(cmd, src_image, dst_image, &info, &unaligned_store);
          }
          continue;
       }
 
       tu_copy_image_to_image<CHIP>(cmd, src_image, dst_image,
-                             pCopyImageInfo->pRegions + i);
+                             pCopyImageInfo->pRegions + i, &unaligned_store);
    }
 
    if (dst_image->lrz_height) {
       tu_disable_lrz<CHIP>(cmd, &cmd->cs, dst_image);
    }
+
+   after_image_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
 }
 TU_GENX(tu_CmdCopyImage2);
 
