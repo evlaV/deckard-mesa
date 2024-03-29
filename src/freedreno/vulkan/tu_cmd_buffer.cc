@@ -6168,6 +6168,7 @@ tu_barrier(struct tu_cmd_buffer *cmd,
    }
 
    for (uint32_t i = 0; i < dep_info->imageMemoryBarrierCount; i++) {
+      TU_FROM_HANDLE(tu_image, image, dep_info->pImageMemoryBarriers[i].image);
       VkImageLayout old_layout = dep_info->pImageMemoryBarriers[i].oldLayout;
       if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
          /* The underlying memory for this image may have been used earlier
@@ -6177,7 +6178,6 @@ tu_barrier(struct tu_cmd_buffer *cmd,
           * to the image. We don't want these entries being flushed later and
           * overwriting the actual image, so we need to flush the CCU.
           */
-         TU_FROM_HANDLE(tu_image, image, dep_info->pImageMemoryBarriers[i].image);
 
          if (vk_format_is_depth_or_stencil(image->vk.format)) {
             src_flags |= TU_ACCESS_CCU_DEPTH_INCOHERENT_WRITE;
@@ -6193,6 +6193,15 @@ tu_barrier(struct tu_cmd_buffer *cmd,
                                 sanitized_src_stage, true, gmem);
       dst_flags |= vk2tu_access(dep_info->pImageMemoryBarriers[i].dstAccessMask,
                                 sanitized_dst_stage, true, gmem);
+
+      if (image->layout[0].ubwc && cmd->device->physical_device->info->a7xx.supports_ibo_ubwc) {
+         if (dep_info->pImageMemoryBarriers[i].srcAccessMask & VK_ACCESS_SHADER_WRITE_BIT &&
+             dep_info->pImageMemoryBarriers[i].dstAccessMask & VK_ACCESS_TRANSFER_READ_BIT) {
+            src_flags |= TU_ACCESS_UCHE_WRITE;
+            dst_flags |= TU_ACCESS_CCU_COLOR_READ;
+         }
+      }
+
       srcStage |= sanitized_src_stage;
       dstStage |= sanitized_dst_stage;
    }
