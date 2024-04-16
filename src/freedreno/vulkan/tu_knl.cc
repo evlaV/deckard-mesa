@@ -55,9 +55,21 @@ tu_bo_finish(struct tu_device *dev, struct tu_bo *bo)
 }
 
 VkResult
-tu_bo_map(struct tu_device *dev, struct tu_bo *bo)
+tu_bo_map(struct tu_device *dev, struct tu_bo *bo, void *placed_addr)
 {
-   return dev->instance->knl->bo_map(dev, bo);
+   if (bo->map && (placed_addr == NULL || placed_addr == bo->map))
+      return VK_SUCCESS;
+   else if (bo->map)
+      /* The BO is already mapped, but with a different address. */
+      return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED, "Cannot remap BO to a different address");
+
+   return dev->instance->knl->bo_map(dev, bo, placed_addr);
+}
+
+VkResult
+tu_bo_unmap(struct tu_device *dev, struct tu_bo *bo, bool reserve)
+{
+   return dev->instance->knl->bo_unmap(dev, bo, reserve);
 }
 
 void tu_bo_allow_dump(struct tu_device *dev, struct tu_bo *bo)

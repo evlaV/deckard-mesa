@@ -633,7 +633,7 @@ virtio_bo_init(struct tu_device *dev,
    if (result == VK_SUCCESS &&
        (mem_property & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) &&
        !(mem_property & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-      tu_bo_map(dev, bo);
+      tu_bo_map(dev, bo, NULL);
 
       /* Cached non-coherent memory may already have dirty cache lines,
        * we should clean the cache lines before GPU got the chance to
@@ -724,12 +724,9 @@ out_unlock:
 }
 
 static VkResult
-virtio_bo_map(struct tu_device *dev, struct tu_bo *bo)
+virtio_bo_map(struct tu_device *dev, struct tu_bo *bo, void *placed_addr)
 {
-   if (bo->map)
-      return VK_SUCCESS;
-
-   bo->map = vdrm_bo_map(dev->vdev->vdrm, bo->gem_handle, bo->size);
+   bo->map = vdrm_bo_map(dev->vdev->vdrm, bo->gem_handle, bo->size, placed_addr);
    if (bo->map == MAP_FAILED)
       return vk_error(dev, VK_ERROR_MEMORY_MAP_FAILED);
 
@@ -957,7 +954,7 @@ setup_fence_cmds(struct tu_device *dev)
    if (result != VK_SUCCESS)
       return result;
 
-   result = tu_bo_map(dev, vdev->fence_cmds_mem);
+   result = tu_bo_map(dev, vdev->fence_cmds_mem, NULL);
    if (result != VK_SUCCESS)
       return result;
 
@@ -1223,6 +1220,7 @@ static const struct tu_knl virtio_knl_funcs = {
       .bo_init_dmabuf = virtio_bo_init_dmabuf,
       .bo_export_dmabuf = tu_drm_export_dmabuf,
       .bo_map = virtio_bo_map,
+      .bo_unmap = tu_drm_bo_unmap,
       .bo_allow_dump = virtio_bo_allow_dump,
       .bo_finish = tu_drm_bo_finish,
       .device_wait_u_trace = virtio_device_wait_u_trace,

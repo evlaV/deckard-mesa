@@ -153,6 +153,29 @@ tu_drm_export_dmabuf(struct tu_device *dev, struct tu_bo *bo)
    return ret == 0 ? prime_fd : -1;
 }
 
+VkResult
+tu_drm_bo_unmap(struct tu_device *dev, struct tu_bo *bo, bool reserve)
+{
+   if (!bo->map)
+      return VK_SUCCESS;
+
+   TU_RMV(bo_unmap, dev, bo);
+
+   if (reserve) {
+      void *map = mmap(bo->map, bo->size, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+      if (map == MAP_FAILED)
+         return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,
+                          "Failed to replace mapping with reserved memory");
+   } else {
+      munmap(bo->map, bo->size);
+   }
+
+   bo->map = NULL;
+
+   return VK_SUCCESS;
+}
+
 void
 tu_drm_bo_finish(struct tu_device *dev, struct tu_bo *bo)
 {

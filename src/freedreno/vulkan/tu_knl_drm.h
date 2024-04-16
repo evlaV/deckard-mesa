@@ -32,6 +32,7 @@ VkResult tu_allocate_userspace_iova(struct tu_device *dev,
                                     enum tu_bo_alloc_flags flags,
                                     uint64_t *iova);
 int tu_drm_export_dmabuf(struct tu_device *dev, struct tu_bo *bo);
+VkResult tu_drm_bo_unmap(struct tu_device *dev, struct tu_bo *bo, bool reserve);
 void tu_drm_bo_finish(struct tu_device *dev, struct tu_bo *bo);
 
 static inline void
