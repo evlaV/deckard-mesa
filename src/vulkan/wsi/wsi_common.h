@@ -57,50 +57,6 @@ extern const struct vk_device_entrypoint_table wsi_device_entrypoints;
 #define VK_STRUCTURE_TYPE_WSI_SURFACE_SUPPORTED_COUNTERS_MESA_cast struct wsi_surface_supported_counters
 #define VK_STRUCTURE_TYPE_WSI_MEMORY_SIGNAL_SUBMIT_INFO_MESA_cast struct wsi_memory_signal_submit_info
 
-enum VALVESURFACEPLANES { //ordered as they are in DPU plane ordering -- R, B, G
-   RED_L = 0,
-   RED_R,
-   BLUE_L,
-   BLUE_R,
-   GREEN_L,
-   GREEN_R,
-   VALVESURFACEPLANESMAX
-};
-
-typedef struct VkIcdSurfaceDisplay2 {
-   VkIcdSurfaceDisplay base;
-   int doscaling;
-   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
-   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
-} VkIcdSurfaceDisplay2;
-
-// KHR_display CAC "extension"
-#define VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE (VkStructureType) 1000002099
-#define VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE_cast struct display_surface_create_cac_info_valve
-struct display_surface_create_cac_info_valve {
-   VkStructureType                   sType;
-   const void*                       pNext;
-   VkRect2D src_rgb[VALVESURFACEPLANESMAX];
-   VkRect2D dst_rgb[VALVESURFACEPLANESMAX];
-};
-
-#define VK_STRUCTURE_TYPE_QUEUE_PRESENT_CAC_PLANE_ADJUST_INFO_VALVE (VkStructureType) 1000002100
-#define VK_STRUCTURE_TYPE_QUEUE_PRESENT_CAC_PLANE_ADJUST_INFO_VALVE_cast struct queue_present_cac_plane_adjust_info_valve
-struct queue_present_cac_plane_adjust_info_valve {
-      VkStructureType    sType;
-      const void*        pNext;
-      uint32_t plane_index;
-      uint32_t src_x;
-      uint32_t src_y;
-      uint32_t src_width;
-      uint32_t src_height;
-      uint32_t dst_x;
-      uint32_t dst_y;
-      uint32_t dst_width;
-      uint32_t dst_height;
-};
-
-
 /* This is always chained to VkImageCreateInfo when a wsi image is created.
  * It indicates that the image can be transitioned to/from
  * VK_IMAGE_LAYOUT_PRESENT_SRC_KHR.
