@@ -1201,7 +1201,7 @@ kgsl_queue_submit(struct tu_queue *queue, struct vk_queue_submit *vk_submit)
 
    uint64_t gpu_offset = 0;
 #if HAVE_PERFETTO
-   if (profiling_buffer && profiling_buffer->gpu_ticks_queued) {
+   if (tu_perfetto_enabled() && profiling_buffer && profiling_buffer->gpu_ticks_queued) {
       struct kgsl_perfcounter_read_group perf = {
          .groupid = KGSL_PERFCOUNTER_GROUP_ALWAYSON,
          .countable = 0,

@@ -12,6 +12,7 @@
 #include "util/hash_table.h"
 #include "util/perf/u_perfetto.h"
 #include "util/perf/u_perfetto_renderpass.h"
+#include "util/perf/u_trace.h"
 
 #include "tu_tracepoints.h"
 #include "tu_tracepoints_perfetto.h"
@@ -330,6 +331,9 @@ extern "C" {
 void
 tu_perfetto_init(void)
 {
+   u_trace_state_init();
+   if (!tu_perfetto_enabled())
+      return;
    util_perfetto_init();
 
    {
@@ -594,41 +598,47 @@ log_mem(struct tu_device *dev, struct tu_buffer *buffer, struct tu_image *image,
 void
 tu_perfetto_log_create_buffer(struct tu_device *dev, struct tu_buffer *buffer)
 {
-   log_mem(dev, buffer, NULL, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_CREATE);
+   if (tu_perfetto_enabled())
+      log_mem(dev, buffer, NULL, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_CREATE);
 }
 
 void
 tu_perfetto_log_bind_buffer(struct tu_device *dev, struct tu_buffer *buffer)
 {
-   log_mem(dev, buffer, NULL, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_BIND);
+   if (tu_perfetto_enabled())
+      log_mem(dev, buffer, NULL, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_BIND);
 }
 
 void
 tu_perfetto_log_destroy_buffer(struct tu_device *dev, struct tu_buffer *buffer)
 {
-   log_mem(dev, buffer, NULL, buffer->bo ?
-      perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY_BOUND :
-      perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY);
+   if (tu_perfetto_enabled())
+      log_mem(dev, buffer, NULL, buffer->bo ?
+         perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY_BOUND :
+         perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY);
 }
 
 void
 tu_perfetto_log_create_image(struct tu_device *dev, struct tu_image *image)
 {
-   log_mem(dev, NULL, image, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_CREATE);
+   if (tu_perfetto_enabled())
+      log_mem(dev, NULL, image, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_CREATE);
 }
 
 void
 tu_perfetto_log_bind_image(struct tu_device *dev, struct tu_image *image)
 {
-   log_mem(dev, NULL, image, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_BIND);
+   if (tu_perfetto_enabled())
+      log_mem(dev, NULL, image, perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_BIND);
 }
 
 void
 tu_perfetto_log_destroy_image(struct tu_device *dev, struct tu_image *image)
 {
-   log_mem(dev, NULL, image, image->bo ?
-      perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY_BOUND :
-      perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY);
+   if (tu_perfetto_enabled())
+      log_mem(dev, NULL, image, image->bo ?
+         perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY_BOUND :
+         perfetto::protos::pbzero::perfetto_pbzero_enum_VulkanMemoryEvent::OP_DESTROY);
 }
 
 
