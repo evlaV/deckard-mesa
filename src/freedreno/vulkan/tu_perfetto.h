@@ -10,6 +10,7 @@
 
 /* we can't include tu_common.h because ir3 headers are not C++-compatible */
 #include <stdint.h>
+#include "util/perf/u_trace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +59,12 @@ void tu_perfetto_log_destroy_buffer(struct tu_device *dev, struct tu_buffer *buf
 void tu_perfetto_log_create_image(struct tu_device *dev, struct tu_image *image);
 void tu_perfetto_log_bind_image(struct tu_device *dev, struct tu_image *image);
 void tu_perfetto_log_destroy_image(struct tu_device *dev, struct tu_image *image);
+
+static inline bool
+tu_perfetto_enabled(void)
+{
+   return u_trace_is_enabled(U_TRACE_TYPE_PERFETTO);
+}
 
 #ifdef __cplusplus
 }

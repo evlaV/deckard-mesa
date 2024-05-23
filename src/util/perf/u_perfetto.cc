@@ -27,6 +27,7 @@
 
 #include "c11/threads.h"
 #include "util/macros.h"
+#include "util/perf/u_trace.h"
 
 /* perfetto requires string literals */
 #define UTIL_PERFETTO_CATEGORY_DEFAULT_STR "mesa.default"
@@ -42,6 +43,8 @@ int util_perfetto_tracing_state;
 static void
 util_perfetto_update_tracing_state(void)
 {
+   if (!u_trace_is_enabled(U_TRACE_TYPE_PERFETTO))
+      return;
    p_atomic_set(&util_perfetto_tracing_state,
                 TRACE_EVENT_CATEGORY_ENABLED(UTIL_PERFETTO_CATEGORY_DEFAULT_STR));
 }
@@ -49,6 +52,8 @@ util_perfetto_update_tracing_state(void)
 void
 util_perfetto_trace_begin(const char *name)
 {
+   if (!u_trace_is_enabled(U_TRACE_TYPE_PERFETTO))
+      return;
    TRACE_EVENT_BEGIN(
       UTIL_PERFETTO_CATEGORY_DEFAULT_STR, nullptr,
       [&](perfetto::EventContext ctx) { ctx.event()->set_name(name); });
@@ -57,6 +62,8 @@ util_perfetto_trace_begin(const char *name)
 void
 util_perfetto_trace_end(void)
 {
+   if (!u_trace_is_enabled(U_TRACE_TYPE_PERFETTO))
+      return;
    TRACE_EVENT_END(UTIL_PERFETTO_CATEGORY_DEFAULT_STR);
 
    util_perfetto_update_tracing_state();
@@ -101,5 +108,8 @@ static once_flag perfetto_once_flag = ONCE_FLAG_INIT;
 void
 util_perfetto_init(void)
 {
+   u_trace_state_init();
+   if (!u_trace_is_enabled(U_TRACE_TYPE_PERFETTO))
+      return;
    call_once(&perfetto_once_flag, util_perfetto_init_once);
 }
