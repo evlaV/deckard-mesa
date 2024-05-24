@@ -160,6 +160,8 @@ tu_bo_sync_cache(struct tu_device *dev,
 
    start = (char *) ((uintptr_t) start & ~(level1_dcache_size - 1));
 
+   if(!bo->map) return; //bo->map is invalid, so can't sync cacheline
+
    for (; start < end; start += level1_dcache_size) {
       if (op == TU_MEM_SYNC_CACHE_TO_GPU) {
          tu_sync_cacheline_to_gpu(start);
