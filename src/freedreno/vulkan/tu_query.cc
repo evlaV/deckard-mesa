@@ -880,6 +880,32 @@ emit_begin_occlusion_query(struct tu_cmd_buffer *cmdbuf,
       tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
                                        .write_sample_count = true).value);
       tu_cs_emit_qw(cs, begin_iova);
+
+      /* Firmware expects ZPASS_DONE events with sample-count writes to come in
+       * non-nested begin-end pairs, or as standalone end events (i.e. having
+       * the sample_count_end_offset bit set). This requires some coordination
+       * between the autotuner and the occlusion query handling where such
+       * events are emitted.
+       * Occlusion query can be generated to encompass a renderpass. If so, we
+       * emit the closing ZPASS_DONE event, which will allow the firmware to
+       * handle the autotuner's ZPASS_DONE events correctly. The sample count
+       * write of the closing event will be overwritten by the end-query
+       * ZPASS_DONE event.
+       * When the occlusion query is generated inside a renderpass, we can rely
+       * on the end-query ZPASS_DONE event emission. We also mark this on the
+       * renderpass state since the autotuner can optimize its own ZPASS_DONE
+       * emission when it knows there's no occlusion query's ZPASS_DONE usage
+       * in the renderpass.
+       */
+      if (!cmdbuf->state.pass) {
+         tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
+         tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
+                                          .write_sample_count = true,
+                                          .sample_count_end_offset = true).value);
+         tu_cs_emit_qw(cs, begin_iova);
+      } else {
+         cmdbuf->state.rp.has_zpass_done_sample_count_write_in_rp = true;
+      }
    }
 }
 

@@ -672,6 +672,21 @@ tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
       tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
                                        .write_sample_count = true).value);
       tu_cs_emit_qw(cs, result_iova);
+
+      /* Firmware expects ZPASS_DONE events with sample-count writes to come in
+       * non-nested begin-end pairs. When the renderpass is known to contain
+       * such events, we have to emit the end event here already in order to
+       * avoid breaking the ZPASS_DONE events emitted by the occlusion query.
+       * The result of this second write will later be overwritten by the
+       * autotuner's end-point ZPASS_DONE event.
+       */
+      if (cmd->state.rp.has_zpass_done_sample_count_write_in_rp) {
+         tu_cs_emit_pkt7(cs, CP_EVENT_WRITE7, 3);
+         tu_cs_emit(cs, CP_EVENT_WRITE7_0(.event = ZPASS_DONE,
+                                          .write_sample_count = true,
+                                          .sample_count_end_offset = true).value);
+         tu_cs_emit_qw(cs, result_iova);
+      }
    } else {
       tu_cs_emit_regs(cs,
                         A6XX_RB_SAMPLE_COUNT_ADDR(.qword = result_iova));
