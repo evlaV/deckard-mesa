@@ -590,9 +590,23 @@ ir3_block_link_physical(struct ir3_block *pred,
 }
 
 void
+ir3_block_unlink_physical(struct ir3_block *pred, struct ir3_block *succ)
+{
+   array_remove(pred->physical_successors, succ);
+   array_remove(succ->physical_predecessors, pred);
+}
+
+void
 ir3_block_remove_predecessor(struct ir3_block *block, struct ir3_block *pred)
 {
    array_remove(block->predecessors, pred);
+}
+
+void
+ir3_block_remove_physical_predecessor(struct ir3_block *block,
+                                      struct ir3_block *pred)
+{
+   array_remove(block->physical_predecessors, pred);
 }
 
 unsigned

@@ -751,8 +751,11 @@ ir3_after_preamble(struct ir3 *ir)
 
 void ir3_block_add_predecessor(struct ir3_block *block, struct ir3_block *pred);
 void ir3_block_link_physical(struct ir3_block *pred, struct ir3_block *succ);
+void ir3_block_unlink_physical(struct ir3_block *pred, struct ir3_block *succ);
 void ir3_block_remove_predecessor(struct ir3_block *block,
                                   struct ir3_block *pred);
+void ir3_block_remove_physical_predecessor(struct ir3_block *block,
+                                           struct ir3_block *pred);
 unsigned ir3_block_get_pred_index(struct ir3_block *block,
                                   struct ir3_block *pred);
 

@@ -904,6 +904,11 @@ remove_unused_block(struct ir3_block *old_target)
          ir3_block_remove_predecessor(succ, old_target);
       }
    }
+
+   for (unsigned i = 0; i < old_target->physical_successors_count; i++) {
+      struct ir3_block *phys_succ = old_target->physical_successors[i];
+      ir3_block_remove_physical_predecessor(phys_succ, old_target);
+   }
 }
 
 static bool
@@ -925,6 +930,9 @@ retarget_jump(struct ir3_instruction *instr, struct ir3_block *new_target)
 
    /* and remove old_target's predecessor: */
    ir3_block_remove_predecessor(old_target, cur_block);
+
+   ir3_block_unlink_physical(cur_block, old_target);
+   ir3_block_link_physical(cur_block, new_target);
 
    /* If we reconverged at the old target, we'll reconverge at the new target
     * too:
@@ -966,12 +974,6 @@ opt_jump(struct ir3 *ir)
       block->index = index++;
 
    foreach_block (block, &ir->block_list) {
-      /* This pass destroys the physical CFG so don't keep it around to avoid
-       * validation errors.
-       */
-      block->physical_successors_count = 0;
-      block->physical_predecessors_count = 0;
-
       foreach_instr (instr, &block->instr_list) {
          if (!is_flow(instr) || !instr->cat0.target)
             continue;
@@ -1250,6 +1252,7 @@ prede_sched(struct ir3 *ir)
       remove_unused_block(succ1);
       block->successors[1] = succ0->successors[0];
       ir3_block_add_predecessor(succ0->successors[0], block);
+      ir3_block_link_physical(block, succ0->successors[0]);
    }
 }
 
