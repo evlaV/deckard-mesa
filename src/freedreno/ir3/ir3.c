@@ -592,17 +592,7 @@ ir3_block_link_physical(struct ir3_block *pred,
 void
 ir3_block_remove_predecessor(struct ir3_block *block, struct ir3_block *pred)
 {
-   for (unsigned i = 0; i < block->predecessors_count; i++) {
-      if (block->predecessors[i] == pred) {
-         if (i < block->predecessors_count - 1) {
-            block->predecessors[i] =
-               block->predecessors[block->predecessors_count - 1];
-         }
-
-         block->predecessors_count--;
-         return;
-      }
-   }
+   array_remove(block->predecessors, pred);
 }
 
 unsigned

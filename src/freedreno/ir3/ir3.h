@@ -256,6 +256,21 @@ struct ir3_register {
       arr[arr##_count++] = __VA_ARGS__;                                        \
    } while (0)
 
+/* Remove the first occurrence of an element from an array.
+ * NOTE: this does not preserve the order of elements in the array.
+ */
+#define array_remove(arr, ...)                                                 \
+   do {                                                                        \
+      for (unsigned i = 0; i < arr##_count; i++) {                             \
+         if (arr[i] == __VA_ARGS__) {                                          \
+            if (i < arr##_count - 1)                                           \
+               arr[i] = arr[arr##_count - 1];                                  \
+            arr##_count--;                                                     \
+            break;                                                             \
+         }                                                                     \
+      }                                                                        \
+   } while (0)
+
 typedef enum {
    REDUCE_OP_ADD_U,
    REDUCE_OP_ADD_F,
