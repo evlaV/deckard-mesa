@@ -1542,7 +1542,7 @@ tu_get_system_heap_size(struct tu_physical_device *physical_device)
    if (total_ram <= 4ull * 1024ull * 1024ull * 1024ull)
       available_ram = total_ram / 2;
    else
-      available_ram = total_ram * 3 / 4;
+      available_ram = total_ram * 15 / 16; //gabe hack to allow using more memory
 
    if (physical_device->va_size)
       available_ram = MIN2(available_ram, physical_device->va_size);
@@ -1567,7 +1567,7 @@ tu_get_budget_memory(struct tu_physical_device *physical_device)
     * Let's not incite the app to starve the system: report at most 90% of
     * available system memory.
     */
-   uint64_t heap_available = sys_available * 9 / 10;
+   uint64_t heap_available = sys_available * 15 / 16; //gabe hack to allow using more memory
    return MIN2(heap_size, heap_used + heap_available);
 }
 
