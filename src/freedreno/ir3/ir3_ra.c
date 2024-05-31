@@ -2564,7 +2564,7 @@ ir3_ra(struct ir3_shader_variant *v)
 
    ir3_debug_print(v->ir, "AFTER: create_parallel_copies");
 
-   ir3_merge_regs(live, v->ir);
+   ir3_merge_regs(live, v->ir, /*already_indexed=*/false);
 
    bool has_shared_vectors = false;
    foreach_block (block, &v->ir->block_list) {

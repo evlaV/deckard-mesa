@@ -2115,7 +2115,7 @@ fixup_merge_sets(struct ir3_liveness *live, struct ir3 *ir)
       }
    }
 
-   ir3_merge_regs(live, ir);
+   ir3_merge_regs(live, ir, /*already_indexed=*/false);
 }
 
 void
