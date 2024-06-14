@@ -2125,9 +2125,14 @@ tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    tu_clone_trace_range(cmd, cs, cmd->trace_renderpass_start,
          cmd->trace_renderpass_end);
 
-   tu_cs_sanity_check(cs);
-
    trace_end_draw_ib_gmem(&cmd->trace, &cmd->cs);
+
+   if (CHIP >= A7XX) {
+      tu_cs_emit_pkt7(&cmd->cs, CP_SET_MARKER, 1);
+      tu_cs_emit(&cmd->cs, A6XX_CP_SET_MARKER_0_MODE(RM6_YIELD));
+   }
+
+   tu_cs_sanity_check(cs);
 }
 
 template <chip CHIP>
