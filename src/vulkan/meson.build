@@ -88,3 +88,6 @@ endif
 if with_vulkan_device_select_layer
   subdir('device-select-layer')
 endif
+if with_vulkan_vram_limit_layer
+  subdir('vram-limit-layer')
+endif
