@@ -889,7 +889,7 @@ __glXInitialize(Display * dpy)
 #if defined(GLX_DIRECT_RENDERING) && (!defined(GLX_USE_APPLEGL) || defined(GLX_USE_APPLE))
    Bool glx_direct = !debug_get_bool_option("LIBGL_ALWAYS_INDIRECT", false);
    Bool glx_accel = !debug_get_bool_option("LIBGL_ALWAYS_SOFTWARE", false);
-   const char *env = getenv("MESA_LOADER_DRIVER_OVERRIDE");
+   const char *env = "zink";//getenv("MESA_LOADER_DRIVER_OVERRIDE");
 
    zink = env && !strcmp(env, "zink");
    try_zink = False;
@@ -908,7 +908,7 @@ __glXInitialize(Display * dpy)
     */
 #if defined(GLX_USE_DRM)
    if (glx_direct && glx_accel &&
-       (!zink || debug_get_bool_option("LIBGL_KOPPER_DISABLE", false))) {
+       (!zink || true)) {
 #if defined(HAVE_DRI3)
       if (!debug_get_bool_option("LIBGL_DRI3_DISABLE", false)) {
          dpyPriv->dri3Display = dri3_create_display(dpy);

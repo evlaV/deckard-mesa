@@ -701,6 +701,8 @@ out:
 char *
 loader_get_driver_for_fd(int fd)
 {
+   return strdup("zink");
+#if 0
    char *driver;
 
    /* Allow an environment variable to force choosing a different driver
@@ -725,6 +727,7 @@ loader_get_driver_for_fd(int fd)
       driver = loader_get_kernel_driver_name(fd);
 
    return driver;
+#endif
 }
 
 void
