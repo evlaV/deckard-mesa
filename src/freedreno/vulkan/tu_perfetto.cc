@@ -9,6 +9,7 @@
 #include "tu_buffer.h"
 #include "tu_device.h"
 #include "tu_image.h"
+#include "tu_queue.h"
 
 #include "util/hash_table.h"
 #include "util/perf/u_perfetto.h"
