@@ -4528,9 +4528,18 @@ tc_blit(struct pipe_context *_pipe, const struct pipe_blit_info *info)
    tc_set_resource_reference(&blit->info.src.resource, info->src.resource);
    memcpy(&blit->info, info, sizeof(*info));
    if (tc->options.parse_renderpass_info) {
-      tc->renderpass_info_recording->has_resolve = info->src.resource->nr_samples > 1 &&
-                                                   info->dst.resource->nr_samples <= 1 &&
-                                                   tc->fb_resolve == info->dst.resource;
+      if (info->src.resource->nr_samples > 1 &&
+          info->dst.resource->nr_samples <= 1 &&
+          tc->fb_resolve == info->dst.resource) {
+         tc->renderpass_info_recording->has_resolve = true;
+      } else {
+         for (unsigned i = 0; i < PIPE_MAX_COLOR_BUFS; i++) {
+            if (tc->fb_resources[i] == info->src.resource) {
+               tc_batch_increment_renderpass_info(tc, tc->next, false);
+               break;
+            }
+         }
+      }
    }
 }
 
