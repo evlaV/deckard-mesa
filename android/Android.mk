@@ -29,9 +29,9 @@ MESA3D_TOP := $(dir $(LOCAL_PATH))
 LIBDRM_VERSION = $(shell cat external/libdrm/meson.build | grep -o "\<version\>\s*:\s*'\w*\.\w*\.\w*'" | grep -o "\w*\.\w*\.\w*" | head -1)
 LLVM_VERSION_MAJOR = $(shell \
     if [ -f external/llvm-project/cmake/Modules/LLVMVersion.cmake ]; then \
-        grep 'set.LLVM_VERSION_MAJOR ' external/llvm-project/cmake/Modules/LLVMVersion.cmake | grep -o '[0-9]\+'; \
+        grep 'set.LLVM_VERSION_MAJOR ' external/llvm-project/cmake/Modules/LLVMVersion.cmake | /bin/grep -o '[0-9]\+'; \
     else \
-        grep 'set.LLVM_VERSION_MAJOR ' external/llvm-project/llvm/CMakeLists.txt | grep -o '[0-9]\+'; \
+        grep 'set.LLVM_VERSION_MAJOR ' external/llvm-project/llvm/CMakeLists.txt | /bin/grep -o '[0-9]\+'; \
     fi)
 
 MESA_VK_LIB_SUFFIX_amd := radeon
