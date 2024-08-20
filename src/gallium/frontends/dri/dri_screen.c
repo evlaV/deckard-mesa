@@ -571,7 +571,10 @@ dri_release_screen(struct dri_screen * screen)
       screen->dev = NULL;
    }
 
-   mtx_destroy(&screen->opencl_func_mutex);
+   if (screen->has_opencl_func_mutex) {
+      mtx_destroy(&screen->opencl_func_mutex);
+      screen->has_opencl_func_mutex = false;
+   }
 }
 
 void

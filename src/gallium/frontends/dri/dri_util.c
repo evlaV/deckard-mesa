@@ -130,6 +130,7 @@ driCreateNewScreen3(int scrn, int fd,
     driParseConfigFiles(&screen->optionCache, &screen->optionInfo, screen->myNum,
                         "dri2", NULL, NULL, NULL, 0, NULL, 0);
 
+   screen->has_opencl_func_mutex = true;
    (void) mtx_init(&screen->opencl_func_mutex, mtx_plain);
 
    struct pipe_screen *pscreen = NULL;
