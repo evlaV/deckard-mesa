@@ -4661,7 +4661,7 @@ tc_invalidate_resource(struct pipe_context *_pipe,
    tc_set_resource_reference(&call->resource, resource);
 
    struct tc_renderpass_info *info = tc_get_renderpass_info(tc);
-   if (info) {
+   if (info && info->has_draw) {
       if (tc->fb_resources[PIPE_MAX_COLOR_BUFS] == resource) {
          info->zsbuf_invalidate = true;
       } else {
