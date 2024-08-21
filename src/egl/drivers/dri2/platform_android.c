@@ -1186,7 +1186,13 @@ dri2_initialize_android(_EGLDisplay *disp)
    struct dri2_egl_display *dri2_dpy;
    const char *err;
 
-   dri2_dpy = calloc(1, sizeof(*dri2_dpy));
+   //dri2_dpy = calloc(1, sizeof(*dri2_dpy)); //GABE: dont do this
+   dri2_dpy = dri2_display_create(); //GABE: NEEDED FOR WAYDROID TO WORK!!
+   //make sure to set 
+   //mesa.loader.driver.override=zink
+   //mesa.libgl.kopper.disable=true
+   //in waydroid system image /default.prop
+
    if (!dri2_dpy)
       return _eglError(EGL_BAD_ALLOC, "eglInitialize");
 
