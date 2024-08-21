@@ -49,6 +49,7 @@ EXTENSIONS = [
     Extension("VK_KHR_xcb_surface",
               conditions=["!display_dev"]),
     Extension("VK_KHR_win32_surface"),
+    Extension("VK_KHR_android_surface"),
 ]
 
 if platform.system() == "Darwin":

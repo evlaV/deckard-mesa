@@ -38,6 +38,9 @@
 #include <drm-uapi/drm_fourcc.h>
 #include <sync/sync.h>
 #include <sys/types.h>
+#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_android.h>
+
 
 #include "util/compiler.h"
 #include "util/libsync.h"
@@ -1020,6 +1023,39 @@ static const __DRIextension *droid_swrast_image_loader_extensions[] = {
    NULL,
 };
 
+static_assert(sizeof(struct kopper_vk_surface_create_storage) >=
+                 sizeof(VkAndroidSurfaceCreateInfoKHR),
+              "");
+
+static void
+kopperSetSurfaceCreateInfo(void *_draw, struct kopper_loader_info *out)
+{
+   struct dri2_egl_surface *dri2_surf = _draw;
+   VkAndroidSurfaceCreateInfoKHR *asci = (VkAndroidSurfaceCreateInfoKHR *)&out->bos;
+
+   asci->sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+   asci->pNext = NULL;
+   asci->flags = 0;
+   asci->window = dri2_surf->window;
+   out->present_opaque = true;
+}
+
+static const __DRIkopperLoaderExtension kopper_loader_extension = {
+   .base = {__DRI_KOPPER_LOADER, 1},
+
+   .SetSurfaceCreateInfo = kopperSetSurfaceCreateInfo,
+};
+
+static const __DRIextension *droid_kopper_image_loader_extensions[] = {
+   &droid_image_loader_extension.base,
+   &image_lookup_extension.base,
+   &use_invalidate.base,
+   &droid_mutable_render_buffer_extension.base,
+   &swrast_loader_extension.base,
+   &kopper_loader_extension.base,
+   NULL,
+};
+
 static EGLBoolean
 droid_load_driver(_EGLDisplay *disp, bool swrast)
 {
@@ -1046,7 +1082,10 @@ droid_load_driver(_EGLDisplay *disp, bool swrast)
       }
    }
 
-   dri2_dpy->loader_extensions = droid_image_loader_extensions;
+   if (disp->Options.Zink)
+      dri2_dpy->loader_extensions = droid_kopper_image_loader_extensions;
+   else
+      dri2_dpy->loader_extensions = droid_image_loader_extensions;
    if (!dri2_load_driver(disp)) {
       goto error;
    }
@@ -1207,8 +1246,13 @@ dri2_initialize_android(_EGLDisplay *disp)
 
    if ((!device_opened && disp->Options.ForceSoftware) ||
        force_pure_swrast) {
-      dri2_dpy->driver_name = strdup("swrast");
-      dri2_dpy->loader_extensions = droid_swrast_image_loader_extensions;
+      if (disp->Options.Zink) {
+         dri2_dpy->driver_name = strdup("zink");
+         dri2_dpy->loader_extensions = droid_kopper_image_loader_extensions;
+      } else {
+         dri2_dpy->driver_name = strdup("swrast");
+         dri2_dpy->loader_extensions = droid_swrast_image_loader_extensions;
+      }
       dri2_dpy->fd_render_gpu = -1;
       dri2_dpy->pure_swrast = true;
       if(!dri2_load_driver(disp)) {
