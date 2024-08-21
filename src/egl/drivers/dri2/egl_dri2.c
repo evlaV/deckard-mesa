@@ -590,7 +590,9 @@ dri2_load_driver(_EGLDisplay *disp)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
 
-   dri2_dpy->kopper = disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
+   disp->Options.Zink = true; //force true GABE
+   _eglLog(_EGL_WARNING, "egl: dri2_load_driver GABE disp->Options.Zink = [%d]",disp->Options.Zink);
+   dri2_dpy->kopper = false; //disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
    dri2_dpy->swrast = (disp->Options.ForceSoftware && !dri2_dpy->kopper) ||
                       !dri2_dpy->driver_name || strstr(dri2_dpy->driver_name, "swrast");
    dri2_dpy->swrast_not_kms = dri2_dpy->swrast && (!dri2_dpy->driver_name || strcmp(dri2_dpy->driver_name, "kms_swrast"));
@@ -783,12 +785,38 @@ dri2_create_screen(_EGLDisplay *disp)
    enum dri_screen_type type = DRI_SCREEN_DRI3;
 
    if (dri2_dpy->kopper)
+   {
+      _eglLog(_EGL_WARNING, "egl: GABE type = DRI_SCREEN_KOPPER");
       type = DRI_SCREEN_KOPPER;
+   }
    else if (dri2_dpy->swrast_not_kms)
+   {
+      _eglLog(_EGL_WARNING, "egl: GABE type = DRI_SCREEN_SWRAST");
       type = DRI_SCREEN_SWRAST;
-   else if (dri2_dpy->swrast)
+   }
+   else if (dri2_dpy->swrast) 
+   {
+      _eglLog(_EGL_WARNING, "egl: GABE type = DRI_SCREEN_KMS_SWRAST");
       type = DRI_SCREEN_KMS_SWRAST;
+   }
+   else {
+      _eglLog(_EGL_WARNING, "egl: GABE type = DRI_SCREEN_DRI3"); //because it was initially set to DRI_SCREEN_DRI3
+   }
 
+   _eglLog(_EGL_WARNING, "egl: GABE LIBGL_KOPPER_DISABLE = %d", debug_get_bool_option("LIBGL_KOPPER_DISABLE", false));
+   _eglLog(_EGL_WARNING, "egl: GABE LIBGL_KOPPER_DRI2 = %d", debug_get_bool_option("LIBGL_KOPPER_DRI2", false));
+   
+   const char *stringvar_mesa_loader_driver_override = debug_get_option("MESA_LOADER_DRIVER_OVERRIDE", NULL);
+   _eglLog(_EGL_WARNING, "egl: GABE MESA_LOADER_DRIVER_OVERRIDE = %s", stringvar_mesa_loader_driver_override);
+
+   const char *stringvar_libgl_kopper_disable = debug_get_option("LIBGL_KOPPER_DISABLE", NULL);
+   _eglLog(_EGL_WARNING, "egl: GABE LIBGL_KOPPER_DISABLE = %s", stringvar_libgl_kopper_disable);
+
+   const char *stringvar_libgl_kopper_dri2 = debug_get_option("LIBGL_KOPPER_DRI2", NULL);
+   _eglLog(_EGL_WARNING, "egl: GABE LIBGL_KOPPER_DRI2 = %s", stringvar_libgl_kopper_dri2);
+
+   _eglLog(_EGL_WARNING, "egl: GABE XXX0  dri2_dpy->fd_display_gpu=[%d] dri2_dpy->fd_render_gpu=[%d]",  
+                                          dri2_dpy->fd_display_gpu,     dri2_dpy->fd_render_gpu);
    if (dri2_dpy->fd_render_gpu != dri2_dpy->fd_display_gpu) {
       driver_name_display_gpu =
          loader_get_driver_for_fd(dri2_dpy->fd_display_gpu);
@@ -796,6 +824,10 @@ dri2_create_screen(_EGLDisplay *disp)
          /* check if driver name is matching so that non mesa drivers
           * will not crash.
           */
+         
+         _eglLog(_EGL_WARNING, "egl: GABE XXX1 [%s] dri2_dpy->fd_display_gpu=[%d] dri2_dpy->fd_render_gpu=[%d]",  
+                                          driver_name_display_gpu, dri2_dpy->fd_display_gpu, dri2_dpy->fd_render_gpu);
+
          if (strcmp(dri2_dpy->driver_name, driver_name_display_gpu) == 0) {
             dri2_dpy->dri_screen_display_gpu = driCreateNewScreen3(
                0, dri2_dpy->fd_display_gpu, dri2_dpy->loader_extensions,
@@ -812,12 +844,15 @@ dri2_create_screen(_EGLDisplay *disp)
 #endif
           screen_fd = dri2_dpy->fd_render_gpu;
    }
+   
+   _eglLog(_EGL_WARNING, "egl: GABE XXX2 [%d]",screen_fd);
+
    dri2_dpy->dri_screen_render_gpu = driCreateNewScreen3(
       0, screen_fd, dri2_dpy->loader_extensions, type,
       &dri2_dpy->driver_configs, false, dri2_dpy->multibuffers_available, disp);
 
    if (dri2_dpy->dri_screen_render_gpu == NULL) {
-      _eglLog(_EGL_WARNING, "egl: failed to create dri2 screen");
+      _eglLog(_EGL_WARNING, "egl: failed to create dri2 screen GABEegl");
       return EGL_FALSE;
    }
 

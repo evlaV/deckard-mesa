@@ -1060,6 +1060,9 @@ static EGLBoolean
 droid_load_driver(_EGLDisplay *disp, bool swrast)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
+   
+   disp->Options.Zink = true; // force true GABE
+   _eglLog(_EGL_WARNING, "DRI2: GABE  to create screen disp->Options.Zink = [%d]",disp->Options.Zink);
 
    if (disp->Options.Zink)
       dri2_dpy->driver_name = strdup("zink");
@@ -1083,9 +1086,16 @@ droid_load_driver(_EGLDisplay *disp, bool swrast)
    }
 
    if (disp->Options.Zink)
+   {
       dri2_dpy->loader_extensions = droid_kopper_image_loader_extensions;
+	  _eglLog(_EGL_WARNING, "DRI2: GABE droid_load_driver() droid_kopper_image_loader_extensions called");
+   }
    else
+   {
+      _eglLog(_EGL_WARNING, "DRI2: GABE droid_load_driver() droid_image_loader_extensions called");
       dri2_dpy->loader_extensions = droid_image_loader_extensions;
+   }
+   
    if (!dri2_load_driver(disp)) {
       goto error;
    }
@@ -1247,9 +1257,11 @@ dri2_initialize_android(_EGLDisplay *disp)
    if ((!device_opened && disp->Options.ForceSoftware) ||
        force_pure_swrast) {
       if (disp->Options.Zink) {
+		 _eglLog(_EGL_WARNING, "DRI2: GABE dri2_initialize_android() [zink] loader_extensions=droid_kopper_image_loader_extensions");
          dri2_dpy->driver_name = strdup("zink");
          dri2_dpy->loader_extensions = droid_kopper_image_loader_extensions;
       } else {
+  		 _eglLog(_EGL_WARNING, "DRI2: GABE dri2_initialize_android() [nozink] swrast path");
          dri2_dpy->driver_name = strdup("swrast");
          dri2_dpy->loader_extensions = droid_swrast_image_loader_extensions;
       }

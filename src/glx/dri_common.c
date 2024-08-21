@@ -992,6 +992,8 @@ dri_screen_init(struct glx_screen *psc, struct glx_display *priv, int screen, in
       unreachable("unknown glx driver type");
    }
 
+//GABE
+   os_log_message("GABE: dri_screen_init Z1");
    psc->frontend_screen = driCreateNewScreen3(screen, fd,
                                                  loader_extensions,
                                                  type,

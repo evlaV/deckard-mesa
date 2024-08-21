@@ -709,8 +709,13 @@ loader_get_driver_for_fd(int fd)
     */
    if (__normal_user()) {
       const char *override = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
+	  log_(_LOADER_WARNING, "GABE: loader_get_driver_for_fd __normal_user true!! and [%s]\n", override);
       if (override)
          return strdup(override);
+   }
+   else {
+      const char *override = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
+      log_(_LOADER_WARNING, "GABE: loader_get_driver_for_fd __normal_user false!! and [%s]\n", override);
    }
 
 #if defined(USE_DRICONF)

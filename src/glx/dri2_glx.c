@@ -696,8 +696,10 @@ dri2CreateScreen(int screen, struct glx_display * priv, bool driver_name_is_infe
    psc->base.driverName = driverName;
    priv->driver = GLX_DRIVER_DRI2;
 
+	ErrorMessageF("glx: GABE GLX dri2CreateScreen() \n");
+
    if (!dri_screen_init(&psc->base, priv, screen, psc->fd, loader_extensions, driver_name_is_inferred)) {
-      ErrorMessageF("glx: failed to create dri2 screen\n");
+      ErrorMessageF("glx: failed to create dri2 screen GABEGLX\n");
       goto handle_error;
    }
 

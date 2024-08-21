@@ -250,7 +250,11 @@ dri_screen_create_for_driver(struct gbm_dri_device *dri, char *driver_name, bool
    dri->driver_name = swrast ? strdup("swrast") : driver_name;
 
    dri->swrast = swrast;
-
+//GABE
+   os_log_message("GABE: dri_screen_create_for_driver Y1");
+   char mystr[128];
+   snprintf(mystr,128,"GABE: dri_screen_create_for_driver Y1 swrast=%d fd=%d", swrast, dri->base.v0.fd); os_log_message(mystr);
+   
    dri->loader_extensions = gbm_dri_screen_extensions;
    dri->screen = driCreateNewScreen3(0, swrast ? -1 : dri->base.v0.fd,
                                              dri->loader_extensions,

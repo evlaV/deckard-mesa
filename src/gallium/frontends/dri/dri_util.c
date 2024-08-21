@@ -107,9 +107,14 @@ driCreateNewScreen3(int scrn, int fd,
 {
     struct dri_screen *screen;
 
+   char mystr[128];
+   snprintf(mystr,128,"GABE: driCreateNewScreen3 x1 fd=%d",fd); os_log_message(mystr);
+
     screen = CALLOC_STRUCT(dri_screen);
     if (!screen)
        return NULL;
+
+    os_log_message("GABE: driCreateNewScreen3 x2");
 
     setupLoaderExtensions(screen, loader_extensions);
     // dri2 drivers require working invalidate
@@ -118,11 +123,14 @@ driCreateNewScreen3(int scrn, int fd,
        return NULL;
     }
 
+   os_log_message("GABE: driCreateNewScreen3 x3");
     screen->loaderPrivate = data;
 
     screen->fd = fd;
     screen->myNum = scrn;
     screen->type = type;
+
+   os_log_message("GABE: driCreateNewScreen3 x4");
 
     /* Option parsing before ->InitScreen(), as some options apply there. */
     driParseOptionInfo(&screen->optionInfo,
@@ -136,27 +144,34 @@ driCreateNewScreen3(int scrn, int fd,
    struct pipe_screen *pscreen = NULL;
    switch (type) {
    case DRI_SCREEN_DRI3:
+      os_log_message("GABE: driCreateNewScreen3 x4a");
       pscreen = dri2_init_screen(screen, driver_name_is_inferred);
       break;
    case DRI_SCREEN_KOPPER:
+      os_log_message("GABE: driCreateNewScreen3 x4b");
       pscreen = kopper_init_screen(screen, driver_name_is_inferred);
       break;
    case DRI_SCREEN_SWRAST:
+      os_log_message("GABE: driCreateNewScreen3 x4c");
       pscreen = drisw_init_screen(screen, driver_name_is_inferred);
       break;
    case DRI_SCREEN_KMS_SWRAST:
+      os_log_message("GABE: driCreateNewScreen3 x4d");
       pscreen = dri_swrast_kms_init_screen(screen, driver_name_is_inferred);
       break;
    default:
+      os_log_message("GABE: driCreateNewScreen3 x4e");
       unreachable("unknown dri screen type");
    }
    if (pscreen == NULL) {
       dri_destroy_screen(screen);
+      os_log_message("GABE: driCreateNewScreen3 x5");
       return NULL;
    }
    *driver_configs = dri_init_screen(screen, pscreen, has_multibuffer);
    if (*driver_configs == NULL) {
       dri_destroy_screen(screen);
+      os_log_message("GABE: driCreateNewScreen3 x6");
       return NULL;
    }
 
@@ -186,6 +201,8 @@ driCreateNewScreen3(int scrn, int fd,
        screen->api_mask |= (1 << __DRI_API_GLES2);
     if (screen->max_gl_es2_version >= 30)
        screen->api_mask |= (1 << __DRI_API_GLES3);
+
+   os_log_message("GABE: driCreateNewScreen3 x7");
 
     return opaque_dri_screen(screen);
 }

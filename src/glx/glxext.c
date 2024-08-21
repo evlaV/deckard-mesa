@@ -987,7 +987,9 @@ __glXInitialize(Display * dpy)
    dpyPriv->glXDrawHash = __glxHashCreate();
 
    enum glx_driver glx_driver = 0;
-   const char *env = getenv("MESA_LOADER_DRIVER_OVERRIDE");
+   //const char *env = getenv("MESA_LOADER_DRIVER_OVERRIDE");
+   const char *env = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
+   printf("GABE: __glXInitialize [%s]\n",env);
 
 #if defined(GLX_DIRECT_RENDERING) && (!defined(GLX_USE_APPLEGL) || defined(GLX_USE_APPLE))
    Bool glx_direct = !debug_get_bool_option("LIBGL_ALWAYS_INDIRECT", false);
