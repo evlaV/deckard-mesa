@@ -1071,13 +1071,14 @@ dri2_display_create(void)
    struct dri2_egl_display *dri2_dpy = calloc(1, sizeof *dri2_dpy);
    if (!dri2_dpy) {
       _eglError(EGL_BAD_ALLOC, "eglInitialize");
+      _eglLog(_EGL_WARNING, "egl: GABE dri2_display_create eglInitialize xxx1");
       return NULL;
    }
 
    dri2_dpy->fd_render_gpu = -1;
    dri2_dpy->fd_display_gpu = -1;
    dri2_dpy->multibuffers_available = true;
-
+   _eglLog(_EGL_WARNING, "egl: GABE dri2_display_create eglInitialize xxx2");
    return dri2_dpy;
 }
 

@@ -107,6 +107,8 @@ driCreateNewScreen3(int scrn, int fd,
 {
     struct dri_screen *screen;
 
+   //has_multibuffer = true; //gabe hack
+
    char mystr[128];
    snprintf(mystr,128,"GABE: driCreateNewScreen3 x1 fd=%d",fd); os_log_message(mystr);
 

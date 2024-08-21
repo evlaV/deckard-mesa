@@ -1245,7 +1245,12 @@ dri2_initialize_android(_EGLDisplay *disp)
    struct dri2_egl_display *dri2_dpy;
    const char *err;
 
+#if 0
    dri2_dpy = calloc(1, sizeof(*dri2_dpy));
+#else
+   dri2_dpy = dri2_display_create(); //gabe hack
+#endif
+   
    if (!dri2_dpy)
       return _eglError(EGL_BAD_ALLOC, "eglInitialize");
 

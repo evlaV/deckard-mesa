@@ -655,11 +655,23 @@ dri_init_screen(struct dri_screen *screen,
 #ifdef HAVE_LIBDRM
    if (has_multibuffer) {
       int dmabuf_caps = pscreen->get_param(pscreen, PIPE_CAP_DMABUF);
+      os_log_message("GABE: dri_init_screen: dmabuf_caps checking...");
       if (dmabuf_caps & DRM_PRIME_CAP_IMPORT)
+      {
+         os_log_message("GABE: dri_init_screen: DRM_PRIME_CAP_IMPORT");
          screen->dmabuf_import = true;
+      }
       if (screen->dmabuf_import && dmabuf_caps & DRM_PRIME_CAP_EXPORT)
+      {
+         os_log_message("GABE: dri_init_screen: screen->dmabuf_import and DRM_PRIME_CAP_EXPORT");
          screen->has_dmabuf = true;
+      }
    }
+   else
+   {
+      os_log_message("GABE: dri_init_screen: has_multibuffer false");
+   }
+
 #endif
 
    return dri_fill_in_modes(screen);
