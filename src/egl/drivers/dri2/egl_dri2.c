@@ -677,6 +677,7 @@ dri2_load_driver_common(_EGLDisplay *disp,
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
    const __DRIextension **extensions;
 
+   _eglLog(_EGL_WARNING, "egl: dri2_load_driver_common GABE x1");
    extensions = dri2_open_driver(disp);
    if (!extensions)
       return EGL_FALSE;
@@ -917,7 +918,7 @@ dri2_create_screen(_EGLDisplay *disp)
 {
    struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
    char *driver_name_display_gpu;
-
+	_eglLog(_EGL_WARNING, "egl: dri2_create_screen GABE x1");
    if (dri2_dpy->fd_render_gpu != dri2_dpy->fd_display_gpu) {
       driver_name_display_gpu =
          loader_get_driver_for_fd(dri2_dpy->fd_display_gpu);
@@ -934,11 +935,14 @@ dri2_create_screen(_EGLDisplay *disp)
       }
    }
 
+   _eglLog(_EGL_WARNING, "egl: GABE XXX2 dri2_dpy->dri_screen_display_gpu=[%d]", dri2_dpy->dri_screen_display_gpu);
    int screen_fd = dri2_dpy->swrast ? -1 : dri2_dpy->fd_render_gpu;
    dri2_dpy->dri_screen_render_gpu = dri2_dpy->mesa->createNewScreen3(
       0, screen_fd, dri2_dpy->loader_extensions, dri2_dpy->driver_extensions,
       &dri2_dpy->driver_configs, false, disp);
 
+   _eglLog(_EGL_WARNING, "egl: GABE XXX3 dri2_dpy->dri_screen_render_gpu=[%d]", dri2_dpy->dri_screen_render_gpu);
+   
    if (dri2_dpy->dri_screen_render_gpu == NULL) {
       _eglLog(_EGL_WARNING, "egl: failed to create dri2 screen");
       return EGL_FALSE;
@@ -947,6 +951,8 @@ dri2_create_screen(_EGLDisplay *disp)
    if (dri2_dpy->fd_render_gpu == dri2_dpy->fd_display_gpu)
       dri2_dpy->dri_screen_display_gpu = dri2_dpy->dri_screen_render_gpu;
 
+   _eglLog(_EGL_WARNING, "egl: GABE XXX4 dri2_dpy->dri_screen_display_gpu=[%d]", dri2_dpy->dri_screen_display_gpu);
+   
    dri2_dpy->own_dri_screen = true;
    return EGL_TRUE;
 }

@@ -1567,6 +1567,7 @@ resource_create(struct pipe_screen *pscreen,
    struct zink_resource *res = CALLOC_STRUCT_CL(zink_resource);
 
    if (!res) {
+      os_log_message("GABE: zink resource_create ZINK: failed to allocate res! ");
       mesa_loge("ZINK: failed to allocate res!");
       return NULL;
    }
@@ -1599,6 +1600,7 @@ resource_create(struct pipe_screen *pscreen,
    if (!res->obj) {
       free(res->modifiers);
       FREE_CL(res);
+      os_log_message("GABE: zink resource_create returning null!");
       return NULL;
    }
 
@@ -1655,6 +1657,7 @@ resource_create(struct pipe_screen *pscreen,
             FREE(res->obj);
             free(res->modifiers);
             FREE_CL(res);
+            os_log_message("GABE: zink resource_create returning null 2!");
             return NULL;
          }
          struct kopper_displaytarget *cdt = res->obj->dt;
@@ -1701,6 +1704,8 @@ resource_create(struct pipe_screen *pscreen,
    }
    if (res->obj->exportable)
       res->base.b.bind |= ZINK_BIND_DMABUF;
+   
+   os_log_message("GABE: zink resource_create returning normally");
    return &res->base.b;
 }
 
@@ -1989,6 +1994,8 @@ zink_resource_from_handle(struct pipe_screen *pscreen,
                  struct winsys_handle *whandle,
                  unsigned usage)
 {
+   //gabe
+   os_log_message("GABE: zink_resource_from_handle ");
 #ifdef ZINK_USE_DMABUF
    if (whandle->modifier != DRM_FORMAT_MOD_INVALID &&
        !zink_screen(pscreen)->info.have_EXT_image_drm_format_modifier)
@@ -3186,6 +3193,7 @@ static const struct u_transfer_vtbl transfer_vtbl = {
 bool
 zink_screen_resource_init(struct pipe_screen *pscreen)
 {
+   os_log_message("GABE: zink_screen_resource_init ");
    struct zink_screen *screen = zink_screen(pscreen);
    pscreen->resource_create = u_transfer_helper_resource_create;
    pscreen->resource_create_with_modifiers = zink_resource_create_with_modifiers;
