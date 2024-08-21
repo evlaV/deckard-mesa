@@ -707,7 +707,7 @@ gbm_dri_bo_import(struct gbm_device *gbm,
        * tokens accepted by createImageFromDmaBufs, except for not supporting
        * the sARGB format. */
       fourcc = gbm_core.v0.format_canonicalize(fd_data->format);
-
+      os_log_message("GABE dri2_from_dma_bufs call x6");
       image = dri2_from_dma_bufs(dri->screen,
                                  fd_data->width,
                                  fd_data->height,

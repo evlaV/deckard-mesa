@@ -62,6 +62,7 @@ droid_create_image_from_buffer_info(
 {
    unsigned error;
 
+   os_log_message("GABE dri2_from_dma_bufs call x2");
    return dri2_from_dma_bufs(
       dri2_dpy->dri_screen_render_gpu, width, height, buf_info->drm_fourcc,
       buf_info->modifier, buf_info->fds, buf_info->num_planes,

@@ -1656,9 +1656,11 @@ dri2_from_dma_bufs(__DRIscreen *screen,
    __DRIimage *img;
    const struct dri2_format_mapping *map = dri2_get_mapping_by_fourcc(fourcc);
 
+   os_log_message("GABE: dri2_from_dma_bufs ");
    if (!dri_screen(screen)->dmabuf_import) {
       if (error)
          *error = __DRI_IMAGE_ERROR_BAD_PARAMETER;
+      os_log_message("GABE: dri2_from_dma_bufs return NULL");
       return NULL;
    }
 
@@ -1721,9 +1723,11 @@ dri2_from_dma_bufs(__DRIscreen *screen,
    img->vertical_siting = vertical_siting;
 
    *error = __DRI_IMAGE_ERROR_SUCCESS;
+   os_log_message("GABE: dri2_from_dma_bufs __DRI_IMAGE_ERROR_SUCCESS!");
    return img;
 
 exit:
+   os_log_message("GABE: dri2_from_dma_bufs error!");
    *error = err;
    return NULL;
 }

@@ -1555,6 +1555,7 @@ dri3_alloc_render_buffer(struct loader_dri3_drawable *draw, unsigned int fourcc,
       /* The linear buffer was created in the display GPU's vram, so we
        * need to make it visible to render GPU
        */
+      os_log_message("GABE dri2_from_dma_bufs call x3");
       buffer->linear_buffer =
          dri2_from_dma_bufs(draw->dri_screen_render_gpu,
                                                   width,
@@ -1782,6 +1783,7 @@ loader_dri3_create_image(xcb_connection_t *c,
     * we've gotten the planar wrapper, pull the single plane out of it and
     * discard the wrapper.
     */
+   os_log_message("GABE dri2_from_dma_bufs call x4");
    image_planar = dri2_from_dma_bufs(dri_screen,
                                        bp_reply->width,
                                        bp_reply->height,
@@ -1831,6 +1833,7 @@ loader_dri3_create_image_from_buffers(xcb_connection_t *c,
       offsets[i] = offsets_in[i];
    }
 
+   os_log_message("GABE dri2_from_dma_bufs call x5");
    ret = dri2_from_dma_bufs(dri_screen,
                                        bp_reply->width,
                                        bp_reply->height,
