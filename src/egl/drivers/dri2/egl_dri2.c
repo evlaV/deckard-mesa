@@ -592,7 +592,7 @@ dri2_load_driver(_EGLDisplay *disp)
 
    disp->Options.Zink = true; //force true GABE
    _eglLog(_EGL_WARNING, "egl: dri2_load_driver GABE disp->Options.Zink = [%d]",disp->Options.Zink);
-   dri2_dpy->kopper = true; //disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
+   dri2_dpy->kopper = false; //disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
    dri2_dpy->swrast = (disp->Options.ForceSoftware && !dri2_dpy->kopper) ||
                       !dri2_dpy->driver_name || strstr(dri2_dpy->driver_name, "swrast");
    dri2_dpy->swrast_not_kms = dri2_dpy->swrast && (!dri2_dpy->driver_name || strcmp(dri2_dpy->driver_name, "kms_swrast"));
@@ -838,6 +838,8 @@ dri2_create_screen(_EGLDisplay *disp)
       }
    }
 
+   _eglLog(_EGL_WARNING, "egl: GABE XXX2 dri2_dpy->dri_screen_display_gpu=[%d]", dri2_dpy->dri_screen_display_gpu);
+
    int screen_fd = -1;
    if (!dri2_dpy->swrast) {
 #ifdef HAVE_DRM_PLATFORM
@@ -846,11 +848,15 @@ dri2_create_screen(_EGLDisplay *disp)
           screen_fd = dri2_dpy->fd_render_gpu;
    }
    
-   _eglLog(_EGL_WARNING, "egl: GABE XXX2 [%d]",screen_fd);
+   _eglLog(_EGL_WARNING, "egl: GABE XXX3 screen_fd=[%d], dri2_dpy->dri_screen_display_gpu=[%d]",screen_fd, dri2_dpy->dri_screen_display_gpu);
 
    dri2_dpy->dri_screen_render_gpu = driCreateNewScreen3(
       0, screen_fd, dri2_dpy->loader_extensions, type,
       &dri2_dpy->driver_configs, false, dri2_dpy->multibuffers_available, disp);
+
+
+   _eglLog(_EGL_WARNING, "egl: GABE XXX3 screen_fd=[%d], dri2_dpy->dri_screen_render_gpu=[%d] dri2_dpy->dri_screen_display_gpu=[%d]",
+                                             screen_fd, dri2_dpy->dri_screen_render_gpu, dri2_dpy->dri_screen_display_gpu);
 
    if (dri2_dpy->dri_screen_render_gpu == NULL) {
       _eglLog(_EGL_WARNING, "egl: failed to create dri2 screen GABEegl");

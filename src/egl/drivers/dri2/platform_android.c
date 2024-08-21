@@ -90,9 +90,13 @@ droid_create_image_from_native_buffer(_EGLDisplay *disp,
    };
    __DRIimage *img = NULL;
 
+   _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x1");
    if (u_gralloc_get_buffer_basic_info(dri2_dpy->gralloc, &gr_handle,
                                        &buf_info))
-      return 0;
+   {
+      _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x2");
+                                                return 0;
+   }
 
    /* May fail in some cases, defaults will be used in that case */
    u_gralloc_get_buffer_color_info(dri2_dpy->gralloc, &gr_handle, &color_info);
@@ -100,6 +104,7 @@ droid_create_image_from_native_buffer(_EGLDisplay *disp,
    img = droid_create_image_from_buffer_info(dri2_dpy, buf->width, buf->height,
                                              &buf_info, &color_info, priv);
 
+   _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x3 [%p]",img);
    if (!img) {
       /* If dri driver is gallium virgl, real modifier info queried back from
        * CrOS info (and potentially mapper metadata if integrated later) cannot
@@ -107,11 +112,14 @@ droid_create_image_from_native_buffer(_EGLDisplay *disp,
        * behavior is preserved so that the buffer can be imported without
        * modifier info as a last resort.
        */
+      _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x4");
       buf_info.modifier = DRM_FORMAT_MOD_INVALID;
       img = droid_create_image_from_buffer_info(
          dri2_dpy, buf->width, buf->height, &buf_info, &color_info, priv);
+      _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x5 [%p]",img);
    }
 
+   _eglLog(_EGL_WARNING, "GABE: droid_create_image_from_native_buffer x6");
    return img;
 }
 
@@ -518,6 +526,7 @@ get_back_bo(struct dri2_egl_surface *dri2_surf)
          droid_create_image_from_native_buffer(disp, dri2_surf->buffer, NULL);
       if (!dri2_surf->dri_image_back) {
          _eglLog(_EGL_WARNING, "failed to create DRI image from FD");
+         _eglLog(_EGL_WARNING, "GABE why are we hitting this?");
          return -1;
       }
 

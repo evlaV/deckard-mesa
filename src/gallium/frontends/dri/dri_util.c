@@ -202,6 +202,12 @@ driCreateNewScreen3(int scrn, int fd,
     if (screen->max_gl_es2_version >= 30)
        screen->api_mask |= (1 << __DRI_API_GLES3);
 
+   
+   snprintf(mystr,128,"GABE: driCreateNewScreen3 x6a pscreen=[%p] screen=[%p]",pscreen,screen); os_log_message(mystr);
+
+   snprintf(mystr,128,"GABE: driCreateNewScreen3 x6b opaque_dri_screen(screen)=[%p]",opaque_dri_screen(screen)); os_log_message(mystr);
+
+
    os_log_message("GABE: driCreateNewScreen3 x7");
 
     return opaque_dri_screen(screen);

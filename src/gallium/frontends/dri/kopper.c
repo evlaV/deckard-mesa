@@ -106,7 +106,7 @@ kopper_init_screen(struct dri_screen *screen, bool driver_name_is_inferred)
    screen->is_sw = zink_kopper_is_cpu(pscreen);
 
    char mystr[128];
-   snprintf(mystr,128,"GABE: kopper_init_screen x9 screen->is_sw=%d",screen->is_sw); os_log_message(mystr);
+   snprintf(mystr,128,"GABE: kopper_init_screen x9 screen->is_sw=%d, pscreen=%p",screen->is_sw,pscreen); os_log_message(mystr);
 
    os_log_message("GABE: kopper_init_screen x10");
 
