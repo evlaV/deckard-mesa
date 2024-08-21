@@ -592,7 +592,7 @@ dri2_load_driver(_EGLDisplay *disp)
 
    disp->Options.Zink = true; //force true GABE
    _eglLog(_EGL_WARNING, "egl: dri2_load_driver GABE disp->Options.Zink = [%d]",disp->Options.Zink);
-   dri2_dpy->kopper = false; //disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
+   dri2_dpy->kopper = true; //disp->Options.Zink && !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
    dri2_dpy->swrast = (disp->Options.ForceSoftware && !dri2_dpy->kopper) ||
                       !dri2_dpy->driver_name || strstr(dri2_dpy->driver_name, "swrast");
    dri2_dpy->swrast_not_kms = dri2_dpy->swrast && (!dri2_dpy->driver_name || strcmp(dri2_dpy->driver_name, "kms_swrast"));
@@ -829,6 +829,7 @@ dri2_create_screen(_EGLDisplay *disp)
                                           driver_name_display_gpu, dri2_dpy->fd_display_gpu, dri2_dpy->fd_render_gpu);
 
          if (strcmp(dri2_dpy->driver_name, driver_name_display_gpu) == 0) {
+            _eglLog(_EGL_WARNING, "egl: GABE XXX2 -- calling driCreateNewScreen3()");
             dri2_dpy->dri_screen_display_gpu = driCreateNewScreen3(
                0, dri2_dpy->fd_display_gpu, dri2_dpy->loader_extensions,
                type, &dri2_dpy->driver_configs, false, dri2_dpy->multibuffers_available, disp);

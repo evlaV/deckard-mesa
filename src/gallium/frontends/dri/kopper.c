@@ -38,11 +38,11 @@
 #include "dri_context.h"
 #include "dri_drawable.h"
 #include "dri_helpers.h"
-#include "loader_dri3_helper.h"
 
 #include <vulkan/vulkan.h>
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
+#include "loader_dri3_helper.h"
 #include <xcb/xcb.h>
 #include <xcb/dri3.h>
 #include <xcb/present.h>
@@ -60,8 +60,10 @@ struct pipe_screen *
 kopper_init_screen(struct dri_screen *screen, bool driver_name_is_inferred)
 {
    struct pipe_screen *pscreen = NULL;
-
+//GABE
+   os_log_message("GABE: kopper_init_screen x1");
    if (!screen->kopper_loader) {
+      os_log_message("GABE: kopper_init_screen x2");
       fprintf(stderr, "mesa: Kopper interface not found!\n"
                       "      Ensure the versions of %s built with this version of Zink are\n"
                       "      in your library path!\n", KOPPER_LIB_NAMES);
@@ -73,21 +75,40 @@ kopper_init_screen(struct dri_screen *screen, bool driver_name_is_inferred)
    bool success;
 #ifdef HAVE_LIBDRM
    if (screen->fd != -1)
+   {
+      os_log_message("GABE: kopper_init_screen x3");
       success = pipe_loader_drm_probe_fd(&screen->dev, screen->fd, false);
+   }
    else
+   {
+      os_log_message("GABE: kopper_init_screen x4");
       success = pipe_loader_vk_probe_dri(&screen->dev);
+   }
 #else
+   os_log_message("GABE: kopper_init_screen x5");
    success = pipe_loader_vk_probe_dri(&screen->dev);
 #endif
 
    if (success)
+   {
+      os_log_message("GABE: kopper_init_screen x6");
       pscreen = pipe_loader_create_screen(screen->dev, driver_name_is_inferred);
+   }
 
    if (!pscreen)
+   {
+      os_log_message("GABE: kopper_init_screen x7");
       return NULL;
+   }
 
    assert(pscreen->get_param(pscreen, PIPE_CAP_DEVICE_RESET_STATUS_QUERY));
+   os_log_message("GABE: kopper_init_screen x8");
    screen->is_sw = zink_kopper_is_cpu(pscreen);
+
+   char mystr[128];
+   snprintf(mystr,128,"GABE: kopper_init_screen x9 screen->is_sw=%d",screen->is_sw); os_log_message(mystr);
+
+   os_log_message("GABE: kopper_init_screen x10");
 
    return pscreen;
 }

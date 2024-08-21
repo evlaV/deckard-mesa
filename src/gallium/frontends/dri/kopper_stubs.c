@@ -30,6 +30,7 @@ kopper_init_screen(struct dri_screen *screen, bool driver_name_is_inferred);
 const __DRIconfig **
 kopper_init_screen(struct dri_screen *screen, bool driver_name_is_inferred)
 {
+   os_log_message("GABE: kopper_init_screen STUB WTF?!");
    return NULL;
 }
 
