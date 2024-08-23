@@ -405,7 +405,7 @@ a6xx_gen4 = A6XXProps(
         has_cp_reg_write = False,
         has_8bpp_ubwc = False,
         has_lpac = True,
-        has_shading_rate = True,
+        has_legacy_pipeline_shading_rate = True,
         has_getfiberid = True,
         has_dp2acc = True,
         has_dp4acc = True,
@@ -818,7 +818,6 @@ a7xx_base = A6XXProps(
         has_separate_chroma_filter = True,
         has_sample_locations = True,
         has_lpac = True,
-        has_shading_rate = True,
         has_getfiberid = True,
         has_dp2acc = True,
         has_dp4acc = True,
@@ -833,6 +832,7 @@ a7xx_base = A6XXProps(
         has_isam_v = True,
         has_ssbo_imm_offsets = True,
         has_early_preamble = True,
+        has_attachment_shading_rate = True,
     )
 
 a7xx_725 = A7XXProps(
@@ -866,6 +866,7 @@ a7xx_740 = A7XXProps(
         # Most devices with a740 have blob v6xx which doesn't have
         # this hint set. Match them for better compatibility by default.
         enable_tp_ubwc_flag_hint = False,
+        has_primitive_shading_rate = True,
     )
 
 a7xx_740_a32 = A7XXProps(
@@ -876,6 +877,7 @@ a7xx_740_a32 = A7XXProps(
         supports_ibo_ubwc = True,
         fs_must_have_non_zero_constlen_quirk = True,
         enable_tp_ubwc_flag_hint = False,
+        has_primitive_shading_rate = True,
     )
 
 a7xx_750 = A7XXProps(
@@ -893,6 +895,7 @@ a7xx_750 = A7XXProps(
         ubwc_all_formats_compatible = True,
         has_compliant_dp4acc = True,
         ubwc_coherency_quirk = True,
+        has_primitive_shading_rate = True,
     )
 
 a730_magic_regs = dict(
@@ -948,11 +951,6 @@ a730_raw_magic_regs = [
         [A6XXRegs.REG_A7XX_RB_UNKNOWN_8E79,   0x00000000],
         [A6XXRegs.REG_A7XX_RB_UNKNOWN_8899,   0x00000000],
         [A6XXRegs.REG_A7XX_RB_UNKNOWN_88F5,   0x00000000],
-
-        # Shading rate group
-        [A6XXRegs.REG_A6XX_RB_UNKNOWN_88F4,   0x00000000],
-        [A6XXRegs.REG_A7XX_HLSQ_UNKNOWN_A9AD, 0x00000000],
-        [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F4, 0x00000000],
     ]
 
 add_gpus([
@@ -1061,11 +1059,7 @@ add_gpus([
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_88F5,   0x00000000],
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_8C34,   0x00000000],
 
-            # Shading rate group
-            [A6XXRegs.REG_A6XX_RB_UNKNOWN_88F4,   0x00000000],
-            [A6XXRegs.REG_A7XX_HLSQ_UNKNOWN_A9AD, 0x00000000],
             [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8008, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F4, 0x00000000],
         ],
     ))
 
@@ -1149,12 +1143,7 @@ add_gpus([
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_88F5,   0x00000000],
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_8C34,   0x00000000],
 
-            # Shading rate group
-            [A6XXRegs.REG_A6XX_RB_UNKNOWN_88F4,   0x00000000],
-            [A6XXRegs.REG_A7XX_HLSQ_UNKNOWN_A9AD, 0x00000000],
             [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8008, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F4, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F5, 0x00000000],
         ],
     ))
 
@@ -1233,12 +1222,6 @@ add_gpus([
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_8E79,   0x00000000],
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_8899,   0x00000000],
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_88F5,   0x00000000],
-
-            # Shading rate group
-            [A6XXRegs.REG_A6XX_RB_UNKNOWN_88F4,   0x00000000],
-            [A6XXRegs.REG_A7XX_HLSQ_UNKNOWN_A9AD, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F4, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F5, 0x00000000],
         ],
     ))
 
@@ -1309,11 +1292,7 @@ add_gpus([
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_88F5,   0x00000000],
             [A6XXRegs.REG_A7XX_RB_UNKNOWN_8C34,   0x00000000],
 
-            # Shading rate group
-            [A6XXRegs.REG_A6XX_RB_UNKNOWN_88F4,   0x00000000],
-            [A6XXRegs.REG_A7XX_HLSQ_UNKNOWN_A9AD, 0x00000000],
             [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_8008, 0x00000000],
-            [A6XXRegs.REG_A7XX_GRAS_UNKNOWN_80F4, 0x00000000],
 
             [0x930a, 0],
             [0x960a, 1],
