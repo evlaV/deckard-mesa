@@ -79,7 +79,7 @@ struct fd_dev_info {
       bool tess_use_shared;
 
       /* Does the hw support GL_QCOM_shading_rate? */
-      bool has_shading_rate;
+      bool has_legacy_pipeline_shading_rate;
 
       /* Whether a 16-bit descriptor can be used */
       bool storage_16bit;
@@ -185,6 +185,8 @@ struct fd_dev_info {
        * Happens with VK_EXT_attachment_feedback_loop_layout.
        */
       bool has_coherent_ubwc_flag_caches;
+
+      bool has_attachment_shading_rate;
 
       struct {
          uint32_t PC_POWER_CNTL;
@@ -299,6 +301,8 @@ struct fd_dev_info {
        * on every suspend/resume.
        */
       bool has_persistent_counter;
+
+      bool has_primitive_shading_rate;
    } a7xx;
 };
 
