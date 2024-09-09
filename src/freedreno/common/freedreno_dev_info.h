@@ -280,6 +280,11 @@ struct fd_dev_info {
       bool ubwc_coherency_quirk;
 
       bool has_primitive_shading_rate;
+
+      /* Whether CP_ALWAYS_ON_COUNTER only resets on device loss rather than
+       * on every suspend/resume.
+       */
+      bool has_persistent_counter;
    } a7xx;
 };
 

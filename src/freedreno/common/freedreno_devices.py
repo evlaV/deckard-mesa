@@ -896,6 +896,7 @@ a7xx_750 = A7XXProps(
         has_compliant_dp4acc = True,
         ubwc_coherency_quirk = True,
         has_primitive_shading_rate = True,
+        has_persistent_counter = True,
     )
 
 a730_magic_regs = dict(
