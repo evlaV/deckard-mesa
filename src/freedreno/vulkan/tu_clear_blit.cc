@@ -3250,7 +3250,12 @@ use_generic_clear_for_image_clear(struct tu_cmd_buffer *cmd,
            * generic clears for it. A7XX TODO: allow R9G9B9E5_FLOAT
            * attachments.
            */
-          image->vk.format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32;
+          image->vk.format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 &&
+          /* Clearing VK_FORMAT_R8G8_* with fast-clear value, certain
+           * dimensions (e.g. 960x540), and having GMEM renderpass afterwards
+           * may lead to a GPU fault on A7XX.
+           */
+          !image_is_r8g8(image);
 }
 
 template <chip CHIP>
