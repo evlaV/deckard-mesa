@@ -1542,7 +1542,7 @@ relative:          relative_gpr_src
  * the FLUT table)
  */
 immediate_cat1:    integer             { new_src(0, IR3_REG_IMMED)->iim_val = type_size(instr->cat1.src_type) < 32 ? $1 & 0xffff : $1; }
-|                  '(' integer ')'     { new_src(0, IR3_REG_IMMED)->fim_val = $2; }
+|                  '(' integer ')'     { new_src(0, IR3_REG_IMMED)->iim_val = $2; }
 |                  '(' float ')'       { new_src(0, IR3_REG_IMMED)->fim_val = $2; }
 |                  'h' '(' integer ')' { new_src(0, IR3_REG_IMMED | IR3_REG_HALF)->iim_val = $3 & 0xffff; }
 |                  'h' '(' float ')'   { new_src(0, IR3_REG_IMMED | IR3_REG_HALF)->uim_val = _mesa_float_to_half($3); }
@@ -1550,7 +1550,7 @@ immediate_cat1:    integer             { new_src(0, IR3_REG_IMMED)->iim_val = ty
 |                  '(' T_INF ')'       { new_src(0, IR3_REG_IMMED)->fim_val = INFINITY; }
 
 immediate:         integer             { new_src(0, IR3_REG_IMMED)->iim_val = $1; }
-|                  '(' integer ')'     { new_src(0, IR3_REG_IMMED)->fim_val = $2; }
+|                  '(' integer ')'     { new_src(0, IR3_REG_IMMED)->iim_val = $2; }
 |                  flut_immed          { new_src(0, IR3_REG_IMMED)->uim_val = $1; }
 |                  'h' '(' integer ')' { new_src(0, IR3_REG_IMMED | IR3_REG_HALF)->iim_val = $3; }
 |                  'h' flut_immed      { new_src(0, IR3_REG_IMMED | IR3_REG_HALF)->uim_val = $2; }
