@@ -522,6 +522,12 @@ struct ir3_shader_options {
 
    uint32_t push_consts_base;
    uint32_t push_consts_dwords;
+
+   /* Whether FRAG_RESULT_DATAi slots may be dynamically remapped by the driver.
+    * If true, ir3 will assume it cannot statically use the value of such slots
+    * anywhere (e.g., as the target of alias.rt).
+    */
+   bool fragdata_dynamic_remap;
 };
 
 /**
