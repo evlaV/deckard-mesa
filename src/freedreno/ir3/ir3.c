@@ -72,7 +72,12 @@ collect_reg_info(struct ir3_instruction *instr, struct ir3_register *reg,
 {
    struct ir3_shader_variant *v = info->data;
 
-   if (reg->flags & IR3_REG_IMMED) {
+   /* Alias registers don't occupy GPR space so we don't have to count them.
+    * However, when wrmask > 1, this will be set even when not all registers are
+    * aliases. We can still ignore them here though since those registers will
+    * also appear as a dst of another instructions and will be counted there.
+    */
+   if (reg->flags & (IR3_REG_IMMED | IR3_REG_ALIAS)) {
       /* nothing to do */
       return;
    }
@@ -1444,7 +1449,7 @@ ir3_valid_flags(struct ir3_instruction *instr, unsigned n, unsigned flags)
 bool
 ir3_valid_immediate(struct ir3_instruction *instr, int32_t immed)
 {
-   if (instr->opc == OPC_MOV || is_meta(instr))
+   if (instr->opc == OPC_MOV || is_meta(instr) || instr->opc == OPC_ALIAS)
       return true;
 
    if (is_mem(instr)) {

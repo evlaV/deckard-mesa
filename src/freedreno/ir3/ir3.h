@@ -157,6 +157,17 @@ typedef enum ir3_register_flags {
 
    /* Render target dst. Only used by alias.rt. */
    IR3_REG_RT = BIT(20),
+
+   /* Register that is initialized using alias.tex (or will be once the
+    * alias.tex instructions are inserted). Before alias.tex is inserted, alias
+    * registers may contain things that are normally not allowed by the owning
+    * instruction (e.g., consts or immediates) because they will be replaced by
+    * GPRs later.
+    * Note that if wrmask > 1, this will be set if any of the registers is an
+    * alias, even though not all of them may be. We currently have no way to
+    * tell which ones are actual aliases.
+    */
+   IR3_REG_ALIAS = BIT(21),
 } ir3_register_flags;
 
 struct ir3_register {
@@ -1126,7 +1137,7 @@ is_mem(struct ir3_instruction *instr)
 static inline bool
 is_barrier(struct ir3_instruction *instr)
 {
-   return (opc_cat(instr->opc) == 7);
+   return (opc_cat(instr->opc) == 7) && instr->opc != OPC_ALIAS;
 }
 
 static inline bool
@@ -1400,6 +1411,8 @@ is_reg_gpr(const struct ir3_register *reg)
    if (!(reg->flags & (IR3_REG_SSA | IR3_REG_RELATIV)) &&
        reg->num == INVALID_REG)
       return false;
+   if (reg->flags & IR3_REG_RT)
+      return false;
    return true;
 }
 
@@ -1524,8 +1537,10 @@ conflicts(struct ir3_register *a, struct ir3_register *b)
 static inline bool
 reg_gpr(struct ir3_register *r)
 {
-   if (r->flags & (IR3_REG_CONST | IR3_REG_IMMED | IR3_REG_PREDICATE))
+   if (r->flags &
+       (IR3_REG_CONST | IR3_REG_IMMED | IR3_REG_PREDICATE | IR3_REG_RT)) {
       return false;
+   }
    if (reg_num(r) == REG_A0)
       return false;
    return true;
@@ -2072,6 +2087,12 @@ needs_ss(const struct ir3_compiler *compiler, struct ir3_instruction *producer,
       return false;
 
    return is_ss_producer(producer);
+}
+
+static inline bool
+supports_ss(struct ir3_instruction *instr)
+{
+   return opc_cat(instr->opc) < 5 || instr->opc == OPC_ALIAS;
 }
 
 /* The soft delay for approximating the cost of (ss). */
