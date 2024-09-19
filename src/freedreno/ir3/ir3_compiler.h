@@ -339,6 +339,7 @@ enum ir3_shader_debug {
    IR3_DBG_SCHEDMSGS = BITFIELD_BIT(20),
    IR3_DBG_RAMSGS = BITFIELD_BIT(21),
    IR3_DBG_NOALIASTEX = BITFIELD_BIT(22),
+   IR3_DBG_NOALIASRT = BITFIELD_BIT(23),
 
    /* Only used for the disk-caching logic: */
    IR3_DBG_ROBUST_UBO_ACCESS = BITFIELD_BIT(30),
