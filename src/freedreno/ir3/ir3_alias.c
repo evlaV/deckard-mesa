@@ -64,7 +64,7 @@ alias_srcs(struct ir3_instruction *instr)
       ir3_alloc(instr->block->shader, new_srcs_count * sizeof(instr->srcs[0]));
    instr->srcs_count = 0;
 
-#ifndef NDEBUG
+#if MESA_DEBUG
    instr->srcs_max = new_srcs_count;
 #endif
 
