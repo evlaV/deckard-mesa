@@ -4346,6 +4346,11 @@ typedef struct nir_shader_compiler_options {
    uint8_t support_indirect_outputs;
 
    /**
+    * Lower fmulz to `min(abs(a), abs(b)) == 0.0 ? 0.0 : a * b`.
+    */
+   bool lower_fmulz_with_abs_min;
+
+   /**
     * Remove varying loaded from uniform, let fragment shader load the
     * uniform directly. GPU passing varying by memory can benifit from it
     * for sure; but GPU passing varying by on chip resource may not.
