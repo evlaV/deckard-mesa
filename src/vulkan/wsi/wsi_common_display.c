@@ -294,6 +294,14 @@ wsi_display_parse_edid(struct wsi_display_connector *connector, drmModePropertyB
 #endif
 }
 
+bool b_cac_enabled = false;
+
+static bool
+cac_enabled()
+{
+   return b_cac_enabled;
+}
+
 /**
  * Creates the mapping from our property enums to the KMS property ID for that
  * property associated with the object.
@@ -326,6 +334,7 @@ find_properties(struct wsi_display_connector *connector, uint32_t count_props, u
     * verification at the bottom.
     */
    if (type == DRM_MODE_OBJECT_CRTC) {
+      prop_id[CAC_BLOB] = -1;
       prop_id[GAMMA_LUT] = -1;
       prop_id[DEGAMMA_LUT] = -1;
       prop_id[CTM] = -1;
@@ -341,6 +350,10 @@ find_properties(struct wsi_display_connector *connector, uint32_t count_props, u
       drmModePropertyPtr prop = drmModeGetProperty(fd, props[p]);
       if (!prop)
          continue;
+
+      if(!b_cac_enabled && !strcmp(prop->name, "CAC_BLOB")) {
+         b_cac_enabled = true; //if we ever see CAC_BLOB then latch b_cac_enabled = true
+      }
 
 #define PROPERTY(x) if (!strcmp(prop->name, #x)) prop_id[x] = props[p]
       switch (type) {
@@ -2984,6 +2997,8 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    if ((int)surface->src_rgb[0].extent.width < 0)
          rotation_value |= DRM_MODE_REFLECT_X;
 
+   if (surface->cac_dirty && !cac_enabled() ) surface->cac_dirty = 0;
+
    if (surface->cac_dirty) {
       struct CAC_BLOB cac[4]; // 4 possible CAC regions, 2 per eye
 
@@ -3128,14 +3143,15 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_Y], 0);
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_W], mode->hdisplay);
    drmModeAtomicAddProperty(req, plane_id, prop[CRTC_H], mode->vdisplay);
-   drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
+
+   if ( cac_enabled()) drmModeAtomicAddProperty(req, plane_id, prop[rotation], rotation_value);
 
    ret = drmModeAtomicCommit(fd, req, flags, image);
    if (ret)
       goto out;
 
    if (mode_id != -1) drmModeDestroyPropertyBlob(fd, mode_id);
-   if (cac_blob != -1) drmModeDestroyPropertyBlob(fd, cac_blob);
+   if ( cac_enabled() && cac_blob != -1) drmModeDestroyPropertyBlob(fd, cac_blob);
 
 out:
    drmModeAtomicFree(req);
