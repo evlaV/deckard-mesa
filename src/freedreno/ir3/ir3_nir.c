@@ -1132,7 +1132,10 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so, nir_shader *s)
           * sampler to just be 16-bit texture sources.
           */
          struct nir_opt_tex_srcs_options opt_srcs_options = {
-            .sampler_dims = ~0,
+            /* {i}sam{*} treats 16b coords as signed instead of unsigned,
+             * so it would return 0 e.g. for offset 32768.
+             */
+            .sampler_dims = ~BITFIELD_BIT(GLSL_SAMPLER_DIM_BUF),
             .src_types = (1 << nir_tex_src_coord) |
                          (1 << nir_tex_src_lod) |
                          (1 << nir_tex_src_bias) |
