@@ -1045,6 +1045,11 @@ kgsl_queue_submit(struct tu_queue *queue, struct vk_queue_submit *vk_submit)
 {
    MESA_TRACE_FUNC();
 
+#if HAVE_PERFETTO
+   uint64_t start_ts = tu_perfetto_begin_submit();
+#endif
+   uint32_t submit_idx = queue->device->submit_count++;
+
    bool u_trace_enabled = u_trace_should_process(&queue->device->trace_context);
    bool has_trace_points = false;
 
@@ -1333,7 +1338,7 @@ kgsl_queue_submit(struct tu_queue *queue, struct vk_queue_submit *vk_submit)
          .gpu_ts_offset = gpu_offset,
       };
 
-      clocks = tu_perfetto_submit(queue->device, queue->device->submit_count, &clocks);
+      clocks = tu_perfetto_end_submit(queue, submit_idx, start_ts, &clocks);
       gpu_offset = clocks.gpu_ts_offset;
    }
 #endif
@@ -1362,7 +1367,7 @@ kgsl_queue_submit(struct tu_queue *queue, struct vk_queue_submit *vk_submit)
    if (u_trace_submission_data) {
       struct tu_u_trace_submission_data *submission_data =
          u_trace_submission_data;
-      submission_data->submission_id = queue->device->submit_count;
+      submission_data->submission_id = submit_idx;
       submission_data->gpu_ts_offset = gpu_offset;
       /* We have to allocate it here since it is different between drm/kgsl */
       submission_data->syncobj = (struct tu_u_trace_syncobj *)
@@ -1386,8 +1391,6 @@ kgsl_queue_submit(struct tu_queue *queue, struct vk_queue_submit *vk_submit)
          }
       }
    }
-
-   queue->device->submit_count++;
 
    pthread_mutex_unlock(&queue->device->submit_mutex);
    pthread_cond_broadcast(&queue->device->timeline_cond);

@@ -1081,7 +1081,10 @@ tu_queue_submit_locked(struct tu_queue *queue, struct tu_virtio_queue_submit *su
 {
    struct tu_virtio_device *vdev = queue->device->vdev;
 
-   queue->device->submit_count++;
+#if HAVE_PERFETTO
+   uint64_t start_ts = tu_perfetto_begin_submit();
+#endif
+   uint32_t submit_idx = queue->device->submit_count++;
 
    /* It would be nice to not need to defer this, but virtio_device_init()
     * happens before the device is initialized enough to allocate normal
@@ -1174,14 +1177,14 @@ tu_queue_submit_locked(struct tu_queue *queue, struct tu_virtio_queue_submit *su
    uint64_t gpu_offset = 0;
 #if HAVE_PERFETTO
    struct tu_perfetto_clocks clocks =
-      tu_perfetto_submit(queue->device, queue->device->submit_count, NULL);
+      tu_perfetto_end_submit(queue, submit_idx, start_ts, NULL);
    gpu_offset = clocks.gpu_ts_offset;
 #endif
 
    if (submit->u_trace_submission_data) {
       struct tu_u_trace_submission_data *submission_data =
          submit->u_trace_submission_data;
-      submission_data->submission_id = queue->device->submit_count;
+      submission_data->submission_id = submit_idx;
       submission_data->gpu_ts_offset = gpu_offset;
       /* We have to allocate it here since it is different between drm/kgsl */
       submission_data->syncobj = (struct tu_u_trace_syncobj *)

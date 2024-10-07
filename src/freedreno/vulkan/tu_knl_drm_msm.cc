@@ -979,6 +979,9 @@ tu_queue_build_msm_gem_submit_cmds(struct tu_queue *queue,
 static VkResult
 tu_queue_submit_locked(struct tu_queue *queue, struct tu_msm_queue_submit *submit)
 {
+#if HAVE_PERFETTO
+   uint64_t start_ts = tu_perfetto_begin_submit();
+#endif
    uint32_t submit_idx = queue->device->submit_count++;
 
    struct tu_cs *autotune_cs = NULL;
@@ -1078,14 +1081,14 @@ tu_queue_submit_locked(struct tu_queue *queue, struct tu_msm_queue_submit *submi
    uint64_t gpu_offset = 0;
 #if HAVE_PERFETTO
    struct tu_perfetto_clocks clocks =
-      tu_perfetto_submit(queue->device, queue->device->submit_count, NULL);
+      tu_perfetto_end_submit(queue, submit_idx, start_ts, NULL);
    gpu_offset = clocks.gpu_ts_offset;
 #endif
 
    if (submit->u_trace_submission_data) {
       struct tu_u_trace_submission_data *submission_data =
          submit->u_trace_submission_data;
-      submission_data->submission_id = queue->device->submit_count;
+      submission_data->submission_id = submit_idx;
       submission_data->gpu_ts_offset = gpu_offset;
       /* We have to allocate it here since it is different between drm/kgsl */
       submission_data->syncobj = (struct tu_u_trace_syncobj *)
