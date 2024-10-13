@@ -1155,6 +1155,8 @@ zink_init_screen_caps(struct zink_screen *screen)
 
    caps->string_marker = screen->instance_info->have_EXT_debug_utils;
 
+   caps->placed_allocation = screen->info.have_EXT_map_memory_placed;
+
    caps->min_line_width =
    caps->min_line_width_aa =
       screen->info.feats.features.wideLines ?
@@ -3332,6 +3334,17 @@ zink_cl_cts_version(struct pipe_screen *pscreen)
    return "v2024-08-08-00";
 }
 
+static void
+zink_set_placed_callbacks(struct pipe_screen *pscreen, const struct util_placed_callbacks *cbs)
+{
+   struct zink_screen *screen = zink_screen(pscreen);
+
+   if (cbs)
+      screen->placed_callbacks = *cbs;
+   else
+      memset(&screen->placed_callbacks, 0, sizeof(screen->placed_callbacks));
+}
+
 static struct zink_screen *
 zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev_major, int64_t dev_minor, uint64_t adapter_luid)
 {
@@ -3610,6 +3623,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    screen->base.is_compute_copy_faster = zink_is_compute_copy_faster;
    screen->base.is_format_supported = zink_is_format_supported;
    screen->base.driver_thread_add_job = zink_driver_thread_add_job;
+   screen->base.set_placed_callbacks = zink_set_placed_callbacks;
    if (screen->info.have_EXT_image_drm_format_modifier && screen->info.have_EXT_external_memory_dma_buf) {
       screen->base.query_dmabuf_modifiers = zink_query_dmabuf_modifiers;
       screen->base.is_dmabuf_modifier_supported = zink_is_dmabuf_modifier_supported;
