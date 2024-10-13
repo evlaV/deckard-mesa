@@ -935,6 +935,7 @@ glSecondaryColorPointer
 glSecondaryColorPointerEXT
 glSelectBuffer
 glSeparableFilter2D
+glSetPlacedAllocatorMESA
 glShadeModel
 glShaderBinary
 glShaderSource
