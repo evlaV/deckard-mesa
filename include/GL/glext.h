@@ -9472,6 +9472,16 @@ GLAPI void APIENTRY glGetFramebufferParameterivMESA (GLenum target, GLenum pname
 #define GL_PACK_INVERT_MESA               0x8758
 #endif /* GL_MESA_pack_invert */
 
+#ifndef GL_MESA_placed_allocation
+#define GL_MESA_placed_allocation 1
+typedef void *(APIENTRY  *GLplacedMapMESA)(GLuint size);
+typedef void (APIENTRY  *GLplacedUnmapMESA)(void *mapping, GLuint size);
+typedef void (APIENTRYP PFNGLSETPLACEDALLOCATORMESAPROC) (GLplacedMapMESA placedMap, GLplacedUnmapMESA placedUnmap);
+#ifdef GL_GLEXT_PROTOTYPES
+GLAPI void APIENTRY glSetPlacedAllocatorMESA (GLplacedMapMESA placedMap, GLplacedUnmapMESA placedUnmap);
+#endif
+#endif /* GL_MESA_placed_allocation */
+
 #ifndef GL_MESA_program_binary_formats
 #define GL_MESA_program_binary_formats 1
 #define GL_PROGRAM_BINARY_FORMAT_MESA     0x875F
