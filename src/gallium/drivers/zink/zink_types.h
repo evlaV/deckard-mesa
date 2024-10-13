@@ -690,6 +690,10 @@ struct zink_bo {
           * it can only transition from false to true. Protected by lock.
           */
          bool is_shared;
+
+         void *placed_token;
+         void *placed_addr;
+         unsigned int placed_size;
       } real;
       struct {
          struct pb_slab_entry entry;
@@ -1557,6 +1561,8 @@ struct zink_screen {
       unsigned z16_unscaled_bias;
       unsigned z24_unscaled_bias;
    } driver_workarounds;
+
+   struct util_placed_callbacks placed_callbacks;
 };
 
 static inline struct zink_screen *
