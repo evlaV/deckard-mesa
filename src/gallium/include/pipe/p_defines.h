@@ -1045,6 +1045,7 @@ struct pipe_caps {
    bool call_finalize_nir_in_linker;
    bool mesh_shader;
    bool representative_fragment_test;
+   bool placed_allocation;
 
    int accelerated;
    int min_texel_offset;
