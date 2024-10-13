@@ -1629,6 +1629,7 @@ all_functions = [
     "FramebufferTextureMultiviewOVR",
     "NamedFramebufferTextureMultiviewOVR",
     "FramebufferTextureMultisampleMultiviewOVR",
+    "SetPlacedAllocatorMESA",
 
     # Keep these last. They are never used by any app.
     "ColorTable",
