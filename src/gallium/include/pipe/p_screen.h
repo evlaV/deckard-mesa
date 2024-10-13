@@ -40,6 +40,7 @@
 
 #include "util/compiler.h"
 #include "util/format/u_formats.h"
+#include "util/u_placed_callbacks.h"
 #include "pipe/p_defines.h"
 #include "pipe/p_video_enums.h"
 
@@ -836,6 +837,9 @@ struct pipe_screen {
     * is used.
     */
    struct pipe_screen* (*get_driver_pipe_screen)(struct pipe_screen *screen);
+
+   void (*set_placed_callbacks)(struct pipe_screen *screen,
+                                const struct util_placed_callbacks *cbs);
 };
 
 
