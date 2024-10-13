@@ -1063,6 +1063,7 @@ struct pipe_caps {
    bool representative_fragment_test;
    bool prefer_persp;
    bool blit_3d;
+   bool placed_allocation;
 
    int accelerated;
    int min_texel_offset;
