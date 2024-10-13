@@ -1626,6 +1626,7 @@ all_functions = [
     "DrawMeshTasksIndirectEXT",
     "MultiDrawMeshTasksIndirectEXT",
     "MultiDrawMeshTasksIndirectCountEXT",
+    "SetPlacedAllocatorMESA",
 
     # Keep these last. They are never used by any app.
     "ColorTable",
