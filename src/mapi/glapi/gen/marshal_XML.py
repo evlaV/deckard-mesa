@@ -112,6 +112,8 @@ class marshal_function(gl_XML.gl_function):
             'GLint64': 8,
             'GLuint64': 8,
             'GLuint64EXT': 8,
+            'GLplacedMapMESA' : self.context.pointer_size,
+            'GLplacedUnmapMESA' : self.context.pointer_size,
         }
         val = mapping.get(type, 9999)
         if val == 9999:

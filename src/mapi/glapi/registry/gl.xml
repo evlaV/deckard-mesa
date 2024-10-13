@@ -64,6 +64,9 @@ typedef unsigned int GLhandleARB;
         <type>typedef unsigned short <name>GLhalfNV</name>;</type>
         <type requires="GLintptr">typedef GLintptr <name>GLvdpauSurfaceNV</name>;</type>
         <type>typedef void (<apientry/> *<name>GLVULKANPROCNV</name>)(void);</type>
+        <type>typedef void *(<apientry/> *<name>GLplacedMapMESA</name>)(GLuint size);</type>
+        <type>typedef void (<apientry/> *<name>GLplacedUnmapMESA</name>)(void *mapping, GLuint size);</type>
+
     </types>
 
     <kinds>
@@ -23299,6 +23302,11 @@ typedef unsigned int GLhandleARB;
             <param len="2">const <ptype>GLfloat</ptype> *<name>val</name></param>
         </command>
         <command>
+            <proto>void <name>glSetPlacedAllocatorMESA</name></proto>
+            <param><ptype>GLplacedMapMESA</ptype> <name>placedMap</name></param>
+            <param><ptype>GLplacedUnmapMESA</ptype> <name>placedUnmap</name></param>
+        </command>
+        <command>
             <proto>void <name>glShadeModel</name></proto>
             <param group="ShadingModel"><ptype>GLenum</ptype> <name>mode</name></param>
             <glx type="render" opcode="104"/>
@@ -43459,6 +43467,11 @@ typedef unsigned int GLhandleARB;
         <extension name="GL_MESA_pack_invert" supported="gl">
             <require>
                 <enum name="GL_PACK_INVERT_MESA"/>
+            </require>
+        </extension>
+        <extension name="GL_MESA_placed_allocation" supported="gl">
+            <require>
+                <command name="glSetPlacedAllocatorMESA"/>
             </require>
         </extension>
         <extension name="GL_MESA_program_binary_formats" supported="gl|gles2">
