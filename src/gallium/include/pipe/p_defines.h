@@ -1011,6 +1011,7 @@ struct pipe_caps {
    bool astc_decode_mode;
    bool shader_subgroup_quad_all_stages;
    bool call_finalize_nir_in_linker;
+   bool placed_allocation;
 
    int accelerated;
    int min_texel_offset;
