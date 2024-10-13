@@ -699,6 +699,7 @@ zink_bo_map(struct zink_screen *screen, struct zink_bo *bo)
    void *cpu = NULL;
    uint64_t offset = 0;
    struct zink_bo *real;
+   void *placed_token;
 
    if (bo->mem) {
       real = bo;
@@ -715,6 +716,35 @@ zink_bo_map(struct zink_screen *screen, struct zink_bo *bo)
        * be atomic thanks to the lock. */
       cpu = real->u.real.cpu_ptr;
       if (!cpu) {
+         if ((cpu = u_placed_map(&screen->placed_callbacks, real->base.base.size, &placed_token))) {
+            const VkMemoryMapPlacedInfoEXT placed_info = {
+               .sType = VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT,
+               .pNext = NULL,
+               .pPlacedAddress = cpu,
+            };
+
+            const VkMemoryMapInfoKHR info =
+            {
+               .sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR,
+               .pNext = &placed_info,
+               .flags = VK_MEMORY_MAP_PLACED_BIT_EXT,
+               .memory = real->mem,
+               .offset = 0,
+               .size = real->base.base.size,
+            };
+
+            VkResult result = VKSCR(MapMemory2KHR)(screen->dev, &info, &cpu);
+            if (result == VK_SUCCESS) {
+               real->u.real.placed_addr = placed_info.pPlacedAddress;
+               real->u.real.placed_size = real->base.base.size;
+               real->u.real.placed_token = placed_token;
+            } else {
+               mesa_loge("ZINK: placed vkMapMemory failed (%s)", vk_Result_to_str(result));
+               cpu = NULL;
+               u_placed_unmap(&screen->placed_callbacks, placed_info.pPlacedAddress, real->base.base.size, placed_token);
+            }
+         }
+
          VkResult result = VKSCR(MapMemory)(screen->dev, real->mem, 0, real->base.base.size, 0, &cpu);
          if (result != VK_SUCCESS) {
             mesa_loge("ZINK: vkMapMemory failed (%s)", vk_Result_to_str(result));
@@ -722,6 +752,7 @@ zink_bo_map(struct zink_screen *screen, struct zink_bo *bo)
             p_atomic_dec(&real->u.real.map_count);
             return NULL;
          }
+
          if (unlikely(zink_debug & ZINK_DEBUG_MAP)) {
             p_atomic_add(&screen->mapped_vram, real->base.base.size);
             mesa_loge("NEW MAP(%"PRIu64") TOTAL(%"PRIu64")", real->base.base.size, screen->mapped_vram);
@@ -748,7 +779,22 @@ zink_bo_unmap(struct zink_screen *screen, struct zink_bo *bo)
          p_atomic_add(&screen->mapped_vram, -real->base.base.size);
          mesa_loge("UNMAP(%"PRIu64") TOTAL(%"PRIu64")", real->base.base.size, screen->mapped_vram);
       }
-      VKSCR(UnmapMemory)(screen->dev, real->mem);
+      if (real->u.real.placed_addr)
+      {
+         const VkMemoryUnmapInfoKHR info =
+         {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR,
+            .memory = real->mem,
+            .flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT,
+         };
+
+         VKSCR(UnmapMemory2KHR)(screen->dev, &info);
+
+         u_placed_unmap(&screen->placed_callbacks, real->u.real.placed_addr, real->u.real.placed_size, real->u.real.placed_token);
+         real->u.real.placed_addr = NULL;
+      } else {
+         VKSCR(UnmapMemory)(screen->dev, real->mem);
+      }
       simple_mtx_unlock(&real->lock);
    }
 }
