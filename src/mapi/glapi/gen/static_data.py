@@ -1705,6 +1705,7 @@ offsets = {
     "FramebufferTextureMultiviewOVR": 1675,
     "NamedFramebufferTextureMultiviewOVR": 1676,
     "FramebufferTextureMultisampleMultiviewOVR": 1677,
+    "SetPlacedAllocatorMESA": 1678,
 }
 
 functions = [
@@ -2637,6 +2638,7 @@ functions = [
     "SecondaryColorPointer",
     "SecondaryColorPointerEXT",
     "SelectBuffer",
+    "SetPlacedAllocatorMESA",
     "SeparableFilter2D",
     "ShadeModel",
     "ShaderBinary",
