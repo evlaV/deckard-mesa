@@ -1632,6 +1632,7 @@ all_functions = [
     "CreateSemaphoresNV",
     "GetSemaphoreParameterivNV",
     "SemaphoreParameterivNV",
+    "SetPlacedAllocatorMESA",
 
     # Keep these last. They are never used by any app.
     "ColorTable",
