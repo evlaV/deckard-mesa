@@ -351,6 +351,11 @@ EXTENSIONS = [
               features=True,
               conditions=["$feats.shaderFloatControls2"]),
     Extension("VK_KHR_format_feature_flags2"),
+    Extension("VK_KHR_map_memory2"),
+    Extension("VK_EXT_map_memory_placed",
+              alias="map_placed",
+              features=True,
+              conditions=["$feats.memoryMapPlaced", "$feats.memoryUnmapReserve"]),
 ]
 
 # constructor: Versions(device_version(major, minor, patch), struct_version(major, minor))

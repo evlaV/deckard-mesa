@@ -714,6 +714,10 @@ struct zink_bo {
           * it can only transition from false to true. Protected by lock.
           */
          bool is_shared;
+
+         void *placed_token;
+         void *placed_addr;
+         unsigned int placed_size;
       } real;
       struct {
          struct pb_slab_entry entry;
@@ -1544,6 +1548,8 @@ struct zink_screen {
       /* intel driver is somehow broken for srgb-compatible dmabufs...but only in mesa CI */
       bool srgb_dmabufs;
    } driver_workarounds;
+
+   struct util_placed_callbacks placed_callbacks;
 };
 
 static inline struct zink_screen *
