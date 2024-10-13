@@ -3969,6 +3969,61 @@ _mesa_MapNamedBufferEXT(GLuint buffer, GLenum access)
                            "glMapNamedBufferEXT");
 }
 
+// should probably in some screen-equivalent object i didn't find
+static GLplacedMapMESA placed_map_cb;
+static GLplacedUnmapMESA placed_unmap_cb;
+
+static void* _mesa_placed_map(unsigned int size,
+                              void **token)
+{
+   void *mapping;
+
+   if (placed_map_cb && (mapping = placed_map_cb(size)))
+   {
+      *token = placed_unmap_cb;
+      return mapping;
+   }
+
+   return NULL;
+}
+
+static void _mesa_placed_unmap(void *mapping, unsigned int size, void *token)
+{
+   GLplacedUnmapMESA matched_unmap = (GLplacedUnmapMESA) token;
+
+   if (matched_unmap)
+      matched_unmap(mapping, size);
+}
+
+static void set_placed_allocator(struct gl_context *ctx, GLplacedMapMESA placedMap, GLplacedUnmapMESA placedUnmap)
+{
+   struct util_placed_callbacks cbs = {
+      _mesa_placed_map,
+      _mesa_placed_unmap,
+   };
+
+   ctx->pipe->screen->set_placed_callbacks(ctx->pipe->screen, &cbs);
+
+   placed_map_cb = placedMap;
+   placed_unmap_cb = placedUnmap;
+}
+
+void GLAPIENTRY
+_mesa_SetPlacedAllocatorMESA(GLplacedMapMESA placedMap, GLplacedUnmapMESA placedUnmap)
+{
+   GET_CURRENT_CONTEXT(ctx);
+
+   set_placed_allocator(ctx, placedMap, placedUnmap);
+}
+
+void GLAPIENTRY
+_mesa_SetPlacedAllocatorMESA_no_error(GLplacedMapMESA placedMap, GLplacedUnmapMESA placedUnmap)
+{
+   GET_CURRENT_CONTEXT(ctx);
+
+   set_placed_allocator(ctx, placedMap, placedUnmap);
+}
+
 static void
 flush_mapped_buffer_range(struct gl_context *ctx,
                           struct gl_buffer_object *bufObj,

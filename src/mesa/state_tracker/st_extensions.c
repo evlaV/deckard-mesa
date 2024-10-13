@@ -1160,6 +1160,7 @@ void st_init_extensions(struct pipe_screen *screen,
    EXT_CAP(INTEL_blackhole_render,           frontend_noop);
    EXT_CAP(ARM_shader_framebuffer_fetch_depth_stencil, fbfetch_zs);
    EXT_CAP(MESA_texture_const_bandwidth,     has_const_bw);
+   EXT_CAP(MESA_placed_allocation,           placed_allocation);
 
 #undef EXT_CAP
 
