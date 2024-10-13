@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!DOCTYPE OpenGLAPI SYSTEM "gl_API.dtd">
+
+<OpenGLAPI>
+
+<category name="GL_MESA_placed_allocation">
+    <type name="placedMapMESA" size="4" pointer="true"/>
+    <type name="placedUnmapMESA" size="4" pointer="true"/>
+
+    <function name="SetPlacedAllocatorMESA" es2="3.0" desktop="true" no_error="true">
+        <param name="placedMap" type="GLplacedMapMESA"/>
+        <param name="placedUnmap" type="GLplacedUnmapMESA"/>
+    </function>
+</category>
+
+</OpenGLAPI>
