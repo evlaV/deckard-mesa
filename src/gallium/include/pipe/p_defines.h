@@ -1064,6 +1064,7 @@ struct pipe_caps {
    bool prefer_persp;
    bool blit_3d;
    bool glsl_bindless_handles_are_32bit;
+   bool placed_allocation;
 
    int accelerated;
    int min_texel_offset;
