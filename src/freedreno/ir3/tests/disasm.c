@@ -173,6 +173,7 @@ static const struct test {
    INSTR_7XX(a00c3101_c2040001, "isam.v.base0 (u32)(x)r0.y, r0.x, s#0, t#1"),
    INSTR_7XX(a00c3101_c2000001, "isam.v.base0.1d (u32)(x)r0.y, r0.x, s#0, t#1"),
    INSTR_7XX(a02c3f06_c2041003, "isam.v.base0 (u32)(xyzw)r1.z, r0.y+8, s#0, t#1"),
+   INSTR_7XX(a02c3f05_a1240601, "isam.v.s2en.uniform.base0 (u32)(xyzw)r1.y, r0.x+3, r2.y"),
 
    /* dEQP-VK.subgroups.arithmetic.compute.subgroupadd_float */
    INSTR_6XX(a7c03102_00100003, "brcst.active.w8 (u32)(x)r0.z, r0.y"), /* brcst.active.w8 (u32)(xOOO)r0.z, r0.y */
