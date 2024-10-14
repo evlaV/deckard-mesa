@@ -209,9 +209,8 @@ static void fixup_cat5_s2en(void)
 	else
 		assert(s2en_src->flags & IR3_REG_HALF);
 
-	for (int i = 0; i < instr->srcs_count - 1; i++) {
-		instr->srcs[i+1] = instr->srcs[i];
-	}
+	memmove(instr->srcs + 1, instr->srcs,
+		(instr->srcs_count - 1) * sizeof(instr->srcs[0]));
 	instr->srcs[0] = s2en_src;
 }
 
