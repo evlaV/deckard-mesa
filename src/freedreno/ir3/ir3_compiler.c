@@ -150,6 +150,7 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->bitops_can_write_predicates = false;
    compiler->has_branch_and_or = false;
    compiler->has_rpt_bary_f = false;
+   compiler->has_alias = false;
 
    if (compiler->gen >= 6) {
       compiler->samgq_workaround = true;
@@ -220,6 +221,10 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
       compiler->has_early_preamble = dev_info->a6xx.has_early_preamble;
       compiler->has_rpt_bary_f = true;
       compiler->has_shfl = true;
+
+      if (compiler->gen >= 7) {
+         compiler->has_alias = true;
+      }
    } else {
       compiler->max_const_pipeline = 512;
       compiler->max_const_geom = 512;
