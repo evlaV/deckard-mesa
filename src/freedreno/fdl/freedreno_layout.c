@@ -28,10 +28,10 @@ fdl_layout_buffer(struct fdl_layout *layout, uint32_t size)
 const char *
 fdl_tile_mode_desc(const struct fdl_layout *layout, int level)
 {
-   if (fdl_ubwc_enabled(layout, level))
-      return "UBWC";
-   else if (fdl_tile_mode(layout, level) == 0) /* TILE6_LINEAR and friends */
+   if (fdl_tile_mode(layout, level) == 0)
       return "linear";
+   else if (fdl_ubwc_enabled(layout, level))
+      return "UBWC";
    else
       return "tiled";
 }
