@@ -524,6 +524,12 @@ ir3_lower_copies(struct ir3_shader_variant *v)
             unsigned flags = dst->flags & (IR3_REG_HALF | IR3_REG_SHARED);
             for (unsigned i = 0; i < instr->srcs_count; i++) {
                struct ir3_register *src = instr->srcs[i];
+
+               /* Don't add a copy if the dst is not used. */
+               if (!(dst->wrmask & (1 << i))) {
+                  continue;
+               }
+
                array_insert(NULL, copies,
                             (struct copy_entry){
                                .dst = ra_num_to_physreg(dst->num + i, flags),
