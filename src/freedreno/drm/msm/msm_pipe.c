@@ -170,8 +170,13 @@ open_submitqueue(struct fd_pipe *pipe, uint32_t prio)
    const struct fd_dev_info *info = fd_dev_info_raw(&pipe->dev_id);
    int ret = -1;
 
-   if (info && info->chip >= A7XX)
-      ret = __open_submitqueue(pipe, prio, MSM_SUBMITQUEUE_ALLOW_PREEMPT);
+   if (info && info->chip >= A7XX) {
+      /* Not MSM_SUBMITQUEUE_ALLOW_PREEMPT so that this works with our older
+       * kernel.
+       */
+      //ret = __open_submitqueue(pipe, prio, MSM_SUBMITQUEUE_ALLOW_PREEMPT);
+      ret = __open_submitqueue(pipe, prio, 0);
+   }
 
    /* If kernel doesn't support preemption, try again without: */
    if (ret)

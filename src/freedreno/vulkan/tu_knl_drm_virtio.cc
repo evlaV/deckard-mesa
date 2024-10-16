@@ -310,9 +310,12 @@ virtio_submitqueue_new(struct tu_device *dev,
           priority < dev->physical_device->submitqueue_priority_count);
 
    struct drm_msm_submitqueue req = {
-      .flags = dev->physical_device->info->chip >= 7 &&
-         dev->physical_device->has_preemption ?
-         MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0,
+      /* Not MSM_SUBMITQUEUE_ALLOW_PREEMPT so that this works with our older
+       * kernel.
+       */
+      //.flags = dev->physical_device->info->chip >= 7 &&
+      //   dev->physical_device->has_preemption ?
+      //   MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0,
       .prio = priority,
    };
 
@@ -334,7 +337,10 @@ static bool
 virtio_has_preemption(struct vdrm_device *vdrm)
 {
    struct drm_msm_submitqueue req = {
-      .flags = MSM_SUBMITQUEUE_ALLOW_PREEMPT,
+      /* Not MSM_SUBMITQUEUE_ALLOW_PREEMPT so that this works with our older
+       * kernel.
+       */
+      //.flags = MSM_SUBMITQUEUE_ALLOW_PREEMPT,
       .prio = vdrm->caps.u.msm.priorities / 2,
    };
 

@@ -125,7 +125,10 @@ static bool
 tu_drm_has_preemption(const struct tu_physical_device *dev)
 {
    struct drm_msm_submitqueue req = {
-      .flags = MSM_SUBMITQUEUE_ALLOW_PREEMPT,
+      /* Not MSM_SUBMITQUEUE_ALLOW_PREEMPT so that this works with our older
+       * kernel.
+       */
+      //.flags = MSM_SUBMITQUEUE_ALLOW_PREEMPT,
       .prio = dev->submitqueue_priority_count / 2,
    };
 
@@ -232,9 +235,12 @@ msm_submitqueue_new(struct tu_device *dev,
    assert(priority >= 0 &&
           priority < dev->physical_device->submitqueue_priority_count);
    struct drm_msm_submitqueue req = {
-      .flags = dev->physical_device->info->chip >= 7 &&
-         dev->physical_device->has_preemption ?
-         MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0,
+      /* Not MSM_SUBMITQUEUE_ALLOW_PREEMPT so that this works with our older
+       * kernel.
+       */
+      //.flags = dev->physical_device->info->chip >= 7 &&
+      //   dev->physical_device->has_preemption ?
+      //   MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0,
       .prio = priority,
    };
 
