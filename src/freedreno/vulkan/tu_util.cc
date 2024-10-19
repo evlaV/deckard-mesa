@@ -46,6 +46,7 @@ static const struct debug_control tu_debug_options[] = {
    { "noconcurrentresolves", TU_DEBUG_NO_CONCURRENT_RESOLVES },
    { "noconcurrentunresolves", TU_DEBUG_NO_CONCURRENT_UNRESOLVES },
    { "preempt", TU_DEBUG_PREEMPT },
+   { "deck_emu", TU_DEBUG_DECK_EMU },
    { NULL, 0 }
 };
 
