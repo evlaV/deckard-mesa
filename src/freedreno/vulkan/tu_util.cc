@@ -53,6 +53,7 @@ static const struct debug_control tu_debug_options[] = {
    { "check_cmd_buffer_status", TU_DEBUG_CHECK_CMD_BUFFER_STATUS },
    { "comm", TU_DEBUG_COMM },
    { "nofdm", TU_DEBUG_NOFDM },
+   { "deck_emu", TU_DEBUG_DECK_EMU },
    { NULL, 0 }
 };
 
