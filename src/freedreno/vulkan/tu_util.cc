@@ -49,6 +49,7 @@ static const struct debug_control tu_debug_options[] = {
    { "dumpas", TU_DEBUG_DUMPAS },
    { "nobinmerging", TU_DEBUG_NO_BIN_MERGING },
    { "preempt", TU_DEBUG_PREEMPT },
+   { "deck_emu", TU_DEBUG_DECK_EMU },
    { NULL, 0 }
 };
 
@@ -58,7 +59,7 @@ static const struct debug_control tu_debug_options[] = {
  * or the hardware and would otherwise break when toggled should not be set here.
  * Note: Keep in sync with the list of flags in 'docs/drivers/freedreno.rst'.
  */
-const uint32_t tu_runtime_debug_flags =
+const uint64_t tu_runtime_debug_flags =
    TU_DEBUG_NIR | TU_DEBUG_NOBIN | TU_DEBUG_SYSMEM | TU_DEBUG_GMEM |
    TU_DEBUG_FORCEBIN | TU_DEBUG_LAYOUT | TU_DEBUG_NOLRZ | TU_DEBUG_NOLRZFC |
    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
@@ -74,7 +75,7 @@ static void
 tu_env_notify(
    void *data, const char *path, bool created, bool deleted, bool dir_deleted)
 {
-   int file_flags = 0;
+   uint64_t file_flags = 0;
    if (!deleted) {
       FILE *file = fopen(path, "r");
       if (file) {
@@ -87,10 +88,10 @@ tu_env_notify(
       }
    }
 
-   int runtime_flags = file_flags & tu_runtime_debug_flags;
+   uint64_t runtime_flags = file_flags & tu_runtime_debug_flags;
    if (unlikely(runtime_flags != file_flags)) {
       mesa_logw(
-         "Certain options in TU_DEBUG_FILE don't support runtime changes: 0x%x, ignoring",
+         "Certain options in TU_DEBUG_FILE don't support runtime changes: 0x%" PRIx64 ", ignoring",
          file_flags & ~tu_runtime_debug_flags);
    }
 
@@ -116,7 +117,7 @@ tu_env_init_once(void)
    tu_env.env_debug = tu_env.debug & ~tu_runtime_debug_flags;
 
    if (TU_DEBUG(STARTUP))
-      mesa_logi("TU_DEBUG=0x%x", tu_env.env_debug);
+      mesa_logi("TU_DEBUG=0x%" PRIx64, tu_env.env_debug);
 
    /* TU_DEBUG=rd functionality was moved to fd_rd_output. This debug option
     * should translate to the basic-level FD_RD_DUMP_ENABLE option.
@@ -128,7 +129,7 @@ tu_env_init_once(void)
    if (debug_file) {
       if (tu_env.debug != tu_env.env_debug) {
          mesa_logw("TU_DEBUG_FILE is set (%s), but TU_DEBUG is also set. "
-                   "Any runtime options (0x%x) in TU_DEBUG will be ignored.",
+                   "Any runtime options (0x%" PRIx64 ") in TU_DEBUG will be ignored.",
                    debug_file, tu_env.debug & ~tu_runtime_debug_flags);
       }
 
