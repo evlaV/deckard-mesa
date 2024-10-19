@@ -44,6 +44,7 @@ static const struct debug_control tu_debug_options[] = {
    { "rd", TU_DEBUG_RD },
    { "hiprio", TU_DEBUG_HIPRIO },
    { "preempt", TU_DEBUG_PREEMPT },
+   { "deck_emu", TU_DEBUG_DECK_EMU },
    { NULL, 0 }
 };
 

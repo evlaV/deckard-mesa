@@ -50,6 +50,7 @@ enum tu_debug_flags
    TU_DEBUG_RD = 1 << 25,
    TU_DEBUG_HIPRIO = 1 << 26,
    TU_DEBUG_PREEMPT = 1 << 27,
+   TU_DEBUG_DECK_EMU = 1 << 28,
 };
 
 struct tu_env {
