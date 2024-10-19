@@ -52,6 +52,7 @@ enum tu_debug_flags
    TU_DEBUG_NO_CONCURRENT_RESOLVES = 1 << 27,
    TU_DEBUG_NO_CONCURRENT_UNRESOLVES = 1 << 28,
    TU_DEBUG_PREEMPT = 1 << 29,
+   TU_DEBUG_DECK_EMU = 1 << 30,
 };
 
 struct tu_env {
