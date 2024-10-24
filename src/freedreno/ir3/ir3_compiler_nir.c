@@ -1250,7 +1250,7 @@ emit_intrinsic_load_ubo(struct ir3_context *ctx, nir_intrinsic_instr *intr,
    struct ir3_builder *b = &ctx->build;
    struct ir3_instruction *base_lo, *base_hi, *addr, *src0, *src1;
    const struct ir3_const_state *const_state = ir3_const_state(ctx->so);
-   unsigned ubo = regid(const_state->offsets.ubo, 0);
+   unsigned ubo = ir3_const_reg(const_state, IR3_CONST_ALLOC_UBO_PTRS, 0);
    const unsigned ptrsz = ir3_pointer_size(ctx->compiler);
 
    int off = 0;
@@ -1270,9 +1270,10 @@ emit_intrinsic_load_ubo(struct ir3_context *ctx, nir_intrinsic_instr *intr,
        * at least big enough to cover all the UBO addresses, since the
        * assembler won't know what the max address reg is.
        */
-      ctx->so->constlen =
-         MAX2(ctx->so->constlen,
-              const_state->offsets.ubo + (ctx->s->info.num_ubos * ptrsz));
+      ctx->so->constlen = MAX2(
+         ctx->so->constlen,
+         const_state->allocs.consts[IR3_CONST_ALLOC_UBO_PTRS].offset_vec4 +
+            (ctx->s->info.num_ubos * ptrsz));
    }
 
    /* note: on 32bit gpu's base_hi is ignored and DCE'd */
@@ -2678,10 +2679,10 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
           * since we don't know in the assembler what the max
           * addr reg value can be:
           */
-         ctx->so->constlen =
-            MAX2(ctx->so->constlen,
-                 ctx->so->shader_options.num_reserved_user_consts +
-                 const_state->ubo_state.size / 16);
+         uint32_t worst_ubo_offset =
+            const_state->allocs.consts[IR3_CONST_ALLOC_UBO_RANGES].offset_vec4 +
+            (const_state->ubo_state.size / 16);
+         ctx->so->constlen = MAX2(ctx->so->constlen, worst_ubo_offset);
       }
       break;
 
