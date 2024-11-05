@@ -276,6 +276,9 @@ struct ir3_compiler {
 
    /* True if (rptN) is supported for bary.f. */
    bool has_rpt_bary_f;
+
+   /* True if alias.tex and alias.rt are supported. */
+   bool has_alias;
 };
 
 void ir3_compiler_destroy(struct ir3_compiler *compiler);
