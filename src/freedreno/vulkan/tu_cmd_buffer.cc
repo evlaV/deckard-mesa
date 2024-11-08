@@ -22,6 +22,7 @@
 
 #include "common/freedreno_gpu_event.h"
 #include "common/freedreno_lrz.h"
+#include "util/perf/gpuvis_trace_utils.h"
 
 static void
 tu_clone_trace_range(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
@@ -2399,12 +2400,12 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer)
    struct tu_renderpass_result *autotune_result = NULL;
    if (use_sysmem_rendering(cmd_buffer, &autotune_result))
    {
-      gpuvis_trace_vprintf("[MESA] tu_cmd_render SYSMEM");
+      GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render SYSMEM");
       tu_cmd_render_sysmem<CHIP>(cmd_buffer, autotune_result);
    }
    else
    {
-      gpuvis_trace_vprintf("[MESA] tu_cmd_render GMEM");
+      GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render GMEM");
       tu_cmd_render_tiles<CHIP>(cmd_buffer, autotune_result);
    }
 
