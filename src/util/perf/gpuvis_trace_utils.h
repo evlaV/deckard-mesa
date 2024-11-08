@@ -33,6 +33,7 @@
 #define _GPUVIS_TRACE_UTILS_H_
 
 #include <stdarg.h>
+#include <inttypes.h>
 
 #if !defined( __linux__ )
 #define GPUVIS_TRACE_UTILS_DISABLE
