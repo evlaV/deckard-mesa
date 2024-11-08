@@ -96,6 +96,10 @@ tu_cmd_buffer_status_gpu_write(struct tu_cmd_buffer *cmd_buffer,
    tu_cs_emit(cs, (uint32_t)status);
 }
 
+#if defined(HAVE_GPUVIS)
+#include "util/perf/gpuvis_trace_utils.h"
+#endif
+
 static void
 tu_clone_trace_range(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                      struct u_trace *dst,
@@ -3997,9 +4001,19 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer,
 
    tu_autotune::rp_ctx_t rp_ctx = NULL;
    if (use_sysmem_rendering(cmd_buffer, &rp_ctx, rp_key))
+   {
+#if defined(HAVE_GPUVIS)
+      gpuvis_trace_printf("[MESA] tu_cmd_render SYSMEM");
+#endif
       tu_cmd_render_sysmem<CHIP>(cmd_buffer, rp_ctx);
+   }
    else
+   {
+#if defined(HAVE_GPUVIS)
+      gpuvis_trace_printf("[MESA] tu_cmd_render GMEM");
+#endif
       tu_cmd_render_tiles<CHIP>(cmd_buffer, rp_ctx, fdm_offsets);
+   }
 }
 
 static void tu_reset_render_pass(struct tu_cmd_buffer *cmd_buffer)
