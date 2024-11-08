@@ -2398,9 +2398,15 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer)
 
    struct tu_renderpass_result *autotune_result = NULL;
    if (use_sysmem_rendering(cmd_buffer, &autotune_result))
+   {
+      gpuvis_trace_vprintf("[MESA] tu_cmd_render SYSMEM");
       tu_cmd_render_sysmem<CHIP>(cmd_buffer, autotune_result);
+   }
    else
+   {
+      gpuvis_trace_vprintf("[MESA] tu_cmd_render GMEM");
       tu_cmd_render_tiles<CHIP>(cmd_buffer, autotune_result);
+   }
 
    /* Outside of renderpasses we assume all draw states are disabled. We do
     * this outside the draw CS for the normal case where 3d gmem stores aren't
