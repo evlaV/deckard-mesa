@@ -35,7 +35,7 @@
 #include <stdarg.h>
 #include <inttypes.h>
 
-#if !defined( __linux__ )
+#if !defined( __linux__ ) || !defined( HAVE_GPUVIS )
 #define GPUVIS_TRACE_UTILS_DISABLE
 #endif
 
