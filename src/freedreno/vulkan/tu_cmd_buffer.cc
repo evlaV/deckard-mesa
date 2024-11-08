@@ -3396,14 +3396,14 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer,
    if (use_sysmem_rendering(cmd_buffer, &autotune_result))
    {
 #if defined(HAVE_GPUVIS)
-      gpuvis_trace_printf("[MESA] tu_cmd_render SYSMEM");
+      GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render SYSMEM");
 #endif
       tu_cmd_render_sysmem<CHIP>(cmd_buffer, autotune_result);
    }
    else
    {
 #if defined(HAVE_GPUVIS)
-      gpuvis_trace_printf("[MESA] tu_cmd_render GMEM");
+      GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render GMEM");
 #endif
       tu_cmd_render_tiles<CHIP>(cmd_buffer, autotune_result, fdm_offsets);
    }
