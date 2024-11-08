@@ -1106,6 +1106,9 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
       VkExtent2D frag_areas[views];
       for (unsigned i = 0; i < views; i++) {
          float floor_x, floor_y;
+         //TODO: figure out if its allowed to pass in density of 0 -- otherwise clamping width / height otherwise could be infinite!
+         raw_areas[i].width = fminf(raw_areas[i].width, tiling->tile0.width);
+         raw_areas[i].height = fminf(raw_areas[i].height, tiling->tile0.height);
          float area = raw_areas[i].width * raw_areas[i].height;
          float frac_x = modff(raw_areas[i].width, &floor_x);
          float frac_y = modff(raw_areas[i].height, &floor_y);
