@@ -1592,18 +1592,6 @@ reg_gpr(struct ir3_register *r)
 }
 
 static inline bool
-reg_gpr(struct ir3_register *r)
-{
-   if (r->flags &
-       (IR3_REG_CONST | IR3_REG_IMMED | IR3_REG_PREDICATE | IR3_REG_RT)) {
-      return false;
-   }
-   if (reg_num(r) == REG_A0)
-      return false;
-   return true;
-}
-
-static inline bool
 reg_is_addr1(struct ir3_register *r)
 {
    if (r->flags & (IR3_REG_CONST | IR3_REG_IMMED))
