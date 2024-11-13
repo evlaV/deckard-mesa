@@ -451,4 +451,26 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
 	 -->
 </domain>
 
+<bitset name="a6xx_sp_cs_ndrange_0" inline="yes">
+	<bitfield name="KERNELDIM" low="0" high="1" type="uint"/>
+	<!-- localsize is value minus one: -->
+	<bitfield name="LOCALSIZEX" low="2" high="11" type="uint"/>
+	<bitfield name="LOCALSIZEY" low="12" high="21" type="uint"/>
+	<bitfield name="LOCALSIZEZ" low="22" high="31" type="uint"/>
+</bitset>
+
+<bitset name="a7xx_pc_mesh_cntl" inline="yes">
+	<bitfield name="MESHSHADEREN" pos="0" type="boolean"/>
+	<bitfield name="VIEW" pos="1" type="boolean"/>
+	<bitfield name="LAYER" pos="2" type="boolean"/>
+	<bitfield name="SHADINGRATE" pos="3" type="boolean"/>
+</bitset>
+
+<bitset name="a7xx_pc_mesh_stereo_rendering_cntl" inline="yes">
+	<bitfield name="ENABLE" pos="0" type="boolean"/>
+	<bitfield name="VIEWS" low="1" high="5" type="uint"/>
+	<bitfield name="VIEWMASK" low="6" high="21" type="hex"/>
+	<bitfield name="DISABLEMULTIPOS" pos="22" type="boolean"/>
+</bitset>
+
 </database>

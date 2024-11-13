@@ -658,6 +658,9 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
 	</doc>
 	<value name="CP_FIXED_STRIDE_DRAW_TABLE" value="0x7f" variants="A7XX-"/>
 
+	<doc>The contents of the packet are sent to AQE</doc>
+	<value name="CP_AQE_COMMAND" value="0x7a" variants="A7XX-"/>
+
 	<doc>Reset various on-chip state used for synchronization</doc>
 	<value name="CP_RESET_CONTEXT_STATE" value="0x1f" variants="A7XX-"/>
 
@@ -2453,6 +2456,144 @@ opcode: CP_LOAD_STATE4 (30) (4 dwords)
 		<bitfield name="WRITE" pos="0" type="boolean"/>
 		<bitfield name="ENCODING" low="62" high="63" type="cp_br_resource_encoding"/>
 	</reg64>
+</domain>
+
+<!-- See https://gitlab.freedesktop.org/freedreno/freedreno/-/wikis/AQE for details -->
+
+<enum name="aqe_opcode">
+	<value name="AQE_TRACE_RAYS_0" value="1"/>
+	<value name="AQE_TRACE_RAYS_1" value="2"/>
+	<value name="AQE_TRACE_RAYS_INDIRECT2" value="3"/> <!-- vkCmdTraceRaysIndirect2KHR -->
+	<value name="AQE_TRACE_RAYS_INDIRECT" value="4"/> <!-- vkCmdTraceRaysIndirectKHR -->
+	<value name="AQE_DISPATCH_MESH" value="5"/>
+	<value name="AQE_DISPATCH_MESH_INDIRECT" value="7"/>
+</enum>
+
+<domain name="CP_AQE_COMMAND" width="32">
+	<reg32 offset="0" name="0">
+		<bitfield name="OPCODE" low="0" high="3" type="aqe_opcode" addvariant="yes"/>
+	</reg32>
+	<stripe varset="aqe_opcode" variants="AQE_TRACE_RAYS_0">
+		<reg64 name="RAYGEN_SBT" offset="1" type="address"/>
+		<reg32 name="WIDTH" offset="3" type="uint"/>
+		<reg32 name="HEIGHT" offset="4" type="uint"/>
+		<reg32 name="DEPTH" offset="5" type="uint"/>
+		<reg64 name="GLOBAL_COUNT_0" offset="6" type="waddress"/>
+		<reg64 name="GLOBAL_COUNT_1" offset="8" type="waddress"/>
+		<reg32 name="SLOT_COUNT" offset="10" type="uint"/>
+		<reg64 name="SLOT_TO_SHADER" offset="11" type="waddress"/>
+		<reg64 name="SHADER_TO_SLOT" offset="13" type="waddress"/>
+		<reg64 name="COUNTS" offset="15" type="waddress"/>
+		<reg32 name="MAX_THREADS" offset="17" type="uint"/>
+		<reg64 name="PENDING_THREAD_IDS" offset="18" type="waddress"/>
+		<reg32 name="SCRATCH0_SIZE" offset="20" type="uint"/>
+		<reg64 name="SCRATCH0" offset="21" type="waddress"/>
+		<reg32 name="SCRATCH1_SIZE" offset="23" type="uint"/>
+		<reg64 name="SCRATCH1" offset="24" type="waddress"/>
+		<reg64 name="SHADER_IB_ADDRS" offset="26" type="address"/>
+		<reg64 name="SHADER_IB_LENGTHS" offset="28" type="address"/>
+	</stripe>
+	<stripe varset="aqe_opcode" variants="AQE_TRACE_RAYS_1">
+		<reg64 name="RAYGEN_SBT" offset="1" type="address"/>
+		<reg32 name="WIDTH" offset="3" type="uint"/>
+		<reg32 name="HEIGHT" offset="4" type="uint"/>
+		<reg32 name="DEPTH" offset="5" type="uint"/>
+		<reg64 name="GLOBAL_COUNT_0" offset="6" type="waddress"/>
+		<reg64 name="GLOBAL_COUNT_1" offset="8" type="waddress"/>
+		<reg32 name="SLOT_COUNT" offset="10" type="uint"/>
+		<reg64 name="SLOT_TO_SHADER" offset="11" type="waddress"/>
+		<reg64 name="SHADER_TO_SLOT" offset="13" type="waddress"/>
+		<reg64 name="COUNTS" offset="15" type="waddress"/>
+		<reg32 name="MAX_THREADS" offset="17" type="uint"/>
+		<reg64 name="PENDING_THREAD_IDS" offset="18" type="waddress"/>
+		<reg32 name="SCRATCH0_SIZE" offset="20" type="uint"/>
+		<reg64 name="SCRATCH0" offset="21" type="waddress"/>
+		<reg32 name="SCRATCH1_SIZE" offset="23" type="uint"/>
+		<reg64 name="SCRATCH1" offset="24" type="waddress"/>
+		<reg64 name="SHADER_IB_ADDRS" offset="26" type="address"/>
+		<reg64 name="SHADER_IB_LENGTHS" offset="28" type="address"/>
+	</stripe>
+	<stripe varset="aqe_opcode" variants="AQE_TRACE_RAYS_INDIRECT2">
+		<reg64 name="INDIRECT_COMMAND" offset="1" type="address"/>
+		<reg64 name="GLOBAL_COUNT_0" offset="2" type="waddress"/>
+		<reg64 name="GLOBAL_COUNT_1" offset="4" type="waddress"/>
+		<reg32 name="SLOT_COUNT" offset="6" type="uint"/>
+		<reg64 name="SLOT_TO_SHADER" offset="7" type="waddress"/>
+		<reg64 name="SHADER_TO_SLOT" offset="9" type="waddress"/>
+		<reg64 name="COUNTS" offset="11" type="waddress"/>
+		<reg32 name="MAX_THREADS" offset="13" type="uint"/>
+		<reg64 name="PENDING_THREAD_IDS" offset="14" type="waddress"/>
+		<reg32 name="SCRATCH0_SIZE" offset="16" type="uint"/>
+		<reg64 name="SCRATCH0" offset="17" type="waddress"/>
+		<reg32 name="SCRATCH1_SIZE" offset="19" type="uint"/>
+		<reg64 name="SCRATCH1" offset="20" type="waddress"/>
+		<reg64 name="SHADER_IB_ADDRS" offset="22" type="address"/>
+		<reg64 name="SHADER_IB_LENGTHS" offset="24" type="address"/>
+	</stripe>
+	<stripe varset="aqe_opcode" variants="AQE_TRACE_RAYS_INDIRECT">
+		<reg64 name="RAYGEN_SBT" offset="1" type="address"/>
+		<reg64 name="INDIRECT_COMMAND" offset="3" type="address"/>
+		<reg64 name="GLOBAL_COUNT_0" offset="5" type="waddress"/>
+		<reg64 name="GLOBAL_COUNT_1" offset="7" type="waddress"/>
+		<reg32 name="SLOT_COUNT" offset="9" type="uint"/>
+		<reg64 name="SLOT_TO_SHADER" offset="10" type="waddress"/>
+		<reg64 name="SHADER_TO_SLOT" offset="12" type="waddress"/>
+		<reg64 name="COUNTS" offset="14" type="waddress"/>
+		<reg32 name="MAX_THREADS" offset="16" type="uint"/>
+		<reg64 name="PENDING_THREAD_IDS" offset="17" type="waddress"/>
+		<reg32 name="SCRATCH0_SIZE" offset="19" type="uint"/>
+		<reg64 name="SCRATCH0" offset="20" type="waddress"/>
+		<reg32 name="SCRATCH1_SIZE" offset="22" type="uint"/>
+		<reg64 name="SCRATCH1" offset="23" type="waddress"/>
+		<reg64 name="SHADER_IB_ADDRS" offset="25" type="address"/>
+		<reg64 name="SHADER_IB_LENGTHS" offset="27" type="address"/>
+	</stripe>
+	<stripe varset="aqe_opcode" variants="AQE_DISPATCH_MESH">
+		<reg32 name="NGROUPSX" offset="1" type="uint"/>
+		<reg32 name="NGROUPSY" offset="2" type="uint"/>
+		<reg32 name="NGROUPSZ" offset="3" type="uint"/>
+		<reg64 name="SHADER_DESCRIPTOR" offset="4" type="address"/>
+		<reg32 name="6" offset="6" type="a7xx_pc_mesh_stereo_rendering_cntl"/>
+		<reg32 name="7" offset="7"/>
+		<reg32 name="TASK_PER_CHUNK" offset="8" type="uint"/>
+		<reg32 name="MESH_PER_CHUNK" offset="9" type="uint"/>
+		<reg64 name="PRIM_COUNT_BASE" offset="10" type="address"/>
+		<reg32 name="PRIM_COUNT_SIZE" offset="12" type="uint"/>
+		<reg64 name="INDEX_BASE" offset="13" type="address"/>
+		<reg32 name="INDEX_SIZE" offset="15" type="uint"/>
+		<reg64 name="VARYING_BASE" offset="16" type="address"/>
+		<reg32 name="VARYING_SIZE" offset="18" type="uint"/>
+		<reg64 name="PRIMITIVE_VARYING_BASE" offset="19" type="address"/>
+		<reg32 name="PRIMITIVE_VARYING_SIZE" offset="21" type="uint"/>
+		<reg64 name="MESH_VIS_BASE" offset="22" type="address"/>
+		<reg32 name="MESH_VIS_SIZE" offset="24" type="uint"/>
+		<reg64 name="PAYLOAD_BASE" offset="25" type="address"/>
+		<reg32 name="PAYLOAD_SIZE" offset="27" type="uint"/>
+		<reg64 name="MESH_COUNT_BASE" offset="28" type="address"/>
+		<reg32 name="MESH_COUNT_SIZE" offset="30" type="uint"/>
+	</stripe>
+	<stripe varset="aqe_opcode" variants="AQE_DISPATCH_MESH_INDIRECT">
+		<reg64 name="NGROUPS" offset="1" type="address"/>
+		<reg64 name="SHADER_DESCRIPTOR" offset="3" type="address"/>
+		<reg32 name="5" offset="5" type="a7xx_pc_mesh_stereo_rendering_cntl"/>
+		<reg32 name="6" offset="6"/>
+		<reg32 name="TASK_PER_CHUNK" offset="7" type="uint"/>
+		<reg32 name="MESH_PER_CHUNK" offset="8" type="uint"/>
+		<reg64 name="PRIM_COUNT_BASE" offset="9" type="address"/>
+		<reg32 name="PRIM_COUNT_SIZE" offset="11" type="uint"/>
+		<reg64 name="INDEX_BASE" offset="12" type="address"/>
+		<reg32 name="INDEX_SIZE" offset="14" type="uint"/>
+		<reg64 name="VARYING_BASE" offset="15" type="address"/>
+		<reg32 name="VARYING_SIZE" offset="17" type="uint"/>
+		<reg64 name="PRIMITIVE_VARYING_BASE" offset="18" type="address"/>
+		<reg32 name="PRIMITIVE_VARYING_SIZE" offset="20" type="uint"/>
+		<reg64 name="MESH_VIS_BASE" offset="21" type="address"/>
+		<reg32 name="MESH_VIS_SIZE" offset="23" type="uint"/>
+		<reg64 name="PAYLOAD_BASE" offset="24" type="address"/>
+		<reg32 name="PAYLOAD_SIZE" offset="26" type="uint"/>
+		<reg64 name="MESH_COUNT_BASE" offset="27" type="address"/>
+		<reg32 name="MESH_COUNT_SIZE" offset="29" type="uint"/>
+	</stripe>
 </domain>
 
 </database>

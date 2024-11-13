@@ -134,4 +134,43 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
 	<reg32 offset="15" name="15"/>
 </domain>
 
+<!-- This descriptor is read by AQE -->
+<domain name="A8XX_MESH_SHADER" width="32">
+	<reg32 offset="0" name="0">
+		<bitfield name="TASK_SHADER_EN" pos="0" type="boolean"/>
+		<bitfield name="SKIP_DRAW" pos="1" type="boolean"/>
+		<bitfield name="MESH_VIS_EN" pos="2" type="boolean"/>
+		<bitfield name="USE_PRIMITIVE_VARYINGS" pos="3" type="boolean"/>
+		<bitfield name="PRIM_TYPE" low="5" high="6" type="a8xx_mesh_prim_type"/>
+		<bitfield name="SET_CS_BASE" pos="7" type="boolean"/>
+		<bitfield name="PS_PER_PRIMITIVE_VARYING" pos="8" type="boolean"/>
+		<bitfield name="MESH_VIS_PER_VIEW" pos="9" type="boolean"/>
+		<bitfield name="SET_PS_BASE" pos="10" type="boolean"/>
+	</reg32>
+	<reg64 offset="1" name="TASK_IB_BASE" type="address"/>
+	<reg32 offset="3" name="3">
+		<bitfield name="TASK_IB_SIZE" low="0" high="19"/>
+	</reg32>
+	<reg64 offset="4" name="MESH_IB_BASE" type="address"/>
+	<reg32 offset="6" name="6">
+		<bitfield name="MESH_IB_SIZE" low="0" high="19"/>
+	</reg32>
+	<reg32 offset="7" name="MAX_INDICES_PER_MESH"/>
+	<reg32 offset="8" name="MAX_INDICES_PER_VIEW"/>
+	<reg32 offset="9" name="VARYING_PER_MESH_SIZE"/>
+	<reg32 offset="10" name="VARYING_PER_VIEW_SIZE"/>
+	<reg32 offset="11" name="PRIMITIVE_VARYING_PER_MESH_SIZE"/>
+	<reg32 offset="12" name="PRIMITIVE_VARYING_PER_VIEW_SIZE"/>
+	<reg32 offset="13" name="MESH_VIS_PER_MESH_SIZE"/>
+	<reg32 offset="14" name="14"/>
+	<reg32 offset="15" name="MAX_VERTICES_PER_MESH"/>
+	<reg32 offset="16" name="16"/>
+	<reg32 offset="17" name="17" type="a7xx_pc_mesh_cntl"/>
+	<reg32 offset="18" name="TASK_NDRANGE_0" type="a6xx_sp_cs_ndrange_0"/>
+	<reg32 offset="19" name="MESH_NDRANGE_0" type="a6xx_sp_cs_ndrange_0"/>
+	<reg64 offset="20" name="TASK_CS_BASE" type="address"/>
+	<reg64 offset="22" name="MESH_CS_BASE" type="address"/>
+	<reg64 offset="24" name="SP_PS_BASE" type="address"/>
+</domain>
+
 </database>

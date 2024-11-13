@@ -296,4 +296,10 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
 	<value name="A8XX_SWIZ_W" value="6"/>
 </enum>
 
+<enum name="a8xx_mesh_prim_type">
+	<value name="MESH_PT_TRILIST" value="0"/>
+	<value name="MESH_PT_LINELIST" value="1"/>
+	<value name="MESH_PT_POINTLIST" value="2"/>
+</enum>
+
 </database>

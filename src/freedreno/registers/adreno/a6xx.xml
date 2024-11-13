@@ -4731,13 +4731,7 @@ by a particular renderpass/blit.
 	<reg32 offset="0xa9cd" name="SP_CS_CONST_CONFIG" type="a6xx_xs_const_config" variants="A7XX-" usage="compute"/>
 
 	<!-- TODO: what does KERNELDIM do exactly (blob sets it differently from turnip) -->
-	<reg32 offset="0xb990" name="SP_CS_NDRANGE_0" variants="A6XX" usage="compute">
-		<bitfield name="KERNELDIM" low="0" high="1" type="uint"/>
-		<!-- localsize is value minus one: -->
-		<bitfield name="LOCALSIZEX" low="2" high="11" type="uint"/>
-		<bitfield name="LOCALSIZEY" low="12" high="21" type="uint"/>
-		<bitfield name="LOCALSIZEZ" low="22" high="31" type="uint"/>
-	</reg32>
+	<reg32 offset="0xb990" name="SP_CS_NDRANGE_0" variants="A6XX" type="a6xx_sp_cs_ndrange_0" usage="compute"/>
 	<reg32 offset="0xb991" name="SP_CS_NDRANGE_1" variants="A6XX" usage="compute">
 		<bitfield name="GLOBALSIZE_X" low="0" high="31" type="uint"/>
 	</reg32>
@@ -4783,13 +4777,7 @@ by a particular renderpass/blit.
 	<reg32 offset="0xb99b" name="SP_CS_KERNEL_GROUP_Z" variants="A6XX" usage="compute"/>
 
 	<!-- TODO: what does KERNELDIM do exactly (blob sets it differently from turnip) -->
-	<reg32 offset="0xa9d4" name="SP_CS_NDRANGE_0" variants="A7XX-" usage="compute">
-		<bitfield name="KERNELDIM" low="0" high="1" type="uint"/>
-		<!-- localsize is value minus one: -->
-		<bitfield name="LOCALSIZEX" low="2" high="11" type="uint"/>
-		<bitfield name="LOCALSIZEY" low="12" high="21" type="uint"/>
-		<bitfield name="LOCALSIZEZ" low="22" high="31" type="uint"/>
-	</reg32>
+	<reg32 offset="0xa9d4" name="SP_CS_NDRANGE_0" variants="A7XX-" type="a6xx_sp_cs_ndrange_0" usage="compute"/>
 	<reg32 offset="0xa9d5" name="SP_CS_NDRANGE_1" variants="A7XX-" usage="compute">
 		<bitfield name="GLOBALSIZE_X" low="0" high="31" type="uint"/>
 	</reg32>
