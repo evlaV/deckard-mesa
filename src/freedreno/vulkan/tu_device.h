@@ -117,6 +117,7 @@ struct tu_physical_device
    int32_t reserved_set_idx;
 
    bool has_set_iova;
+   bool has_sparse;
    uint64_t va_start;
    uint64_t va_size;
 
@@ -424,6 +425,9 @@ struct tu_device
    bool use_lrz;
 
    struct fd_rd_output rd_output;
+
+   /* This is an internal queue for mapping/unmapping non-sparse BOs */
+   uint32_t vm_bind_queue_id;
 };
 VK_DEFINE_HANDLE_CASTS(tu_device, vk.base, VkDevice, VK_OBJECT_TYPE_DEVICE)
 
