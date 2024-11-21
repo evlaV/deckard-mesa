@@ -19,7 +19,20 @@
 
 #include "vk_util.h"
 
-#define TU_DEBUG(name) unlikely(tu_env.debug & TU_DEBUG_##name)
+/*
+ * Returns if the specified TU_DEBUG flag is set. The value returned by this
+ * macro can change at runtime if TU_DEBUG_FILE is used. Therefore, the value
+ * should be cached in a local scope if it needs to be used multiple times.
+ */
+#define TU_DEBUG(name) unlikely(tu_env_get_flag(TU_DEBUG_##name, false))
+
+/*
+ * Same as TU_DEBUG, but only uses the environment variable's value rather
+ * than TU_DEBUG_FILE. This is useful for flags that should not be changed
+ * at runtime or when a flag has different behavior depending on whether it
+ * is set in TU_DEBUG or TU_DEBUG_FILE.
+ */
+#define TU_DEBUG_ENV(name) unlikely(tu_env_get_flag(TU_DEBUG_##name, true))
 
 enum tu_debug_flags
 {
@@ -55,14 +68,15 @@ enum tu_debug_flags
    TU_DEBUG_DECK_EMU = 1 << 30,
 };
 
-struct tu_env {
-    uint32_t debug;
-};
-
-extern struct tu_env tu_env;
-
+/*
+ * Note: tu_env_init() must be called before using the TU_DEBUG* macro or
+ * tu_env_get_flag().
+ */
 void
 tu_env_init(void);
+
+bool
+tu_env_get_flag(tu_debug_flags flag, bool env_only);
 
 /* Whenever we generate an error, pass it through this function. Useful for
  * debugging, where we can break on it. Only call at error site, not when
