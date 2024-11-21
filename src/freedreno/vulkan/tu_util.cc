@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <fcntl.h>
 
 #include "common/freedreno_rd_output.h"
 #include "util/u_math.h"
@@ -49,7 +50,27 @@ static const struct debug_control tu_debug_options[] = {
    { NULL, 0 }
 };
 
-struct tu_env tu_env;
+/*
+ * The runtime debug flags are a subset of the debug flags that can be set at
+ * runtime. Flags which depend on running state of the driver, the application
+ * or the hardware and would otherwise break when toggled should not be set here.
+ * Note: Keep in sync with the list of flags in 'docs/drivers/freedreno.rst'.
+ */
+const uint32_t tu_runtime_debug_flags =
+   TU_DEBUG_NIR | TU_DEBUG_NOBIN | TU_DEBUG_SYSMEM | TU_DEBUG_GMEM |
+   TU_DEBUG_FORCEBIN | TU_DEBUG_LAYOUT | TU_DEBUG_NOLRZ | TU_DEBUG_PERF |
+   TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW | TU_DEBUG_RAST_ORDER |
+   TU_DEBUG_UNALIGNED_STORE | TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD |
+   TU_DEBUG_FDM;
+
+struct tu_env {
+    uint32_t debug;
+    mtx_t mutex;
+    int fd;
+    uint32_t fd_mtime;
+    uint64_t last_ts;
+    uint32_t runtime_debug;
+} tu_env;
 
 static void
 tu_env_init_once(void)
@@ -65,6 +86,24 @@ tu_env_init_once(void)
     */
    if (TU_DEBUG(RD))
       fd_rd_dump_env.flags |= FD_RD_DUMP_ENABLE;
+
+   const char *debug_file = os_get_option("TU_DEBUG_FILE");
+   if (debug_file) {
+      mtx_init(&tu_env.mutex, mtx_plain);
+
+      tu_env.fd = open(debug_file, O_RDWR | O_CREAT, 0600);
+      if (tu_env.fd < 0) {
+         mesa_logw("Failed to open TU_DEBUG_FILE '%s': %s", debug_file,
+                   strerror(errno));
+         return;
+      }
+
+      tu_env.fd_mtime = 0;
+      tu_env.last_ts = 0;
+      tu_env.runtime_debug = 0;
+   } else {
+      tu_env.fd = -1;
+   }
 }
 
 void
@@ -74,6 +113,58 @@ tu_env_init(void)
 
    static once_flag once = ONCE_FLAG_INIT;
    call_once(&once, tu_env_init_once);
+}
+
+bool
+tu_env_get_flag(tu_debug_flags flag, bool env_only)
+{
+   if (env_only || tu_env.fd == -1 || (tu_runtime_debug_flags & flag) == 0)
+      return tu_env.debug & flag;
+
+   uint64_t now = os_time_get_nano();
+   const uint64_t interval = 500000000; /* 500ms */
+   if (unlikely(now - tu_env.last_ts > interval)) {
+      mtx_lock(&tu_env.mutex);
+
+      if (now - tu_env.last_ts > interval) {
+         /* Recheck since another thread might've updated it already. */
+         tu_env.last_ts = now;
+
+         /* Check the mtime of the file to see if it has changed. */
+         struct stat st;
+         int ret = fstat(tu_env.fd, &st);
+         if (ret == 0 && st.st_mtime != tu_env.fd_mtime) {
+            tu_env.fd_mtime = st.st_mtime;
+
+            char buf[512];
+            ssize_t len = pread(tu_env.fd, buf, sizeof(buf) - 1, 0);
+            if (len > 0) {
+               if (buf[len - 1] == '\n')
+                  /* 'echo' will include a newline by default which will break
+                   * parse_debug_string() if we don't remove it. */
+                  len--;
+               buf[len] = '\0';
+
+               int file_flags = parse_debug_string(buf, tu_debug_options);
+               int runtime_flags = file_flags & tu_runtime_debug_flags;
+               if (unlikely(runtime_flags != file_flags))
+                  mesa_logw(
+                     "Certain options in TU_DEBUG_FILE don't support runtime changes: 0x%x, ignoring",
+                     file_flags & ~tu_runtime_debug_flags);
+
+               tu_env.runtime_debug = runtime_flags;
+            } else if (unlikely(len < 0)) {
+               mesa_logw("Failed to read TU_DEBUG_FILE: %s", strerror(errno));
+            }
+         } else if (unlikely(ret < 0)) {
+            mesa_logw("Failed to stat TU_DEBUG_FILE: %s", strerror(errno));
+         }
+      }
+
+      mtx_unlock(&tu_env.mutex);
+   }
+
+   return (tu_env.runtime_debug & flag) || (tu_env.debug & flag);
 }
 
 void PRINTFLIKE(3, 4)
