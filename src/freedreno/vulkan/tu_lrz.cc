@@ -181,7 +181,7 @@ tu_lrz_init_state(struct tu_cmd_buffer *cmd,
    /* Be optimistic and unconditionally enable fast-clear in
     * secondary cmdbufs and when reusing previous LRZ state.
     */
-   cmd->state.lrz.fast_clear = view->image->has_lrz_fc;
+   cmd->state.lrz.fast_clear = view->image->has_lrz_fc && !TU_DEBUG(NOLRZFC);
 
    cmd->state.lrz.gpu_dir_tracking = has_gpu_tracking;
    cmd->state.lrz.reuse_previous_state = !clears_depth;
@@ -302,7 +302,7 @@ tu_lrz_begin_renderpass(struct tu_cmd_buffer *cmd)
     /* Track LRZ valid state */
    tu_lrz_begin_resumed_renderpass<CHIP>(cmd);
 
-   if (!cmd->state.lrz.valid) {
+   if (!cmd->state.lrz.valid || TU_DEBUG(NOLRZ)) {
       tu6_emit_lrz_buffer<CHIP>(&cmd->cs, NULL);
    }
 }
@@ -584,7 +584,7 @@ tu_lrz_clear_depth_image(struct tu_cmd_buffer *cmd,
    if (!range)
       return;
 
-   bool fast_clear = image->has_lrz_fc &&
+   bool fast_clear = image->has_lrz_fc && !TU_DEBUG(NOLRZFC) &&
                      tu_lrzfc_depth_supported<CHIP>(pDepthStencil->depth);
 
    tu6_emit_lrz_buffer<CHIP>(&cmd->cs, image);
