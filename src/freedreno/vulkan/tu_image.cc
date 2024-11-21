@@ -609,7 +609,7 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
       image->has_lrz_fc =
          device->physical_device->info->a6xx.enable_lrz_fast_clear &&
          lrz_fc_size <= fd_lrzfc_layout<CHIP>::FC_SIZE &&
-         !TU_DEBUG(NOLRZFC);
+         !TU_DEBUG_ENV(NOLRZFC);
 
       if (image->has_lrz_fc || device->physical_device->info->a6xx.has_lrz_dir_tracking) {
          image->lrz_fc_offset = image->total_size + lrz_size;
