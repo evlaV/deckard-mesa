@@ -153,6 +153,8 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
                      file_flags & ~tu_runtime_debug_flags);
 
                tu_env.runtime_debug = runtime_flags;
+            } else if (len == 0) {
+               tu_env.runtime_debug = 0;
             } else if (unlikely(len < 0)) {
                mesa_logw("Failed to read TU_DEBUG_FILE: %s", strerror(errno));
             }
