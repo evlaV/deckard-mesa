@@ -163,6 +163,7 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
    if (unlikely(now - tu_env.last_ts > interval)) {
       mtx_lock(&tu_env.mutex);
 
+      int runtime_flags = tu_env.runtime_debug;
       if (now - tu_env.last_ts > interval) {
          /* Recheck since another thread might've updated it already. */
          tu_env.last_ts = now;
@@ -175,14 +176,14 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
             /* The file was deleted. */
             close(tu_env.fd);
             tu_env.fd = -1;
-            tu_env.runtime_debug = 0;
+            runtime_flags = 0;
          } else if (st.st_mtime != tu_env.fd_mtime) {
             /* Check the mtime of the file to see if it has changed. */
             tu_env.fd_mtime = st.st_mtime;
 
             char buf[512];
             ssize_t len = pread(tu_env.fd, buf, sizeof(buf) - 1, 0);
-            if (len > 0) {
+            if (likely(len > 0)) {
                if (buf[len - 1] == '\n')
                   /* 'echo' will include a newline by default which will break
                    * parse_debug_string() if we don't remove it. */
@@ -190,19 +191,31 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
                buf[len] = '\0';
 
                int file_flags = parse_debug_string(buf, tu_debug_options);
-               int runtime_flags = file_flags & tu_runtime_debug_flags;
+               runtime_flags = file_flags & tu_runtime_debug_flags;
                if (unlikely(runtime_flags != file_flags))
                   mesa_logw(
                      "Certain options in TU_DEBUG_FILE don't support runtime changes: 0x%x, ignoring",
                      file_flags & ~tu_runtime_debug_flags);
 
-               tu_env.runtime_debug = runtime_flags;
             } else if (len == 0) {
-               tu_env.runtime_debug = 0;
-            } else if (unlikely(len < 0)) {
+               runtime_flags = 0;
+            } else {
                mesa_logw("Failed to read TU_DEBUG_FILE: %s", strerror(errno));
             }
          }
+      }
+
+      if (tu_env.runtime_debug ^ runtime_flags) {
+         mesa_logd("Runtime debug flags change detected. Flags set:");
+         for (unsigned i = 0; i < ARRAY_SIZE(tu_debug_options); i++) {
+            if (runtime_flags & tu_debug_options[i].flag)
+               mesa_logd("  %s", tu_debug_options[i].string);
+         }
+
+         if (runtime_flags == 0)
+            mesa_logd("  None");
+
+         tu_env.runtime_debug = runtime_flags;
       }
 
       mtx_unlock(&tu_env.mutex);
