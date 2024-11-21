@@ -66,6 +66,7 @@ const uint32_t tu_runtime_debug_flags =
 
 struct tu_env {
     uint32_t debug;
+    const char *file_path;
     mtx_t mutex;
     int fd;
     uint32_t fd_mtime;
@@ -89,22 +90,42 @@ tu_env_init_once(void)
       fd_rd_dump_env.flags |= FD_RD_DUMP_ENABLE;
 
    const char *debug_file = os_get_option("TU_DEBUG_FILE");
-   if (debug_file) {
-      mtx_init(&tu_env.mutex, mtx_plain);
+   if (!debug_file) {
+      tu_env.fd = -1;
+      tu_env.file_path = NULL;
+      return;
+   }
 
-      tu_env.fd = open(debug_file, O_RDWR | O_CREAT, 0600);
-      if (tu_env.fd < 0) {
+   tu_env.file_path = ralloc_strndup(NULL, debug_file, 2048);
+   if (!tu_env.file_path) {
+      mesa_logw("Failed to save TU_DEBUG_FILE value.");
+      tu_env.fd = -1;
+      tu_env.file_path = NULL;
+      return;
+   }
+   debug_file = tu_env.file_path;
+
+   mtx_init(&tu_env.mutex, mtx_plain);
+
+   errno = 0;
+   tu_env.fd = open(debug_file, O_RDONLY, 0600);
+   if (tu_env.fd < 0) {
+      if (errno == ENOENT) {
+         mesa_logd(
+            "TU_DEBUG_FILE '%s' does not exist. Runtime flags not set.",
+            debug_file);
+      } else {
          mesa_logw("Failed to open TU_DEBUG_FILE '%s': %s", debug_file,
                    strerror(errno));
-         return;
       }
-
-      tu_env.fd_mtime = 0;
-      tu_env.last_ts = 0;
-      tu_env.runtime_debug = 0;
-   } else {
-      tu_env.fd = -1;
    }
+   assert(tu_env.fd == -1 || tu_env.fd >= 0);
+
+   tu_env.fd_mtime = 0;
+   tu_env.last_ts = 0;
+   tu_env.runtime_debug = 0;
+
+   return;
 }
 
 void
@@ -119,8 +140,23 @@ tu_env_init(void)
 bool
 tu_env_get_flag(tu_debug_flags flag, bool env_only)
 {
-   if (env_only || tu_env.fd == -1 || (tu_runtime_debug_flags & flag) == 0)
+   if (env_only || !tu_env.file_path || (tu_runtime_debug_flags & flag) == 0)
       return tu_env.debug & flag;
+
+   /* We want to try open the file again in these cases:
+    *  - The application was started but the debug file was created
+    *    afterwards.
+    *  - The file was deleted to clear the runtime debug flags and then
+    *    recreated to dynamically set flags again.
+    */
+   if (tu_env.fd == -1) {
+      const char *debug_file = tu_env.file_path;
+
+      errno = 0;
+      tu_env.fd = open(debug_file, O_RDONLY, 0600);
+      if (tu_env.fd < 0)
+         return tu_env.debug & flag;
+   }
 
    uint64_t now = os_time_get_nano();
    const uint64_t interval = 500000000; /* 500ms */
@@ -131,10 +167,17 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
          /* Recheck since another thread might've updated it already. */
          tu_env.last_ts = now;
 
-         /* Check the mtime of the file to see if it has changed. */
          struct stat st;
          int ret = fstat(tu_env.fd, &st);
-         if (ret == 0 && st.st_mtime != tu_env.fd_mtime) {
+         if (unlikely(ret != 0)) {
+            mesa_logw("Failed to stat TU_DEBUG_FILE: %s", strerror(errno));
+         } else if (!st.st_nlink) {
+            /* The file was deleted. */
+            close(tu_env.fd);
+            tu_env.fd = -1;
+            tu_env.runtime_debug = 0;
+         } else if (st.st_mtime != tu_env.fd_mtime) {
+            /* Check the mtime of the file to see if it has changed. */
             tu_env.fd_mtime = st.st_mtime;
 
             char buf[512];
@@ -159,8 +202,6 @@ tu_env_get_flag(tu_debug_flags flag, bool env_only)
             } else if (unlikely(len < 0)) {
                mesa_logw("Failed to read TU_DEBUG_FILE: %s", strerror(errno));
             }
-         } else if (unlikely(ret < 0)) {
-            mesa_logw("Failed to stat TU_DEBUG_FILE: %s", strerror(errno));
          }
       }
 
