@@ -295,7 +295,8 @@ fd6_setup_slices(struct fd_resource *rsc)
 
    fdl6_layout(&rsc->layout, screen->info, prsc->format, fd_resource_nr_samples(prsc),
                prsc->width0, prsc->height0, prsc->depth0, prsc->last_level + 1,
-               prsc->array_size, prsc->target == PIPE_TEXTURE_3D, false, NULL);
+               prsc->array_size, prsc->target == PIPE_TEXTURE_3D, false,
+               false, NULL);
 
    return rsc->layout.size;
 }
@@ -318,7 +319,8 @@ fill_ubwc_buffer_sizes(struct fd_resource *rsc)
 
    if (!fdl6_layout(&rsc->layout, screen->info, prsc->format, fd_resource_nr_samples(prsc),
                     prsc->width0, prsc->height0, prsc->depth0,
-                    prsc->last_level + 1, prsc->array_size, false, false, &l))
+                    prsc->last_level + 1, prsc->array_size, false, false,
+                    false, &l))
       return -1;
 
    if (rsc->layout.size > fd_bo_size(rsc->bo))
