@@ -554,6 +554,7 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
                        image->vk.array_layers,
                        image->vk.image_type == VK_IMAGE_TYPE_3D,
                        image->is_mutable,
+                       image->vk.create_flags & VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT,
                        force_ubwc,
                        plane_layouts ? &plane_layout : NULL)) {
          assert(plane_layouts); /* can only fail with explicit layout */
