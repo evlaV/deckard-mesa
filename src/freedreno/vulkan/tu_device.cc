@@ -375,7 +375,8 @@ tu_get_features(struct tu_physical_device *pdevice,
    features->shaderFloat64 = false;
    features->shaderInt64 = true;
    features->shaderInt16 = true;
-   features->sparseBinding = false;
+   features->sparseBinding = pdevice->has_sparse;
+   features->sparseResidencyBuffer = pdevice->has_sparse;
    features->variableMultisampleRate = true;
    features->inheritedQueries = true;
 
@@ -929,7 +930,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->maxMemoryAllocationCount = UINT32_MAX;
    props->maxSamplerAllocationCount = 64 * 1024;
    props->bufferImageGranularity = 64;          /* A cache line */
-   props->sparseAddressSpaceSize = 0;
+   props->sparseAddressSpaceSize = pdevice->va_size;
    props->maxBoundDescriptorSets = pdevice->usable_sets;
    props->maxPerStageDescriptorSamplers = max_descriptor_set_size;
    props->maxPerStageDescriptorUniformBuffers = max_descriptor_set_size;
@@ -1054,7 +1055,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->sparseResidencyStandard2DMultisampleBlockShape = { 0 };
    props->sparseResidencyStandard3DBlockShape = { 0 };
    props->sparseResidencyAlignedMipSize = { 0 };
-   props->sparseResidencyNonResidentStrict = { 0 };
+   props->sparseResidencyNonResidentStrict = true;
 
    strcpy(props->deviceName, pdevice->name);
    memcpy(props->pipelineCacheUUID, pdevice->cache_uuid, VK_UUID_SIZE);
@@ -1317,6 +1318,13 @@ static const VkQueueFamilyProperties tu_gfx_queue_family_properties = {
    .minImageTransferGranularity = { 1, 1, 1 },
 };
 
+static const VkQueueFamilyProperties tu_sparse_queue_family_properties = {
+   .queueFlags = VK_QUEUE_SPARSE_BINDING_BIT,
+   .queueCount = 1,
+   .timestampValidBits = 48,
+   .minImageTransferGranularity = { 1, 1, 1 },
+};
+
 VkResult
 tu_physical_device_init(struct tu_physical_device *device,
                         struct tu_instance *instance)
@@ -1476,6 +1484,14 @@ tu_physical_device_init(struct tu_physical_device *device,
          .type = TU_QUEUE_GFX,
          .properties = &tu_gfx_queue_family_properties,
       };
+
+   if (device->has_sparse) {
+      device->queue_families[device->num_queue_families++] =
+         (struct tu_queue_family) {
+            .type = TU_QUEUE_SPARSE,
+            .properties = &tu_sparse_queue_family_properties,
+         };
+   }
 
 #ifdef TU_USE_WSI_PLATFORM
    result = tu_wsi_init(device);
