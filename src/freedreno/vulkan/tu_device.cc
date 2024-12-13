@@ -1898,7 +1898,8 @@ tu_trace_read_ts(struct u_trace_context *utctx,
 
    /* Only need to stall on results for the first entry: */
    if (offset_B == 0) {
-      tu_device_wait_u_trace(device, submission_data->syncobj);
+      tu_queue_wait_fence(submission_data->queue, submission_data->fence,
+                          1000000000);
    }
 
    if (tu_bo_map(device, bo, NULL) != VK_SUCCESS) {
@@ -2129,7 +2130,6 @@ tu_u_trace_submission_data_finish(
    }
 
    vk_free(&device->vk.alloc, submission_data->cmd_trace_data);
-   vk_free(&device->vk.alloc, submission_data->syncobj);
    vk_free(&device->vk.alloc, submission_data);
 }
 

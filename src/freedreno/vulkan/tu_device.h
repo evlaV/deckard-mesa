@@ -347,6 +347,7 @@ struct tu_device
    struct drm_msm_gem_submit_bo *bo_list;
    /* map bo handles to bo list index: */
    uint32_t bo_count, bo_list_size;
+   /* bo list for dumping */
    mtx_t bo_mutex;
    /* protects imported BOs creation/freeing */
    struct u_rwlock dma_bo_lock;
@@ -542,10 +543,12 @@ struct tu_u_trace_cmd_data
 struct tu_u_trace_submission_data
 {
    uint32_t submission_id;
+
    /* We have to know when timestamps are available,
-    * this sync object indicates it.
+    * this queue and fence indicates it.
     */
-   struct tu_u_trace_syncobj *syncobj;
+   struct tu_queue *queue;
+   uint32_t fence;
 
    uint32_t cmd_buffer_count;
    uint32_t last_buffer_with_tracepoints;
