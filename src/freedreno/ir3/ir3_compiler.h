@@ -199,6 +199,12 @@ struct ir3_compiler {
     */
    bool has_getfiberid;
 
+   /* Whether movs is supported for subgroupBroadcast. */
+   bool has_movs;
+
+   /* Whether movs is supported for half registers. This is broken pre-a7xx. */
+   bool has_movs_half;
+
    /* True if the shfl instruction is supported. Needed for subgroup rotate and
     * (more efficient) shuffle.
     */

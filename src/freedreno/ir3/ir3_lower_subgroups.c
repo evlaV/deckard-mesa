@@ -743,6 +743,14 @@ ir3_nir_lower_subgroups_filter(const nir_instr *instr, const void *data)
       default:
          return intrin->def.num_components > 1;
       }
+   case nir_intrinsic_read_invocation:
+      if (!compiler->has_movs) {
+         return true;
+      }
+      if (!compiler->has_movs_half && intrin->def.bit_size < 32) {
+         return true;
+      }
+      return false;
    default:
       return true;
    }
