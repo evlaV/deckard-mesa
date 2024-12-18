@@ -405,15 +405,6 @@ typedef uint8_t pixel8a1_t __attribute__((vector_size(8), aligned(1)));
 typedef uint8_t pixel16_t __attribute__((vector_size(16), aligned(16)));
 typedef uint8_t pixel16a1_t __attribute__((vector_size(16), aligned(1)));
 
-/* We use memcpy_small as a fallback for copying a tile when there isn't
- * optimized assembly, which requires a config, but because we're just copying
- * a tile it doesn't matter which config we pass. Just pass an arbitrary valid
- * config.
- */
-static const struct fdl_ubwc_config dummy_config = {
-   .highest_bank_bit = 13,
-};
-
 /* We use handwritten assembly for the smaller cpp's because gcc is too dumb
  * to register allocate the vector registers without inserting extra moves,
  * and it can't use the post-increment register mode so it emits too many add
@@ -455,7 +446,7 @@ linear_to_tiled_1cpp(char *_tiled, char *_linear, uint32_t linear_pitch)
    }
 #else
    memcpy_small<1, LINEAR_TO_TILED, FDL_MACROTILE_4_CHANNEL>(
-      0, 0, 32, 8, _tiled, _linear, linear_pitch, 0, &dummy_config);
+      0, 0, 32, 8, _tiled, _linear, linear_pitch, 0, 0, 0);
 #endif
 }
 
@@ -493,7 +484,7 @@ tiled_to_linear_1cpp(char *_tiled, char *_linear, uint32_t linear_pitch)
    }
 #else
    memcpy_small<1, TILED_TO_LINEAR, FDL_MACROTILE_4_CHANNEL>(
-      0, 0, 32, 8, _tiled, _linear, linear_pitch, 0, &dummy_config);
+      0, 0, 32, 8, _tiled, _linear, linear_pitch, 0, 0, 0);
 #endif
 }
 
@@ -531,7 +522,7 @@ linear_to_tiled_2cpp(char *_tiled, char *_linear, uint32_t linear_pitch)
    }
 #else
    memcpy_small<2, LINEAR_TO_TILED, FDL_MACROTILE_4_CHANNEL>(
-      0, 0, 32, 4, _tiled, _linear, linear_pitch, 0, &dummy_config);
+      0, 0, 32, 4, _tiled, _linear, linear_pitch, 0, 0, 0);
 #endif
 }
 
@@ -569,7 +560,7 @@ tiled_to_linear_2cpp(char *_tiled, char *_linear, uint32_t linear_pitch)
    }
 #else
    memcpy_small<2, LINEAR_TO_TILED, FDL_MACROTILE_4_CHANNEL>(
-      0, 0, 32, 4, _tiled, _linear, linear_pitch, 0, &dummy_config);
+      0, 0, 32, 4, _tiled, _linear, linear_pitch, 0, 0, 0);
 #endif
 }
 
