@@ -2658,6 +2658,186 @@ cp_run_cl(const uint32_t *dwords, uint32_t sizedwords, int level)
    dump_register_summary(level, "compute");
 }
 
+static uint64_t
+get_qword(const uint32_t *dwords, uint32_t dword_offset)
+{
+   return ((uint64_t)dwords[dword_offset + 1] << 32) |
+      dwords[dword_offset];
+}
+
+static void
+dump_mesh_shader_descriptor(const uint32_t *dwords, int level)
+{
+   struct rnndomain *domain = rnn_finddomain(rnn->db, "A8XX_MESH_SHADER");
+
+   dump_domain(dwords, 25, level + 2, "A8XX_MESH_SHADER");
+
+   uint32_t task_ib_dword = rnndec_decodereg(rnn->vc, domain, "TASK_IB_BASE");
+   uint64_t task_ib_base = get_qword(dwords, task_ib_dword);
+   uint32_t task_ib_size = dwords[task_ib_dword + 2];
+
+   if (task_ib_size) {
+      uint32_t *task_ib = hostptr(task_ib_base);
+      if (task_ib) {
+         printf("%stask shader IB:\n", levels[level]);
+         ib++;
+         ibs[ib].base = task_ib_base;
+         ibs[ib].size = task_ib_size;
+         dump_commands(task_ib, task_ib_size, level);
+         ib--;
+      }
+   }
+
+   uint32_t mesh_ib_dword = rnndec_decodereg(rnn->vc, domain, "MESH_IB_BASE");
+   uint64_t mesh_ib_base = get_qword(dwords, mesh_ib_dword);
+   uint32_t mesh_ib_size = dwords[mesh_ib_dword + 2];
+
+   if (mesh_ib_size) {
+      uint32_t *mesh_ib = hostptr(mesh_ib_base);
+      if (mesh_ib) {
+         printf("%smesh shader IB:\n", levels[level]);
+         ib++;
+         ibs[ib].base = mesh_ib_base;
+         ibs[ib].size = mesh_ib_size;
+         dump_commands(mesh_ib, mesh_ib_size, level);
+         ib--;
+      }
+   }
+
+   uint64_t task_cs_obj_start =
+      get_qword(dwords, rnndec_decodereg(rnn->vc, domain,
+               "TASK_CS_OBJ_START"));
+   if (task_cs_obj_start) {
+      disasm_gpuaddr("SP_CS_OBJ_START", task_cs_obj_start, level);
+   }
+
+   uint64_t mesh_cs_obj_start =
+      get_qword(dwords, rnndec_decodereg(rnn->vc, domain,
+               "MESH_CS_OBJ_START"));
+   if (mesh_cs_obj_start) {
+      printf("%smesh shader:\n", levels[level]);
+      disasm_gpuaddr("SP_CS_OBJ_START", mesh_cs_obj_start, level);
+   }
+
+   uint64_t sp_ps_obj_start =
+      get_qword(dwords, rnndec_decodereg(rnn->vc, domain,
+               "SP_PS_OBJ_START"));
+   if (sp_ps_obj_start) {
+      printf("%sfragment shader:\n", levels[level]);
+      disasm_gpuaddr("SP_PS_OBJ_START", sp_ps_obj_start, level);
+   }
+}
+
+static void
+cp_aqe_command(const uint32_t *dwords, uint32_t sizedwords, int level)
+{
+   struct rnndomain *domain = rnn_finddomain(rnn->db, "CP_AQE_COMMAND");
+   
+   uint32_t ib_addrs_dword = rnndec_decodereg(rnn->vc, domain, "SHADER_IB_ADDRS");
+   uint32_t ib_sizes_dword = rnndec_decodereg(rnn->vc, domain, "SHADER_IB_LENGTHS");
+   uint32_t slot_count_dword = rnndec_decodereg(rnn->vc, domain, "SLOT_COUNT");
+   uint32_t raygen_sbt_dword = rnndec_decodereg(rnn->vc, domain, "RAYGEN_SBT");
+   uint32_t shader_descriptor_dword = rnndec_decodereg(rnn->vc, domain, "SHADER_DESCRIPTOR");
+
+   if (raygen_sbt_dword) {
+      uint64_t raygen_sbt_addr =
+         ((uint64_t)dwords[raygen_sbt_dword + 1] << 32) |
+         dwords[raygen_sbt_dword];
+      uint32_t *raygen_sbt = hostptr(raygen_sbt_addr);
+      if (raygen_sbt) {
+         printf("%sraygen sbt index: %u\n", levels[level], *raygen_sbt);
+      }
+   }
+
+   if (ib_addrs_dword) {
+      uint32_t counts_dword =
+         rnndec_decodereg(rnn->vc, domain, "COUNTS");
+      uint32_t global_counts_dword =
+         rnndec_decodereg(rnn->vc, domain, "GLOBAL_COUNT_0");
+      uint32_t slot_to_shader_dword =
+         rnndec_decodereg(rnn->vc, domain, "SLOT_TO_SHADER");
+      uint64_t ib_addrs_addr = get_qword(dwords, ib_addrs_dword);
+      uint64_t ib_sizes_addr = get_qword(dwords, ib_sizes_dword);
+      uint64_t counts_addr = get_qword(dwords, counts_dword);
+      uint64_t slot_to_shader_addr = get_qword(dwords, slot_to_shader_dword);
+      uint64_t global_counts_addr[2];
+      global_counts_addr[0] = get_qword(dwords, global_counts_dword);
+      global_counts_addr[1] = get_qword(dwords, global_counts_dword + 2);
+      uint32_t slot_count = dwords[slot_count_dword];
+      uint32_t shader_count = slot_count - 1;
+
+      uint32_t *counts = hostptr(counts_addr);
+      if (counts) {
+         for (unsigned ctxt = 0; ctxt < 2; ctxt++) {
+            printl(3, "%scounts ctxt %u: ", levels[level], ctxt);
+            for (unsigned i = 0; i < slot_count; i++) {
+               printf("%u ", counts[slot_count * ctxt + i]);
+            }
+            printf("\n");
+         }
+      }
+
+      uint32_t *slot_to_shader = hostptr(slot_to_shader_addr);
+      if (slot_to_shader) {
+         for (unsigned ctxt = 0; ctxt < 2; ctxt++) {
+            printl(3, "%sslot_to_shader ctxt %u: ", levels[level], ctxt);
+            for (unsigned i = 0; i < slot_count; i++) {
+               printf("%u ", slot_to_shader[slot_count * ctxt + i]);
+            }
+            printf("\n");
+         }
+      }
+
+      uint32_t *global_counts[2];
+      global_counts[0] = hostptr(global_counts_addr[0]);
+      global_counts[1] = hostptr(global_counts_addr[1]);
+      if (global_counts[0]) {
+         for (unsigned ctxt = 0; ctxt < 2; ctxt++) {
+               printl(3, "%sglobal counts ctxt %u: ", levels[level], ctxt);
+               for (unsigned i = 0; i < 4; i++) {
+                  printf("%u ", global_counts[ctxt][i]);
+               }
+               printf("\n");
+         }
+      }
+
+      uint64_t *ib_addrs = hostptr(ib_addrs_addr);
+      uint32_t *ib_sizes = hostptr(ib_sizes_addr);
+      if (ib_addrs && ib_sizes) {
+         ib++;
+         for (unsigned i = 0; i < shader_count; i++) {
+            uint32_t *ib_ptr = hostptr(ib_addrs[i]);
+            if (ib_ptr) {
+               printl(3, "%sshader %u:\n", levels[level], i);
+               if (!quiet(3)) {
+                  printf("%sibaddr:%016" PRIx64 "\n", levels[level], ib_addrs[i]);
+                  printf("%sibsize:%08x\n", levels[level], ib_sizes[i]);
+               }
+               ibs[ib].base = ib_addrs[i];
+               ibs[ib].size = ib_sizes[i];
+               dump_commands(ib_ptr, ib_sizes[i], level);
+            }
+         }
+         ib--;
+      }
+   }
+
+   if (shader_descriptor_dword) {
+      uint64_t shader_descriptor_addr = get_qword(dwords,
+            shader_descriptor_dword);
+      const uint32_t *shader_descriptor = hostptr(shader_descriptor_addr);
+      if (shader_descriptor) {
+         printf("%sshader descriptor:\n", levels[level]);
+         dump_mesh_shader_descriptor(shader_descriptor, level);
+      }
+   }
+
+   /* Decoding IBs may have reset this. */
+   current_pkt = "CP_AQE_COMMAND";
+
+   dump_bindless_descriptors(true, level);
+}
+
 static void
 print_nop_tail_string(const uint32_t *dwords, uint32_t sizedwords)
 {
@@ -3403,6 +3583,7 @@ static const struct type3_op {
    CP(DRAW_INDIRECT, cp_draw_indirect, {.load_all_groups = true}),
    CP(DRAW_INDX_INDIRECT, cp_draw_indx_indirect, {.load_all_groups = true}),
    CP(DRAW_INDIRECT_MULTI, cp_draw_indirect_multi, {.load_all_groups = true}),
+   CP(AQE_COMMAND, cp_aqe_command),
    CP(SKIP_IB2_ENABLE_GLOBAL, cp_skip_ib2_enable_global),
    CP(SKIP_IB2_ENABLE_LOCAL, cp_skip_ib2_enable_local),
 

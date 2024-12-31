@@ -378,6 +378,22 @@ emit_shader_iova_reg_bunch(struct replay_context *ctx, struct cmdstream *cs,
    pkt_qw(prev_cs, cs->iova);                                                  \
    pkt(prev_cs, ibcs_size);
 
+#define begin_rt()                                                             \
+   struct cmdstream *ib_addrs = cs_alloc(&ctx, 1024 * 8);                      \
+   struct cmdstream *ib_sizes = cs_alloc(&ctx, 1024 * 4);                      \
+
+#define begin_rt_ib()                                                          \
+   struct cmdstream *cs = cs_alloc(&ctx, 1024 * 1024);                         \
+
+#define end_rt_ib()                                                            \
+   uint64_t ibcs_size = cs->cur;                                               \
+   pkt_qw(ib_addrs, cs->iova);                                                 \
+   pkt(ib_sizes, ibcs_size);
+
+#define end_rt()                                                               \
+   pkt_qw(cs, ib_addrs->iova);                                                 \
+   pkt_qw(cs, ib_sizes->iova);
+
 UNUSED static void
 gpu_print(struct replay_context *ctx, struct cmdstream *_cs, uint64_t iova,
           uint32_t dwords)

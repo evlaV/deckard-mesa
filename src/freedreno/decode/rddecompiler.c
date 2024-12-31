@@ -437,6 +437,87 @@ decompile_domain(uint32_t pkt, const uint32_t *dwords, uint32_t sizedwords,
 
 static void
 decompile_commands(const uint32_t *dwords, uint32_t sizedwords, int level,
+                   uint32_t *cond_count);
+
+static void
+decompile_aqe(const uint32_t *dwords, uint32_t sizedwords, int level)
+{
+   struct rnndomain *dom;
+   int i;
+
+   dom = rnn_finddomain(rnn->db, "CP_AQE_COMMAND");
+
+   printlvl(level, "pkt7(cs, CP_AQE_COMMAND, %u);\n", sizedwords);
+
+   uint32_t slot_count = 0;
+
+   for (i = 0; i < sizedwords; i++) {
+      struct rnndecaddrinfo *info = NULL;
+      if (dom) {
+         info = rnndec_decodeaddr(rnn->vc, dom, i, 0);
+      }
+
+      if (strcmp(info->name, "SLOT_COUNT") == 0) {
+         slot_count = dwords[i];
+      }
+
+      if (strcmp(info->name, "SHADER_IB_ADDRS") == 0) {
+         uint64_t ibaddrs_addr = dwords[i] | ((uint64_t)dwords[i+1] << 32);
+         uint64_t ibsizes_addr = dwords[i+2] | ((uint64_t)dwords[i+3] << 32);
+         uint64_t *ibaddrs = hostptr(ibaddrs_addr);
+         uint32_t *ibsizes = hostptr(ibsizes_addr);
+
+         printlvl(level, "{\n");
+         printlvl(level + 1, "begin_rt();\n");
+
+         for (unsigned j = 0; j < slot_count - 1; j++) {
+            uint64_t ibaddr = ibaddrs[j];
+            uint32_t ibsize = ibsizes[j];
+
+            printlvl(level + 1, "/* shader %u */ {\n", j);
+            printlvl(level + 2, "begin_rt_ib();\n");
+
+            uint32_t *ptr = hostptr(ibaddr);
+            decompile_commands(ptr, ibsize, level + 2, NULL);
+
+            printlvl(level + 2, "end_rt_ib();\n");
+            printlvl(level + 1, "}\n");
+         }
+
+         printlvl(level + 1, "end_rt();\n");
+         printlvl(level, "}\n");
+
+         i += 3; /* skip subsequent 3 dwords (emitted by end_rt()) */
+         continue;
+      }
+
+      char *decoded;
+      if (!(info && info->typeinfo)) {
+         printlvl(level, "pkt(cs, 0x%x);\n", dwords[i]);
+         continue;
+      }
+      uint64_t value = dwords[i];
+      bool reg64 = info->typeinfo->high >= 32 && i < sizedwords - 1;
+      if (reg64) {
+         value |= (uint64_t)dwords[i + 1] << 32;
+      }
+      decoded = rnndec_decodeval(rnn->vc, info->typeinfo, value);
+
+      printlvl(level, "/* %s */\n", decoded);
+      printlvl(level, "pkt(cs, 0x%x);\n", dwords[i]);
+      if (reg64) {
+         printlvl(level, "pkt(cs, 0x%x);\n", dwords[i + 1]);
+         i++;
+      }
+
+      free(decoded);
+      free(info->name);
+      free(info);
+   }
+}
+
+static void
+decompile_commands(const uint32_t *dwords, uint32_t sizedwords, int level,
                    uint32_t *cond_count)
 {
    int dwords_left = sizedwords;
@@ -567,6 +648,8 @@ decompile_commands(const uint32_t *dwords, uint32_t sizedwords, int level,
                decompile_domain(val, dwords + 1, count - 1, dom_name, packet_name,
                                 level);
             }
+         } else if (val == CP_AQE_COMMAND) {
+            decompile_aqe(dwords + 1, count - 1, level);
          } else {
             const char *packet_name = pktname(val);
             const char *dom_name = packet_name;
