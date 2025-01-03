@@ -41,7 +41,7 @@ enum tu_debug_flags
    TU_DEBUG_LAYOUT = 1 << 16,
    TU_DEBUG_LOG_SKIP_GMEM_OPS = 1 << 17,
    TU_DEBUG_PERF = 1 << 18,
-   TU_DEBUG_NOLRZFC = 1 << 19,
+   _TU_DEBUG_USE_ME_FOR_NEW_DBG_FLAG = 1 << 19,
    TU_DEBUG_DYNAMIC = 1 << 20,
    TU_DEBUG_BOS = 1 << 21,
    TU_DEBUG_3D_LOAD = 1 << 22,
