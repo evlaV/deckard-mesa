@@ -596,13 +596,15 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
       image->lrz_height = lrz_height;
       image->lrz_pitch = lrz_pitch;
       image->lrz_offset = image->total_size;
-      unsigned lrz_size = lrz_pitch * lrz_height * sizeof(uint16_t);
+      image->lrz_layer_size = lrz_pitch * lrz_height * sizeof(uint16_t);
+      uint32_t lrz_size = image->lrz_layer_size * image->vk.array_layers;
 
       unsigned nblocksx = DIV_ROUND_UP(DIV_ROUND_UP(width, 8), 16);
       unsigned nblocksy = DIV_ROUND_UP(DIV_ROUND_UP(height, 8), 4);
 
       /* Fast-clear buffer is 1bit/block */
-      unsigned lrz_fc_size = DIV_ROUND_UP(nblocksx * nblocksy, 8);
+      unsigned lrz_fc_size =
+         DIV_ROUND_UP(nblocksx * nblocksy, 8) * image->vk.array_layers;
 
       /* Fast-clear buffer cannot be larger than 512 bytes on A6XX and 1024 bytes on A7XX (HW limitation) */
       image->has_lrz_fc =
