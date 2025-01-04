@@ -625,6 +625,10 @@
    DRI_CONF_OPT_B(tu_disable_d24s8_border_color_workaround, def, \
                   "Use UBWC for D24S8 images with VK_IMAGE_USAGE_SAMPLED_BIT when customBorderColorWithoutFormat is enabled")
 
+#define DRI_CONF_TU_LRZ_RP_DISABLE_THRESHOLD(def) \
+   DRI_CONF_OPT_F(tu_lrz_rp_disable_threshold, def, 0.0, 1.0, \
+                  "Disable LRZ for the whole renderpass if LRZ is disabled before threshold fraction of the total RP drawcalls")
+
 /**
  * \brief Honeykrisp specific configuration options
  */
