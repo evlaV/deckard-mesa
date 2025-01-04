@@ -178,6 +178,8 @@ struct tu_instance
     */
    bool conservative_lrz;
 
+   float lrz_rp_disable_threshold;
+
    /* If to internally reserve a descriptor set for descriptor set
     * dynamic offsets, a descriptor set can be freed at the cost of
     * being unable to use the feature. As it is a part of the Vulkan
