@@ -575,7 +575,8 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
    if (util_format_has_depth(desc) && device->use_lrz) {
       fdl6_lrz_layout_init<CHIP>(&image->lrz_layout, &image->layout[0],
                                  device->physical_device->info,
-                                 image->total_size, image->vk.array_layers);
+                                 image->total_size, image->vk.array_layers,
+                                 TU_DEBUG_ENV(NOLRZFC));
 
       image->total_size += image->lrz_layout.lrz_total_size;
    } else {
