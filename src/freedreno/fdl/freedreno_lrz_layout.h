@@ -35,7 +35,8 @@ static void
 fdl6_lrz_layout_init(struct fdl_lrz_layout *lrz_layout,
                      struct fdl_layout *layout,
                      const struct fd_dev_info *dev_info, uint32_t lrz_offset,
-                     uint32_t array_layers)
+                     uint32_t array_layers,
+                     bool no_lrz_fc)
 {
    unsigned width = layout->width0;
    unsigned height = layout->height0;
@@ -73,7 +74,8 @@ fdl6_lrz_layout_init(struct fdl_lrz_layout *lrz_layout,
    /* Fast-clear buffer cannot be larger than 512 bytes on A6XX and 1024 bytes
     * on A7XX (HW limitation) */
    if (!dev_info->a6xx.enable_lrz_fast_clear ||
-       lrz_layout->lrz_fc_size > fd_lrzfc_layout<CHIP>::FC_SIZE) {
+       lrz_layout->lrz_fc_size > fd_lrzfc_layout<CHIP>::FC_SIZE ||
+       no_lrz_fc) {
       lrz_layout->lrz_fc_size = 0;
    }
 

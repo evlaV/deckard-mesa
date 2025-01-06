@@ -309,7 +309,7 @@ tu_lrz_begin_renderpass(struct tu_cmd_buffer *cmd)
     /* Track LRZ valid state */
    tu_lrz_begin_resumed_renderpass<CHIP>(cmd);
 
-   if (!cmd->state.lrz.valid) {
+   if (!cmd->state.lrz.valid || TU_DEBUG(NOLRZ)) {
       tu6_emit_lrz_buffer<CHIP>(&cmd->cs, NULL);
    }
 }
@@ -602,9 +602,8 @@ tu_lrz_clear_depth_image(struct tu_cmd_buffer *cmd,
    if (!range)
       return;
 
-   bool fast_clear = image->lrz_layout.lrz_fc_size &&
-                     tu_lrzfc_depth_supported<CHIP>(pDepthStencil->depth) &&
-                     !TU_DEBUG(NOLRZFC);
+   bool fast_clear = image->lrz_layout.lrz_fc_size && !TU_DEBUG(NOLRZFC) &&
+                     tu_lrzfc_depth_supported<CHIP>(pDepthStencil->depth);
 
    tu6_emit_lrz_buffer<CHIP>(&cmd->cs, image);
 
