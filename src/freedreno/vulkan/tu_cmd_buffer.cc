@@ -6020,12 +6020,20 @@ vs_params_offset(struct tu_cmd_buffer *cmd)
    return const_state->offsets.driver_param;
 }
 
+template <chip CHIP>
 static void
 tu6_emit_empty_vs_params(struct tu_cmd_buffer *cmd)
 {
    if (cmd->state.vs_params.iova) {
       cmd->state.vs_params = (struct tu_draw_state) {};
       cmd->state.dirty |= TU_CMD_DIRTY_VS_PARAMS;
+
+      /* Previous VS params can affect current indirect draw, e.g. how the
+       * vertex index value is computed. Invalidation of VS state here
+       * avoids that.
+       */
+      tu_cs_emit_regs(&cmd->draw_cs, HLSQ_INVALIDATE_CMD(CHIP,
+         .vs_state = true));
    }
 }
 
@@ -6273,7 +6281,7 @@ tu_CmdDrawIndirect(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
-   tu6_emit_empty_vs_params(cmd);
+   tu6_emit_empty_vs_params<CHIP>(cmd);
 
    if (cmd->device->physical_device->info->a6xx.indirect_draw_wfm_quirk)
       draw_wfm(cmd);
@@ -6302,7 +6310,7 @@ tu_CmdDrawIndexedIndirect(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
-   tu6_emit_empty_vs_params(cmd);
+   tu6_emit_empty_vs_params<CHIP>(cmd);
 
    if (cmd->device->physical_device->info->a6xx.indirect_draw_wfm_quirk)
       draw_wfm(cmd);
@@ -6336,7 +6344,7 @@ tu_CmdDrawIndirectCount(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_buffer, count_buf, countBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
-   tu6_emit_empty_vs_params(cmd);
+   tu6_emit_empty_vs_params<CHIP>(cmd);
 
    /* It turns out that the firmware we have for a650 only partially fixed the
     * problem with CP_DRAW_INDIRECT_MULTI not waiting for WFI's to complete
@@ -6373,7 +6381,7 @@ tu_CmdDrawIndexedIndirectCount(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_buffer, count_buf, countBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
-   tu6_emit_empty_vs_params(cmd);
+   tu6_emit_empty_vs_params<CHIP>(cmd);
 
    draw_wfm(cmd);
 
