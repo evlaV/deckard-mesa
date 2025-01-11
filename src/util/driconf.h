@@ -472,6 +472,10 @@
    DRI_CONF_OPT_B(vk_x11_ignore_suboptimal, def, \
                   "Force the X11 WSI to never report VK_SUBOPTIMAL_KHR")
 
+#define DRI_CONF_VK_DISABLE_IMPLICIT_SYNC(def) \
+   DRI_CONF_OPT_B(vk_disable_implicit_sync, def, \
+                  "Disable implicit sync")
+
 #define DRI_CONF_VK_XWAYLAND_WAIT_READY(def) \
    DRI_CONF_OPT_B(vk_xwayland_wait_ready, def, \
                   "Wait for fences before submitting buffers to Xwayland")
