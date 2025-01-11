@@ -1508,6 +1508,9 @@ msm_queue_submit(struct tu_queue *queue, void *_submit,
          }
       }
 
+      if (queue->device->instance->disable_implicit_sync)
+         flags |= MSM_SUBMIT_NO_IMPLICIT;
+
       struct drm_msm_gem_submit req = {
          .flags = flags,
          .nr_bos = entry_count ? queue->device->submit_bo_count : 0,
