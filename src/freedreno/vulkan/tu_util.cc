@@ -76,7 +76,7 @@ tu_env_notify(void *data, const char *path, bool deleted)
    if (!deleted) {
       FILE *file = fopen(path, "r");
       if (file) {
-         char buf[512];
+         static char buf[512];
          size_t len = fread(buf, 1, sizeof(buf) - 1, file);
          fclose(file);
          buf[len] = '\0';
