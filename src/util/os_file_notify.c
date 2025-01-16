@@ -64,7 +64,7 @@ os_file_notifier_thread(void *data)
 
                thrd_sleep(&interval, NULL);
 
-               if (access(notifier->path, F_OK) == -1) {
+               if (access(notifier->path, F_OK) != -1) {
                   /* Some editors delete and recreate the file when saving. The file was deleted and
                    * the IN_DELETE_SELF event was triggered. We wait for an interval need to check
                    * if the file was recreated. If so, we consider it as a modification rather than
