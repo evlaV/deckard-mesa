@@ -4838,7 +4838,8 @@ template <chip CHIP>
 static void
 store_cp_blit(struct tu_cmd_buffer *cmd,
               struct tu_cs *cs,
-              const struct tu_image_view *iview,
+              const struct tu_image_view *src_iview,
+              const struct tu_image_view *dst_iview,
               uint32_t samples,
               bool separate_stencil,
               enum pipe_format src_format,
@@ -4849,33 +4850,37 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
 {
    r2d_setup_common<CHIP>(cmd, cs, src_format, dst_format,
                           VK_IMAGE_ASPECT_COLOR_BIT, 0, false,
-                          iview->view.ubwc_enabled, true);
+                          dst_iview->view.ubwc_enabled, true);
 
-   if (iview->image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+   if (dst_iview->image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
       if (!separate_stencil) {
-         r2d_dst_depth(cs, iview, layer);
+         r2d_dst_depth(cs, dst_iview, layer);
       } else {
-         r2d_dst_stencil(cs, iview, layer);
+         r2d_dst_stencil(cs, dst_iview, layer);
       }
    } else {
-      r2d_dst<CHIP>(cs, &iview->view, layer, src_format);
+      r2d_dst<CHIP>(cs, &dst_iview->view, layer, src_format);
    }
 
-   enum a6xx_format fmt = blit_format_texture<CHIP>(src_format, TILE6_2, false, true).fmt;
+   enum a6xx_format fmt =
+      blit_format_texture<CHIP>(src_format, TILE6_2,
+                                src_iview->view.is_mutable, true).fmt;
    fixup_src_format(&src_format, dst_format, &fmt);
 
    tu_cs_emit_regs(cs,
                    SP_PS_2D_SRC_INFO(CHIP,
                       .color_format = fmt,
                       .tile_mode = TILE6_2,
-                      .color_swap = WZYX,
+                      .color_swap = (enum a3xx_color_swap)src_iview->view.color_swap,
                       .srgb = util_format_is_srgb(src_format),
                       .samples = tu_msaa_samples(samples),
                       .samples_average = !util_format_is_pure_integer(dst_format) &&
                                          !util_format_is_depth_or_stencil(dst_format),
                       .unk20 = 1,
                       .unk22 = 1),
-                   SP_PS_2D_SRC_SIZE(CHIP, .width = iview->vk.extent.width, .height = iview->vk.extent.height),
+                   SP_PS_2D_SRC_SIZE(CHIP,
+                      .width = dst_iview->vk.extent.width,
+                      .height = dst_iview->vk.extent.height),
                    SP_PS_2D_SRC(CHIP, .qword = cmd->device->physical_device->gmem_base + gmem_offset),
                    SP_PS_2D_SRC_PITCH(CHIP, .pitch = cmd->state.tiling->tile0.width * cpp));
 
@@ -4903,7 +4908,8 @@ template <chip CHIP>
 static void
 store_3d_blit(struct tu_cmd_buffer *cmd,
               struct tu_cs *cs,
-              const struct tu_image_view *iview,
+              const struct tu_image_view *src_iview,
+              const struct tu_image_view *dst_iview,
               VkSampleCountFlagBits dst_samples,
               bool separate_stencil,
               enum pipe_format src_format,
@@ -4931,21 +4937,21 @@ store_3d_blit(struct tu_cmd_buffer *cmd,
    }
 
    r3d_setup<CHIP>(cmd, cs, src_format, dst_format, VK_IMAGE_ASPECT_COLOR_BIT,
-                   0, false, iview->view.ubwc_enabled, dst_samples);
+                   0, false, dst_iview->view.ubwc_enabled, dst_samples);
 
    r3d_coords(cmd, cs, render_area->offset, render_area->offset, render_area->extent);
 
-   if (iview->image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+   if (dst_iview->image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
       if (!separate_stencil) {
-         r3d_dst_depth<CHIP>(cs, iview, layer);
+         r3d_dst_depth<CHIP>(cs, dst_iview, layer);
       } else {
-         r3d_dst_stencil<CHIP>(cs, iview, layer);
+         r3d_dst_stencil<CHIP>(cs, dst_iview, layer);
       }
    } else {
-      r3d_dst<CHIP>(cs, &iview->view, layer, src_format);
+      r3d_dst<CHIP>(cs, &dst_iview->view, layer, src_format);
    }
 
-   r3d_src_gmem<CHIP>(cmd, cs, iview, src_format, dst_format, gmem_offset, cpp);
+   r3d_src_gmem<CHIP>(cmd, cs, src_iview, src_format, dst_format, gmem_offset, cpp);
 
    /* sync GMEM writes with CACHE. */
    tu_emit_event_write<CHIP>(cmd, cs, FD_CACHE_INVALIDATE);
@@ -5015,6 +5021,23 @@ tu_attachment_store_unaligned(struct tu_cmd_buffer *cmd, uint32_t a)
            (y2 % phys_dev->info->gmem_align_h && need_y2_align));
 }
 
+/* The fast path cannot handle cases where GMEM and sysmem attachments have
+ * different swap, which can happen when one is mutable or linear and the
+ * other is not.
+ */
+static bool
+tu_attachment_store_mismatched_swap(struct tu_cmd_buffer *cmd, uint32_t a,
+                                    uint32_t gmem_a)
+{
+   if (a == gmem_a)
+      return false;
+
+   const struct tu_image_view *dst_iview = cmd->state.attachments[a];
+   const struct tu_image_view *src_iview = cmd->state.attachments[gmem_a];
+
+   return dst_iview->view.color_swap != src_iview->view.color_swap;
+}
+
 /* Choose the GMEM layout (use the CCU space or not) based on whether the
  * current attachments will need.  This has to happen at vkBeginRenderPass()
  * time because tu_attachment_store_unaligned() looks at the image views, which
@@ -5042,6 +5065,21 @@ tu_choose_gmem_layout(struct tu_cmd_buffer *cmd)
          cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
       if (att->will_be_resolved && !blit_can_resolve(att->format))
          cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
+   }
+
+   for (unsigned i = 0; i < cmd->state.pass->subpass_count; i++) {
+      const struct tu_subpass *subpass = &cmd->state.pass->subpasses[i];
+      for (unsigned j = 0; j < subpass->resolve_count; j++) {
+         uint32_t a = subpass->resolve_attachments[j].attachment;
+         if (a == VK_ATTACHMENT_UNUSED)
+            continue;
+         uint32_t gmem_a =
+            j == subpass->color_count ?
+               subpass->depth_stencil_attachment.attachment :
+               subpass->color_attachments[j].attachment;
+         if (tu_attachment_store_mismatched_swap(cmd, a, gmem_a))
+            cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
+      }
    }
 
    cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
@@ -5099,8 +5137,9 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
 {
    const VkRect2D *render_area = &cmd->state.render_area;
    struct tu_render_pass_attachment *dst = &cmd->state.pass->attachments[a];
-   const struct tu_image_view *iview = cmd->state.attachments[a];
+   const struct tu_image_view *dst_iview = cmd->state.attachments[a];
    struct tu_render_pass_attachment *src = &cmd->state.pass->attachments[gmem_a];
+   const struct tu_image_view *src_iview = cmd->state.attachments[a];
    const VkClearValue *clear_value = &cmd->state.clear_values[gmem_a];
    bool resolve = a != gmem_a;
    if (resolve)
@@ -5110,6 +5149,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
       return;
 
    bool unaligned = tu_attachment_store_unaligned(cmd, a);
+   bool mismatched_swap = tu_attachment_store_mismatched_swap(cmd, a, gmem_a);
 
    /* D32_SFLOAT_S8_UINT is quite special format: it has two planes,
     * one for depth and other for stencil. When resolving a MSAA
@@ -5129,7 +5169,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    bool store_common = dst->store && !resolve_d32s8_s8;
    bool store_separate_stencil = dst->store_stencil || resolve_d32s8_s8;
 
-   bool use_fast_path = !unaligned && !resolve_d24s8_s8 &&
+   bool use_fast_path = !unaligned && !mismatched_swap && !resolve_d24s8_s8 &&
                         (a == gmem_a || blit_can_resolve(dst->format));
 
    trace_start_gmem_store(&cmd->trace, cs, dst->format, use_fast_path, unaligned);
@@ -5145,9 +5185,9 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    /* use fast path when render area is aligned, except for unsupported resolve cases */
    if (use_fast_path) {
       if (store_common)
-         tu_emit_blit<CHIP>(cmd, cs, resolve_group, iview, src, clear_value, BLIT_EVENT_STORE, false);
+         tu_emit_blit<CHIP>(cmd, cs, resolve_group, dst_iview, src, clear_value, BLIT_EVENT_STORE, false);
       if (store_separate_stencil)
-         tu_emit_blit<CHIP>(cmd, cs, resolve_group, iview, src, clear_value, BLIT_EVENT_STORE, true);
+         tu_emit_blit<CHIP>(cmd, cs, resolve_group, dst_iview, src, clear_value, BLIT_EVENT_STORE, true);
 
       if (cond_exec) {
          tu_end_load_store_cond_exec(cmd, cs, false);
@@ -5180,11 +5220,11 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
 
       for_each_layer(i, layer_mask, layers) {
          if (store_common) {
-            store_3d_blit<CHIP>(cmd, cs, iview, dst->samples, false, src_format,
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, dst->samples, false, src_format,
                           dst_format, render_area, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp);
          }
          if (store_separate_stencil) {
-            store_3d_blit<CHIP>(cmd, cs, iview, dst->samples, true, PIPE_FORMAT_S8_UINT,
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, dst->samples, true, PIPE_FORMAT_S8_UINT,
                           PIPE_FORMAT_S8_UINT, render_area, i,
                           tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples);
          }
@@ -5218,11 +5258,11 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
                                          state);
          }
          if (store_common) {
-            store_cp_blit<CHIP>(cmd, cs, iview, src->samples, false, src_format,
+            store_cp_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, false, src_format,
                           dst_format, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp);
          }
          if (store_separate_stencil) {
-            store_cp_blit<CHIP>(cmd, cs, iview, src->samples, true, PIPE_FORMAT_S8_UINT,
+            store_cp_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, true, PIPE_FORMAT_S8_UINT,
                           PIPE_FORMAT_S8_UINT, i, tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples);
          }
       }
