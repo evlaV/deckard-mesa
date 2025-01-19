@@ -137,6 +137,8 @@ tu_env_init_once(void)
       debug_file = NULL;
    }
 
+   debug_file = NULL;
+
    if (debug_file) {
       if (tu_env.debug != tu_env.env_debug) {
          mesa_logw("TU_DEBUG_FILE is set (%s), but TU_DEBUG is also set. "
