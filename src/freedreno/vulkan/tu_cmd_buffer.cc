@@ -3800,6 +3800,17 @@ tu_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
       cmd_buffer->descriptors[i].max_dynamic_offset_size = 0;
    }
 
+   util_dynarray_foreach (&cmd_buffer->msrtss_color_temporaries,
+                          struct tu_device_memory *, mem) {
+      tu_destroy_memory(cmd_buffer->device, *mem);
+   }
+   util_dynarray_clear(&cmd_buffer->msrtss_color_temporaries);
+   util_dynarray_foreach (&cmd_buffer->msrtss_depth_temporaries,
+                          struct tu_device_memory *, mem) {
+      tu_destroy_memory(cmd_buffer->device, *mem);
+   }
+   util_dynarray_clear(&cmd_buffer->msrtss_depth_temporaries);
+
    u_trace_fini(&cmd_buffer->trace);
    u_trace_init(&cmd_buffer->trace, &cmd_buffer->device->trace_context);
    u_trace_fini(&cmd_buffer->rp_trace);
@@ -6213,7 +6224,7 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
       vk_multialloc_add(&ma, &cmd->state.attachments,
                         const struct tu_image_view *, pass->attachment_count);
       vk_multialloc_add(&ma, &cmd->state.clear_values, VkClearValue,
-                        pRenderPassBegin->clearValueCount);
+                        pass->attachment_count);
       if (!vk_multialloc_alloc(&ma, &cmd->vk.pool->alloc,
                                VK_SYSTEM_ALLOCATION_SCOPE_OBJECT)) {
          vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_HOST_MEMORY);
@@ -6225,14 +6236,31 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
       tu_cs_emit_call(&cmd->cs, cmd->device->dbg_renderpass_stomp_cs);
    }
 
-   for (unsigned i = 0; i < pass->attachment_count; i++) {
+   for (unsigned i = 0; i < pass->user_attachment_count; i++) {
       cmd->state.attachments[i] = pAttachmentInfo ?
          tu_image_view_from_handle(pAttachmentInfo->pAttachments[i]) :
          cmd->state.framebuffer->attachments[i];
    }
+
+   for (unsigned i = 0; i < pass->attachment_count - pass->user_attachment_count; i++) {
+      /* With imageless attachments, the only attachments in the framebuffer
+       * are MSRTSS attachments. Without imageless attachments, they are after
+       * the user's attachments.
+       */
+      unsigned fb_idx = i + (pAttachmentInfo ? 0 : pass->user_attachment_count);
+      cmd->state.attachments[i + pass->user_attachment_count] =
+         cmd->state.framebuffer->attachments[fb_idx];
+   }
+
    if (pass->attachment_count) {
-      for (unsigned i = 0; i < pRenderPassBegin->clearValueCount; i++)
-            cmd->state.clear_values[i] = pRenderPassBegin->pClearValues[i];
+      for (unsigned i = 0; i < MIN2(pRenderPassBegin->clearValueCount,
+                                    pass->user_attachment_count); i++) {
+         struct tu_render_pass_attachment *att = &pass->attachments[i];
+         uint32_t idx = i;
+         if (att->remapped_clear_att != VK_ATTACHMENT_UNUSED)
+            idx = att->remapped_clear_att;
+         cmd->state.clear_values[idx] = pRenderPassBegin->pClearValues[i];
+      }
    }
 
    tu_choose_gmem_layout(cmd);
@@ -6284,19 +6312,30 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
    cmd->state.clear_values = cmd->dynamic_clear_values;
 
    for (unsigned i = 0; i < pRenderingInfo->colorAttachmentCount; i++) {
-      uint32_t a = cmd->dynamic_subpass.color_attachments[i].attachment;
       if (!pRenderingInfo->pColorAttachments[i].imageView)
          continue;
+      uint32_t a = cmd->dynamic_subpass.color_attachments[i].attachment;
 
       cmd->state.clear_values[a] =
          pRenderingInfo->pColorAttachments[i].clearValue;
 
+      /* With MSRTSS, the user's attachment corresponds to the
+       * resolve/unresolve attachment, not the color attachment. The color
+       * attachment is the transient multisample attachment. However the clear
+       * happens on the multisample attachment, so we don't remap the
+       * clear_values assignment above.
+       */
+      bool msrtss = false;
+      if (a >= cmd->dynamic_pass.user_attachment_count) {
+         a = cmd->dynamic_pass.attachments[a].user_att;
+         msrtss = true;
+      }
       VK_FROM_HANDLE(tu_image_view, view,
                      pRenderingInfo->pColorAttachments[i].imageView);
       cmd->state.attachments[a] = view;
 
       a = cmd->dynamic_subpass.resolve_attachments[i].attachment;
-      if (a != VK_ATTACHMENT_UNUSED) {
+      if (!msrtss && a != VK_ATTACHMENT_UNUSED) {
          VK_FROM_HANDLE(tu_image_view, resolve_view,
                         pRenderingInfo->pColorAttachments[i].resolveImageView);
          cmd->state.attachments[a] = resolve_view;
@@ -6312,7 +6351,6 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
          pRenderingInfo->pStencilAttachment;
       if (common_info && common_info->imageView != VK_NULL_HANDLE) {
          VK_FROM_HANDLE(tu_image_view, view, common_info->imageView);
-         cmd->state.attachments[a] = view;
          if (pRenderingInfo->pDepthAttachment) {
             cmd->state.clear_values[a].depthStencil.depth =
                pRenderingInfo->pDepthAttachment->clearValue.depthStencil.depth;
@@ -6323,7 +6361,15 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
                pRenderingInfo->pStencilAttachment->clearValue.depthStencil.stencil;
          }
 
-         if (cmd->dynamic_subpass.resolve_count >
+         bool msrtss = false;
+         if (a >= cmd->dynamic_pass.user_attachment_count) {
+            a = cmd->dynamic_pass.attachments[a].user_att;
+            msrtss = true;
+         }
+
+         cmd->state.attachments[a] = view;
+
+         if (!msrtss && cmd->dynamic_subpass.resolve_count >
              cmd->dynamic_subpass.color_count) {
             VK_FROM_HANDLE(tu_image_view, resolve_view,
                            common_info->resolveImageView);
@@ -6357,6 +6403,12 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
                               RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR);
       VK_FROM_HANDLE(tu_image_view, view, fsr_info->imageView);
       cmd->state.attachments[a] = view;
+   }
+
+   VkResult result = tu_setup_dynamic_msrtss(cmd);
+   if (result != VK_SUCCESS) {
+      vk_command_buffer_set_error(&cmd->vk, result);
+      return;
    }
 
    tu_choose_gmem_layout(cmd);

@@ -127,7 +127,8 @@ static void
 tu_physical_device_get_format_properties(
    struct tu_physical_device *physical_device,
    VkFormat vk_format,
-   VkFormatProperties3 *out_properties)
+   VkFormatProperties3 *out_properties,
+   VkSubpassResolvePerformanceQueryEXT *msrtss_out)
 {
    VkFormatFeatureFlags2 linear = 0, optimal = 0, buffer = 0;
    enum pipe_format format = vk_format_to_pipe_format(vk_format);
@@ -150,6 +151,10 @@ tu_physical_device_get_format_properties(
    if (format == PIPE_FORMAT_X6R10_UNORM ||
        format == PIPE_FORMAT_X6R10X6G10_UNORM)
       supported_color = false;
+
+   /* We never have to spill to memory for MSRTSS. */
+   if (msrtss_out)
+      msrtss_out->optimal = true;
 
    /* We don't support BufferToImage/ImageToBuffer for npot formats */
    if (!is_npot)
@@ -318,9 +323,12 @@ tu_GetPhysicalDeviceFormatProperties2(
       vk_find_struct(pFormatProperties->pNext, FORMAT_PROPERTIES_3);
    if (!props3)
       props3 = &local_props3;
+   VkSubpassResolvePerformanceQueryEXT *msrtss_out =
+      vk_find_struct(pFormatProperties->pNext,
+                     SUBPASS_RESOLVE_PERFORMANCE_QUERY_EXT);
 
    tu_physical_device_get_format_properties(
-      physical_device, format, props3);
+      physical_device, format, props3, msrtss_out);
 
    pFormatProperties->formatProperties = (VkFormatProperties) {
       .linearTilingFeatures =
@@ -392,7 +400,7 @@ tu_get_image_format_properties(
    BITMASK_ENUM(VkSampleCountFlagBits) sampleCounts = VK_SAMPLE_COUNT_1_BIT;
 
    tu_physical_device_get_format_properties(physical_device, info->format,
-                                            &format_props);
+                                            &format_props, NULL);
 
    switch (info->tiling) {
    case VK_IMAGE_TILING_LINEAR:
