@@ -1533,6 +1533,10 @@ r3d_setup(struct tu_cmd_buffer *cmd,
    if (!cmd->state.pass) {
       tu_emit_cache_flush_ccu<CHIP>(cmd, cs, TU_CMD_CCU_SYSMEM);
       tu6_emit_window_scissor(cs, 0, 0, 0x3fff, 0x3fff);
+      if (cmd->device->physical_device->info->a7xx.has_hw_bin_scaling) {
+         tu_cs_emit_regs(cs, A7XX_GRAS_BIN_SCALE());
+         tu_cs_emit_regs(cs, A7XX_RB_BIN_SCALE());
+      }
    }
 
    if (!(blit_param & R3D_DST_GMEM)) {
@@ -3918,6 +3922,7 @@ fdm_apply_sysmem_clear_coords(struct tu_cmd_buffer *cmd,
                               struct tu_cs *cs,
                               void *data,
                               VkOffset2D common_bin_offset,
+                              const VkOffset2D *hw_viewport_offsets,
                               unsigned views,
                               const VkExtent2D *frag_areas,
                               const VkRect2D *bins)
@@ -4191,6 +4196,7 @@ fdm_apply_gmem_clear_coords(struct tu_cmd_buffer *cmd,
                             struct tu_cs *cs,
                             void *data,
                             VkOffset2D common_bin_offset,
+                            const VkOffset2D *hw_viewport_offsets,
                             unsigned views,
                             const VkExtent2D *frag_areas,
                             const VkRect2D *bins)
@@ -4698,6 +4704,7 @@ fdm_apply_generic_clear_coords(struct tu_cmd_buffer *cmd,
                               struct tu_cs *cs,
                               void *data,
                               VkOffset2D common_bin_offset,
+                              const VkOffset2D *hw_viewport_offsets,
                               unsigned views,
                               const VkExtent2D *frag_areas,
                               const VkRect2D *bins)
@@ -4907,6 +4914,7 @@ fdm_apply_load_coords(struct tu_cmd_buffer *cmd,
                       struct tu_cs *cs,
                       void *data,
                       VkOffset2D common_bin_offset,
+                      const VkOffset2D *hw_viewport_offsets,
                       unsigned views,
                       const VkExtent2D *frag_areas,
                       const VkRect2D *bins)
@@ -5390,6 +5398,7 @@ fdm_apply_store_coords(struct tu_cmd_buffer *cmd,
                        struct tu_cs *cs,
                        void *data,
                        VkOffset2D common_bin_offset,
+                       const VkOffset2D *hw_viewport_offsets,
                        unsigned views,
                        const VkExtent2D *frag_areas,
                        const VkRect2D *bins)
