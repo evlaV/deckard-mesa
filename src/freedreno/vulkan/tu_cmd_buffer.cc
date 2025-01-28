@@ -4418,8 +4418,11 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    u_foreach_bit(i, pipeline->set_state_mask)
       cmd->state.dynamic_state[i] = pipeline->dynamic_state[i];
 
-   if (pipeline->program.per_view_viewport != cmd->state.per_view_viewport) {
+   if (pipeline->program.per_view_viewport != cmd->state.per_view_viewport ||
+       pipeline->program.fake_single_viewport != cmd->state.fake_single_viewport) {
       cmd->state.per_view_viewport = pipeline->program.per_view_viewport;
+      cmd->state.fake_single_viewport =
+         pipeline->program.fake_single_viewport;
       cmd->state.dirty |= TU_CMD_DIRTY_PER_VIEW_VIEWPORT;
    }
 
