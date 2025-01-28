@@ -337,6 +337,8 @@ get_device_extensions(const struct tu_physical_device *device,
       .IMG_filter_cubic = device->info->a6xx.has_tex_filter_cubic,
       .NV_compute_shader_derivatives = device->info->chip >= 7,
       .QCOM_fragment_density_map_offset = true,
+      .QCOM_multiview_per_view_viewports =
+         device->info->a6xx.has_per_view_viewport,
       .VALVE_mutable_descriptor_type = true,
    } };
 
@@ -766,6 +768,9 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* VK_EXT_fragment_density_map_offset */
    features->fragmentDensityMapOffset = true;
+
+   /* QCOM_multiview_per_view_viewports */
+   features->multiviewPerViewViewports = true;
 }
 
 static void
