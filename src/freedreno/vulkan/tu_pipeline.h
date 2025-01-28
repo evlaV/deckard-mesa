@@ -107,7 +107,14 @@ struct tu_program_state
 
       unsigned dynamic_descriptor_offsets[MAX_SETS];
 
+      /* Whether the per-view-viewport feature should be enabled in HW.
+       */
       bool per_view_viewport;
+      /* If per_view_viewport is true and this is true, the app expects a
+       * single viewport and we need to fake it by duplicating the viewport
+       * across views before transforming it.
+       */
+      bool fake_single_viewport;
       bool writes_shading_rate;
       bool reads_shading_rate;
       bool accesses_smask;

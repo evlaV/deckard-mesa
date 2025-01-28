@@ -452,6 +452,7 @@ struct tu_cmd_state
 
    bool has_fdm;
    bool per_view_viewport;
+   bool fake_single_viewport;
 
    /* saved states to re-emit in TU_CMD_DIRTY_DRAW_STATE case */
    struct tu_draw_state dynamic_state[TU_DYNAMIC_STATE_COUNT];
