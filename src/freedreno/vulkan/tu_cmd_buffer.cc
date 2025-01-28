@@ -774,12 +774,12 @@ tu6_emit_render_cntl<A7XX>(struct tu_cmd_buffer *cmd,
 {
 }
 
-static void
-tu6_emit_blit_scissor(struct tu_cmd_buffer *cmd, struct tu_cs *cs, bool align,
-                      bool used_by_sysmem)
+void
+tu6_emit_blit_scissor(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+                      unsigned view, bool align, bool used_by_sysmem)
 {
    struct tu_physical_device *phys_dev = cmd->device->physical_device;
-   const VkRect2D *render_area = &cmd->state.render_area;
+   const VkRect2D *render_area = &cmd->state.render_areas[view];
 
    /* Avoid assertion fails with an empty render area at (0, 0) where the
     * subtraction below wraps around. Empty render areas should be forced to
@@ -1115,8 +1115,16 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
    }
 
    /* Use sysmem for empty render areas */
-   if (cmd->state.render_area.extent.width == 0 ||
-       cmd->state.render_area.extent.height == 0) {
+   if (cmd->state.per_layer_render_area) {
+      for (unsigned i = 0; i < MAX2(cmd->state.pass->num_views, 1); i++) {
+         if (cmd->state.render_areas[i].extent.width == 0 ||
+             cmd->state.render_areas[i].extent.height == 0) {
+            cmd->state.rp.gmem_disable_reason = "Render area is empty";
+            return true;
+         }
+      }
+   } else if (cmd->state.render_areas[0].extent.width == 0 ||
+              cmd->state.render_areas[0].extent.height == 0) {
       cmd->state.rp.gmem_disable_reason = "Render area is empty";
       return true;
    }
@@ -1361,7 +1369,9 @@ tu6_emit_sysmem_resolve(struct tu_cmd_buffer *cmd,
    const struct tu_image_view *dst = cmd->state.attachments[a];
    const struct tu_image_view *src = cmd->state.attachments[gmem_a];
 
-   tu_resolve_sysmem<CHIP>(cmd, cs, src, dst, layer_mask, fb->layers, &cmd->state.render_area);
+   tu_resolve_sysmem<CHIP>(cmd, cs, src, dst, layer_mask, fb->layers,
+                           cmd->state.per_layer_render_area,
+                           cmd->state.render_areas);
 }
 
 template <chip CHIP>
@@ -1422,6 +1432,8 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, cmd->state.tiling);
 
+   bool per_layer_render_area = cmd->state.per_layer_render_area;
+
    if (pass->has_fdm)
       tu_cs_set_writeable(cs, true);
 
@@ -1429,7 +1441,8 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    tu_cs_emit(cs, A6XX_CP_SET_MARKER_0_MODE(RM6_BIN_RESOLVE) |
                   A6XX_CP_SET_MARKER_0_USES_GMEM);
 
-   tu6_emit_blit_scissor(cmd, cs, true, false);
+   if (!per_layer_render_area)
+      tu6_emit_blit_scissor(cmd, cs, 0, true, false);
 
    struct tu_resolve_group resolve_group = {};
 
@@ -1442,7 +1455,8 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
          if (a != VK_ATTACHMENT_UNUSED) {
             uint32_t gmem_a = tu_subpass_get_attachment_to_resolve(subpass, i);
             tu_store_gmem_attachment<CHIP>(cmd, cs, &resolve_group, a, gmem_a,
-                                           fb->layers, subpass->multiview_mask, false);
+                                           fb->layers, subpass->multiview_mask,
+                                           per_layer_render_area, false);
          }
       }
    }
@@ -1453,7 +1467,7 @@ tu6_emit_tile_store(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                                         cmd->state.pass->has_cond_load_store;
          tu_store_gmem_attachment<CHIP>(cmd, cs, &resolve_group, a, a,
                                   fb->layers, subpass->multiview_mask,
-                                  cond_exec_allowed);
+                                  per_layer_render_area, cond_exec_allowed);
       }
    }
 
@@ -4985,7 +4999,10 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
    cmd->state.framebuffer = suspended->state.suspended_pass.framebuffer;
    cmd->state.attachments = suspended->state.suspended_pass.attachments;
    cmd->state.clear_values = suspended->state.suspended_pass.clear_values;
-   cmd->state.render_area = suspended->state.suspended_pass.render_area;
+   memcpy(cmd->state.render_areas,
+          suspended->state.suspended_pass.render_areas,
+          sizeof(cmd->state.render_areas));
+   cmd->state.per_layer_render_area = suspended->state.per_layer_render_area;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
    cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
    cmd->state.tiling = tu_framebuffer_get_tiling_config(
@@ -5328,6 +5345,8 @@ tu_emit_subpass_begin_gmem(struct tu_cmd_buffer *cmd, struct tu_resolve_group *r
    uint32_t subpass_idx = cmd->state.subpass - cmd->state.pass->subpasses;
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, cmd->state.tiling);
 
+   bool per_layer_render_area = cmd->state.per_layer_render_area;
+
    /* If we might choose to bin, then put the loads under a check for geometry
     * having been binned to this tile.  If we don't choose to bin in the end,
     * then we will have manually set those registers to say geometry is present.
@@ -5350,12 +5369,13 @@ tu_emit_subpass_begin_gmem(struct tu_cmd_buffer *cmd, struct tu_resolve_group *r
    for (uint32_t i = 0; i < cmd->state.pass->attachment_count; ++i) {
       struct tu_render_pass_attachment *att = &cmd->state.pass->attachments[i];
       if ((att->load || att->load_stencil) && att->first_subpass_idx == subpass_idx) {
-         if (!emitted_scissor) {
-            tu6_emit_blit_scissor(cmd, cs, true, false);
+         if (!emitted_scissor && !per_layer_render_area) {
+            tu6_emit_blit_scissor(cmd, cs, 0, true, false);
             emitted_scissor = true;
          }
          tu_load_gmem_attachment<CHIP>(cmd, cs, resolve_group, i,
-                                       cond_load_allowed, false);
+                                       cond_load_allowed,
+                                       per_layer_render_area, false);
       }
    }
 
@@ -5366,11 +5386,12 @@ tu_emit_subpass_begin_gmem(struct tu_cmd_buffer *cmd, struct tu_resolve_group *r
          struct tu_render_pass_attachment *att =
             &cmd->state.pass->attachments[i];
          if (att->clear_mask && att->first_subpass_idx == subpass_idx) {
-            if (!emitted_scissor) {
-               tu6_emit_blit_scissor(cmd, cs, false, false);
+            if (!emitted_scissor && !per_layer_render_area) {
+               tu6_emit_blit_scissor(cmd, cs, 0, false, false);
                emitted_scissor = true;
             }
-            tu_clear_gmem_attachment<CHIP>(cmd, cs, resolve_group, i);
+            tu_clear_gmem_attachment<CHIP>(cmd, cs, resolve_group,
+                                           per_layer_render_area, i);
          }
       }
    }
@@ -5405,8 +5426,11 @@ tu_emit_subpass_begin_sysmem(struct tu_cmd_buffer *cmd)
 static void
 tu7_emit_subpass_clear(struct tu_cmd_buffer *cmd, struct tu_resolve_group *resolve_group)
 {
-   if (cmd->state.render_area.extent.width == 0 ||
-       cmd->state.render_area.extent.height == 0)
+   bool emit_blit_scissor = !cmd->state.per_layer_render_area;
+
+   if (emit_blit_scissor &&
+       (cmd->state.render_areas[0].extent.width == 0 ||
+        cmd->state.render_areas[0].extent.height == 0))
       return;
 
    struct tu_cs *cs = &cmd->draw_cs;
@@ -5417,11 +5441,12 @@ tu7_emit_subpass_clear(struct tu_cmd_buffer *cmd, struct tu_resolve_group *resol
       struct tu_render_pass_attachment *att =
          &cmd->state.pass->attachments[i];
       if (att->clear_mask && att->first_subpass_idx == subpass_idx) {
-         if (!emitted_scissor) {
-            tu6_emit_blit_scissor(cmd, cs, false, true);
+         if (!emitted_scissor && emit_blit_scissor) {
+            tu6_emit_blit_scissor(cmd, cs, 0, false, true);
             emitted_scissor = true;
          }
-         tu7_generic_clear_attachment(cmd, cs, resolve_group, i);
+         tu7_generic_clear_attachment(cmd, cs, resolve_group,
+                                      !emit_blit_scissor, i);
       }
    }
 }
@@ -5519,6 +5544,33 @@ struct vksubpass_begin_info_valve {
    uint32_t srgb_cntl;
 };
 
+static void
+tu_set_render_area(struct tu_cmd_buffer *cmd,
+                   const VkRect2D *render_area,
+                   const void *pNext)
+{
+   const struct VkMultiviewPerViewRenderAreasRenderPassBeginInfoQCOM *info =
+      vk_find_struct_const(pNext,
+                           MULTIVIEW_PER_VIEW_RENDER_AREAS_RENDER_PASS_BEGIN_INFO_QCOM);
+
+   if (info && info->perViewRenderAreaCount != 0) {
+      memcpy(cmd->state.render_areas, info->pPerViewRenderAreas,
+             sizeof(VkRect2D) * info->perViewRenderAreaCount);
+
+      /* It's not clear from the spec, but if multiview isn't enabled then
+       * presumably we should use the first area as the render area for all
+       * layers, as if it wasn't specified. Use the name per_layer_render_area
+       * to denote that it's actually per-layer and not per-view, because
+       * there may be only one view but more than one layer when multiview is
+       * disabled.
+       */
+      cmd->state.per_layer_render_area = cmd->state.pass->num_views;
+   } else {
+      cmd->state.render_areas[0] = *render_area;
+      cmd->state.per_layer_render_area = false;
+   }
+}
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
@@ -5553,7 +5605,8 @@ tu_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
    cmd->state.pass = pass;
    cmd->state.subpass = pass->subpasses;
    cmd->state.framebuffer = fb;
-   cmd->state.render_area = pRenderPassBegin->renderArea;
+   tu_set_render_area(cmd, &pRenderPassBegin->renderArea,
+                      pRenderPassBegin->pNext);
 
    if (pass->attachment_count > 0) {
       VK_MULTIALLOC(ma);
@@ -5625,7 +5678,8 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
    cmd->state.pass = &cmd->dynamic_pass;
    cmd->state.subpass = &cmd->dynamic_subpass;
    cmd->state.framebuffer = &cmd->dynamic_framebuffer;
-   cmd->state.render_area = pRenderingInfo->renderArea;
+   tu_set_render_area(cmd, &pRenderingInfo->renderArea,
+                      pRenderingInfo->pNext);
    cmd->state.blit_cache_cleaned = false;
 
    cmd->state.attachments = cmd->dynamic_attachments;
@@ -5740,7 +5794,10 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       cmd->state.suspended_pass.pass = cmd->state.pass;
       cmd->state.suspended_pass.subpass = cmd->state.subpass;
       cmd->state.suspended_pass.framebuffer = cmd->state.framebuffer;
-      cmd->state.suspended_pass.render_area = cmd->state.render_area;
+      memcpy(cmd->state.suspended_pass.render_areas,
+             cmd->state.render_areas, sizeof(cmd->state.render_areas));
+      cmd->state.suspended_pass.per_layer_render_area = 
+         cmd->state.per_layer_render_area;
       cmd->state.suspended_pass.attachments = cmd->state.attachments;
       cmd->state.suspended_pass.clear_values = cmd->state.clear_values;
       cmd->state.suspended_pass.gmem_layout = cmd->state.gmem_layout;
@@ -5917,7 +5974,10 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
       tu_cond_exec_start(cs, CP_COND_EXEC_0_RENDER_MODE_GMEM);
 
       if (subpass->resolve_attachments) {
-         tu6_emit_blit_scissor(cmd, cs, true, false);
+         bool per_layer_render_area = cmd->state.per_layer_render_area;
+
+         if (!per_layer_render_area)
+            tu6_emit_blit_scissor(cmd, cs, 0, true, false);
 
          struct tu_resolve_group resolve_group = {};
 
@@ -5929,7 +5989,8 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
             uint32_t gmem_a = tu_subpass_get_attachment_to_resolve(subpass, i);
 
             tu_store_gmem_attachment<CHIP>(cmd, cs, &resolve_group, a, gmem_a,
-                                           fb->layers, subpass->multiview_mask, false);
+                                           fb->layers, subpass->multiview_mask,
+                                           per_layer_render_area, false);
 
             if (!pass->attachments[a].gmem)
                continue;
@@ -5938,7 +5999,8 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
             * if it is, should be doing a GMEM->GMEM resolve instead of GMEM->MEM->GMEM..
             */
             perf_debug(cmd->device, "TODO: missing GMEM->GMEM resolve path\n");
-            tu_load_gmem_attachment<CHIP>(cmd, cs, &resolve_group, a, false, true);
+            tu_load_gmem_attachment<CHIP>(cmd, cs, &resolve_group, a,
+                                          per_layer_render_area, false, true);
          }
 
          tu_emit_resolve_group<CHIP>(cmd, cs, &resolve_group);
