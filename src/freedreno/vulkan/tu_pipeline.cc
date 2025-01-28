@@ -2338,7 +2338,9 @@ tu_emit_program_state(struct tu_cs *sub_cs,
        (shaders[MESA_SHADER_FRAGMENT]->fs.has_fdm &&
         dev->physical_device->info->a6xx.has_per_view_viewport));
    prog->per_layer_viewport = last_shader->per_layer_viewport;
-   prog->fake_single_viewport = prog->per_view_viewport ||
+   prog->fake_single_viewport =
+      (prog->per_view_viewport &&
+       !dev->vk.enabled_features.multiviewPerViewViewports) ||
       prog->per_layer_viewport;
    prog->writes_shading_rate = last_variant->writes_shading_rate;
    prog->reads_shading_rate = fs->reads_shading_rate;
