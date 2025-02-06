@@ -1169,6 +1169,8 @@ vulkan_descriptor_type_name(VkDescriptorType type)
       return "inline-UBO";
    case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
       return "accel-struct";
+   case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
+      return "block-match-image";
    default:
       return "unknown";
    }
@@ -1872,6 +1874,18 @@ print_tex_instr(nir_tex_instr *instr, print_state *state)
    case nir_texop_sample_pos_nv:
       fprintf(fp, "sample_pos_nv ");
       break;
+   case nir_texop_block_match_qcom:
+      switch (instr->match_mode) {
+      case nir_block_match_mode_qcom_sad:
+         fprintf(fp, "block_match_qcom sad ");
+         break;
+      case nir_block_match_mode_qcom_ssd:
+         fprintf(fp, "block_match_qcom ssd ");
+         break;
+      default:
+         UNREACHABLE("Invalid block match mode");
+      }
+      break;
    default:
       UNREACHABLE("Invalid texture operation");
       break;
@@ -1895,6 +1909,9 @@ print_tex_instr(nir_tex_instr *instr, print_state *state)
          break;
       case nir_tex_src_coord:
          fprintf(fp, "(coord)");
+         break;
+      case nir_tex_src_ref_coord:
+         fprintf(fp, "(ref_coord)");
          break;
       case nir_tex_src_projector:
          fprintf(fp, "(projector)");
@@ -1941,8 +1958,14 @@ print_tex_instr(nir_tex_instr *instr, print_state *state)
          has_texture_deref = true;
          fprintf(fp, "(texture_deref)");
          break;
+      case nir_tex_src_ref_texture_deref:
+         fprintf(fp, "(ref_texture_deref)");
+         break;
       case nir_tex_src_sampler_deref:
          has_sampler_deref = true;
+         fprintf(fp, "(sampler_deref)");
+         break;
+      case nir_tex_src_ref_sampler_deref:
          fprintf(fp, "(sampler_deref)");
          break;
       case nir_tex_src_texture_offset:
@@ -1954,8 +1977,17 @@ print_tex_instr(nir_tex_instr *instr, print_state *state)
       case nir_tex_src_texture_handle:
          fprintf(fp, "(texture_handle)");
          break;
+      case nir_tex_src_ref_texture_handle:
+         fprintf(fp, "(ref_texture_handle)");
+         break;
       case nir_tex_src_sampler_handle:
          fprintf(fp, "(sampler_handle)");
+         break;
+      case nir_tex_src_ref_sampler_handle:
+         fprintf(fp, "(ref_sampler_handle)");
+         break;
+      case nir_tex_src_block_size:
+         fprintf(fp, "(block_size)");
          break;
       case nir_tex_src_plane:
          fprintf(fp, "(plane)");

@@ -426,6 +426,7 @@ clone_tex(clone_state *state, const nir_tex_instr *tex)
    ntex->offset_non_uniform = tex->offset_non_uniform;
 
    ntex->backend_flags = tex->backend_flags;
+   ntex->match_mode = tex->match_mode;
 
    return ntex;
 }

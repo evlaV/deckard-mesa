@@ -217,6 +217,7 @@ static const struct spirv_capabilities implemented_capabilities = {
    .WorkgroupMemoryExplicitLayoutKHR = true,
    .WorkgroupMemoryExplicitLayout8BitAccessKHR = true,
    .WorkgroupMemoryExplicitLayout16BitAccessKHR = true,
+   .TextureBlockMatchQCOM = true,
 };
 
 uint32_t mesa_spirv_debug = 0;
@@ -3358,6 +3359,59 @@ get_image_type(struct vtn_builder *b, nir_alu_type type, unsigned operands)
 }
 
 static void
+vtn_handle_blockmatch(struct vtn_builder *b, SpvOp opcode,
+                   const uint32_t *w, unsigned count)
+{
+   nir_tex_instr *instr = nir_tex_instr_create(b->shader, 7);
+   instr->op = nir_texop_block_match_qcom;
+   instr->dest_type = nir_type_float32;
+   instr->sampler_dim = GLSL_SAMPLER_DIM_2D;
+   instr->coord_components = 2;
+   instr->match_mode =
+      (opcode == SpvOpImageBlockMatchSADQCOM) ? nir_block_match_mode_qcom_sad
+                                              : nir_block_match_mode_qcom_ssd;
+
+   /* Validate arguments */
+   struct vtn_sampled_image target_si = vtn_get_sampled_image(b, w[3]);
+   struct vtn_sampled_image ref_si = vtn_get_sampled_image(b, w[5]);
+   vtn_assert(glsl_get_sampler_dim(target_si.image->type) == GLSL_SAMPLER_DIM_2D);
+   vtn_assert(glsl_get_sampler_dim(ref_si.image->type) == GLSL_SAMPLER_DIM_2D);
+
+   nir_def *target_coord = vtn_get_nir_ssa(b, w[4]);
+   nir_def *reference_coord = vtn_get_nir_ssa(b, w[6]);
+   nir_def *block_size = vtn_get_nir_ssa(b, w[7]);
+   vtn_fail_if(target_coord->num_components != 2 || target_coord->bit_size != 32,
+               "BlockMatch target coordinates must be uvec2.");
+   vtn_fail_if(reference_coord->num_components != 2 || reference_coord->bit_size != 32,
+               "BlockMatch reference coordinates must be uvec2.");
+   vtn_fail_if(block_size->num_components != 2 || block_size->bit_size != 32,
+               "BlockMatch block size must be uvec2.");
+
+   if (vtn_has_decoration(b, vtn_untyped_value(b, w[3]), SpvDecorationNonUniformEXT) ||
+       vtn_has_decoration(b, vtn_untyped_value(b, w[5]), SpvDecorationNonUniformEXT)) {
+      instr->texture_non_uniform = true;
+      instr->sampler_non_uniform = true;
+   }
+
+   /* Sources */
+   instr->src[0] = nir_tex_src_for_ssa(nir_tex_src_texture_deref, &target_si.image->def);    /* Target image          */
+   instr->src[1] = nir_tex_src_for_ssa(nir_tex_src_sampler_deref, &target_si.sampler->def);  /* Target sampler        */
+   instr->src[2] = vtn_tex_src(b, w[4], nir_tex_src_coord);                                  /* Target coordinates    */
+   instr->src[3] = nir_tex_src_for_ssa(nir_tex_src_ref_texture_deref, &ref_si.image->def);   /* Reference image       */
+   instr->src[4] = nir_tex_src_for_ssa(nir_tex_src_ref_sampler_deref, &ref_si.sampler->def); /* Reference sampler     */
+   instr->src[5] = vtn_tex_src(b, w[6], nir_tex_src_ref_coord);                              /* Reference coordinates */
+   instr->src[6] = vtn_tex_src(b, w[7], nir_tex_src_block_size);                             /* Block size            */
+
+   /* Output */
+   struct vtn_type *ret_type = vtn_get_type(b, w[1]);
+   vtn_assert(glsl_get_vector_elements(ret_type->type) == 4);
+   nir_def_init(&instr->instr, &instr->def, 4, 32);
+
+   nir_builder_instr_insert(&b->nb, &instr->instr);
+   vtn_push_nir_ssa(b, w[2], &instr->def);
+}
+
+static void
 vtn_handle_texture(struct vtn_builder *b, SpvOp opcode,
                    const uint32_t *w, unsigned count)
 {
@@ -3597,6 +3651,9 @@ vtn_handle_texture(struct vtn_builder *b, SpvOp opcode,
    case nir_texop_tex_type_nv:
    case nir_texop_sample_pos_nv:
       vtn_fail("unexpected nir_texop_*_nv");
+      break;
+   case nir_texop_block_match_qcom:
+      vtn_fail("unexpected nir_texop_block_match_qcom");
       break;
    }
 
@@ -6589,6 +6646,11 @@ vtn_handle_body_instruction(struct vtn_builder *b, SpvOp opcode,
    case SpvOpFragmentMaskFetchAMD:
    case SpvOpFragmentFetchAMD:
       vtn_handle_texture(b, opcode, w, count);
+      break;
+
+   case SpvOpImageBlockMatchSADQCOM:
+   case SpvOpImageBlockMatchSSDQCOM:
+      vtn_handle_blockmatch(b, opcode, w, count);
       break;
 
    case SpvOpAtomicLoad:

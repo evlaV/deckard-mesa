@@ -1564,6 +1564,9 @@ apply_var_decoration(struct vtn_builder *b,
                   "NodeMaxPayloadsAMDX decoration only allowed in compute shaders");
       break;
 
+   case SpvDecorationBlockMatchTextureQCOM:
+      break;
+
    default:
       vtn_fail_with_decoration("Unhandled decoration", dec->decoration);
    }

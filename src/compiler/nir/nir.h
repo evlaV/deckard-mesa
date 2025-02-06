@@ -227,6 +227,14 @@ typedef enum {
 } nir_resource_data_intel;
 
 /**
+ * Adreno block match modes
+ */
+typedef enum {
+   nir_block_match_mode_qcom_sad = 0,
+   nir_block_match_mode_qcom_ssd = 1,
+} nir_block_match_mode_qcom;
+
+/**
  * Register class for registers managed by nir_opt_preamble. General can handle
  * anything, the others are driver-specific but with common names for nir_print.
  */
@@ -2322,6 +2330,14 @@ typedef enum nir_tex_src_type {
    /** Second backend-specific vec4 tex src argument, see nir_tex_src_backend1. */
    nir_tex_src_backend2,
 
+   /** Block matching reference sources */
+   nir_tex_src_ref_coord,
+   nir_tex_src_ref_texture_deref,
+   nir_tex_src_ref_sampler_deref,
+   nir_tex_src_ref_texture_handle,
+   nir_tex_src_ref_sampler_handle,
+   nir_tex_src_block_size,
+
    nir_num_tex_src_types
 } nir_tex_src_type;
 
@@ -2388,6 +2404,13 @@ typedef enum nir_texop {
    nir_texop_tex_type_nv,
    /** Maps to TXQ.SAMPLER_POS */
    nir_texop_sample_pos_nv,
+   /**
+    * Returns the result of SAD/SSD block matching on 2D textures.
+    *
+    * The textures are always 2D dim, and the coord and ref_coord texture
+    * sources are integers. The block size will be an ivec2 in nir_tex_src_backend1.
+   */
+   nir_texop_block_match_qcom,
 } nir_texop;
 
 /** Represents a texture instruction */
@@ -2431,7 +2454,10 @@ typedef struct nir_tex_instr {
    /** Number of sources */
    unsigned num_srcs;
 
-   /** Number of components in the coordinate, if any */
+   /** Number of components in the coordinate, if any.
+    *
+    * This applies to the nir_tex_src_coord and nir_tex_src_ref_coord src types.
+    */
    unsigned coord_components;
 
    /** True if the texture instruction acts on an array texture */
@@ -2531,6 +2557,8 @@ typedef struct nir_tex_instr {
     * to the back-end compiler.
     */
    uint32_t backend_flags;
+
+   nir_block_match_mode_qcom match_mode;
 } nir_tex_instr;
 
 /**
