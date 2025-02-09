@@ -1633,6 +1633,8 @@ cross_validate_globals(void *mem_ctx, const struct gl_constants *consts,
                        nir_shader *shader, struct hash_table *variables,
                        bool uniforms_only)
 {
+   if(shader == NULL) return;
+   
    nir_foreach_variable_in_shader(var, shader) {
       if (uniforms_only &&
           (var->data.mode != nir_var_uniform &&
