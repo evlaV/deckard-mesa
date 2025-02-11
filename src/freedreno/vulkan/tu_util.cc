@@ -54,6 +54,7 @@ static const struct debug_control tu_debug_options[] = {
    { "at_prof", TU_DEBUG_AT_PROF },
    { "at_prof_imm", TU_DEBUG_AT_PROF_IMM },
    { "at_latsen", TU_DEBUG_AT_LAT_SEN },
+   { "fdmoffset", TU_DEBUG_FDM_OFFSET },
    { NULL, 0 }
 };
 
@@ -470,6 +471,16 @@ tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
       tu_tiling_config_update_pipe_layout(vsc, device, pass->has_fdm);
       tu_tiling_config_update_pipes(vsc, device);
       tu_tiling_config_update_binning(vsc, device);
+
+      if (pass->has_fdm) {
+         struct tu_vsc_config *fdm_offset_vsc = &tiling->fdm_offset_vsc;
+         fdm_offset_vsc->tile_count = (VkExtent2D) {
+            vsc->tile_count.width + 1, vsc->tile_count.height + 1
+         };
+         tu_tiling_config_update_pipe_layout(fdm_offset_vsc, device, true);
+         tu_tiling_config_update_pipes(fdm_offset_vsc, device);
+         tu_tiling_config_update_binning(fdm_offset_vsc, device);
+      }
    }
 }
 
