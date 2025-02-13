@@ -13,6 +13,7 @@
 
 #define XXH_INLINE_ALL
 #include "util/xxhash.h"
+#include "util/rand_xor.h"
 
 /* How does it work?
  *
@@ -75,6 +76,12 @@ struct tu_renderpass_history {
    uint32_t num_results;
 
    uint32_t avg_samples;
+
+   uint64_t total_gmem_duration;
+   uint32_t gmem_count;
+   uint64_t total_sysmem_duration;
+   uint32_t sysmem_count;
+   uint32_t sysmem_probability; /* Range [0 (GMEM), 100 (SYSMEM)], where 50 means no preference. */
 };
 
 /* Holds per-submission cs which writes the fence. */
@@ -203,7 +210,10 @@ free_history(struct tu_device *dev, struct tu_renderpass_history *history)
 }
 
 static bool
-get_history(struct tu_autotune *at, uint64_t rp_key, uint32_t *avg_samples)
+get_history(struct tu_autotune *at,
+            uint64_t rp_key,
+            uint32_t *avg_samples,
+            uint32_t *sysmem_probability)
 {
    bool has_history = false;
 
@@ -218,6 +228,7 @@ get_history(struct tu_autotune *at, uint64_t rp_key, uint32_t *avg_samples)
          (struct tu_renderpass_history *) entry->data;
       if (history->num_results > 0) {
          *avg_samples = p_atomic_read(&history->avg_samples);
+         *sysmem_probability = p_atomic_read(&history->sysmem_probability);
          has_history = true;
       }
    }
@@ -265,6 +276,44 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
    float avg_samples = (float)total_samples / (float)history->num_results;
    p_atomic_set(&history->avg_samples, (uint32_t)avg_samples);
+
+   /* Profiled mode: Track separate GMEM/SYSMEM durations */
+   if (result->sysmem) {
+      /** These stores don't need to be atomic since they are only
+       *  accessed from this function which should be single-threaded.
+       */
+      history->total_sysmem_duration += result->duration;
+      history->sysmem_count++;
+   } else {
+      history->total_gmem_duration += result->duration;
+      history->gmem_count++;
+   }
+
+   uint32_t sysmem_probability = history->sysmem_probability;
+   if (history->sysmem_count < 5 || history->gmem_count < 5) {
+      /* Not enough data to make a decision, bias towards least used. */
+      sysmem_probability = history->sysmem_count < history->gmem_count ? 75 : 25;
+   } else {
+      /* Compute average durations */
+      uint64_t avg_gmem = history->total_gmem_duration / history->gmem_count;
+      uint64_t avg_sysmem =
+         history->total_sysmem_duration / history->sysmem_count;
+
+      /* Adjust probability based on timing results */
+      const uint32_t delta = 5;
+      if (avg_gmem < avg_sysmem && history->sysmem_probability > 5) {
+          sysmem_probability = MAX2(history->sysmem_probability - delta, 5);
+      } else if (avg_sysmem < avg_gmem && history->sysmem_probability < 95) {
+          sysmem_probability = MIN2(history->sysmem_probability + delta, 95);
+      }
+
+      if (TU_AUTOTUNE_DEBUG_LOG) {
+          mesa_logi("autotune update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+                    avg_gmem, avg_sysmem, sysmem_probability);
+      }
+   }
+
+   p_atomic_set(&history->sysmem_probability, sysmem_probability);
 }
 
 static void
@@ -280,6 +329,7 @@ process_results(struct tu_autotune *at, uint32_t current_fence)
       struct tu_renderpass_history *history = result->history;
       result->samples_passed =
          result->samples->samples_end - result->samples->samples_start;
+      result->duration = result->samples->ts_end - result->samples->ts_start;
 
       history_add_result(dev, history, result);
    }
@@ -417,6 +467,8 @@ tu_autotune_init(struct tu_autotune *at, struct tu_device *dev)
    at->enabled = true;
    if (TU_DEBUG(AT_BGMEM))
       at->mode = TU_AUTOTUNE_MODE_GMEM_BIG;
+   else if (TU_DEBUG(AT_PROF))
+      at->mode = TU_AUTOTUNE_MODE_PROFILED;
    else
       at->mode = TU_AUTOTUNE_MODE_NORMAL;
    at->device = dev;
@@ -616,8 +668,22 @@ tu_autotune_use_bypass(struct tu_autotune *at,
 
    *autotune_result = create_history_result(at, renderpass_key);
 
-   uint32_t avg_samples = 0;
-   if (get_history(at, renderpass_key, &avg_samples)) {
+   uint32_t avg_samples = 0, sysmem_probability = 50;
+   if (get_history(at, renderpass_key, &avg_samples, &sysmem_probability)) {
+      if (at->mode == TU_AUTOTUNE_MODE_PROFILED) {
+         uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
+         bool select_sysmem =
+            (rand_xorshift128plus(seed) % 100) < sysmem_probability;
+
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi("autotune %016" PRIx64 ": %u%% sysmem chance, using %s",
+                      renderpass_key, sysmem_probability,
+                      select_sysmem ? "sysmem" : "gmem");
+         }
+
+         return select_sysmem;
+      }
+
       const uint32_t pass_pixel_count =
          get_render_pass_pixel_count(cmd_buffer);
       uint64_t sysmem_bandwidth =
@@ -670,17 +736,20 @@ template <chip CHIP>
 void
 tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                              struct tu_cs *cs,
-                             struct tu_renderpass_result *autotune_result)
+                             struct tu_renderpass_result *autotune_result,
+                             bool sysmem)
 {
    if (!autotune_result)
       return;
+
+   autotune_result->sysmem = sysmem;
 
    struct tu_device *dev = cmd->device;
 
    static const uint32_t size = sizeof(struct tu_renderpass_samples);
 
    mtx_lock(&dev->autotune_mutex);
-   VkResult ret = tu_suballoc_bo_alloc(&autotune_result->bo, &dev->autotune_suballoc, size, size);
+   VkResult ret = tu_suballoc_bo_alloc(&autotune_result->bo, &dev->autotune_suballoc, size, 32);
    mtx_unlock(&dev->autotune_mutex);
    if (ret != VK_SUCCESS) {
       autotune_result->bo.iova = 0;
@@ -720,6 +789,12 @@ tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
       tu_cs_emit(cs, ZPASS_DONE);
    }
+
+   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(REG_A6XX_CP_ALWAYS_ON_COUNTER) |
+                  CP_REG_TO_MEM_0_CNT(2) |
+                  CP_REG_TO_MEM_0_64B);
+   tu_cs_emit_qw(cs, result_iova + offsetof(struct tu_renderpass_samples, ts_start));
 }
 TU_GENX(tu_autotune_begin_renderpass);
 
@@ -766,5 +841,11 @@ void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
       tu_cs_emit(cs, ZPASS_DONE);
    }
+
+   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(REG_A6XX_CP_ALWAYS_ON_COUNTER) |
+                  CP_REG_TO_MEM_0_CNT(2) |
+                  CP_REG_TO_MEM_0_64B);
+   tu_cs_emit_qw(cs, result_iova + offsetof(struct tu_renderpass_samples, ts_end));
 }
 TU_GENX(tu_autotune_end_renderpass);
