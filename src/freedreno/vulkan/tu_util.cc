@@ -134,7 +134,7 @@ tu_env_init_once(void)
    tu_env.env_debug = tu_env.debug & ~tu_runtime_debug_flags;
 
    if (TU_DEBUG(STARTUP))
-      mesa_logi("TU_DEBUG=0x%" PRIx64, tu_env.env_debug);
+      mesa_logi("TU_DEBUG=0x%" PRIx64 " (ENV: 0x%" PRIx64 ")", tu_env.debug.load(), tu_env.env_debug);
 
    /* TU_DEBUG=rd functionality was moved to fd_rd_output. This debug option
     * should translate to the basic-level FD_RD_DUMP_ENABLE option.
@@ -147,7 +147,7 @@ tu_env_init_once(void)
       if (tu_env.debug != tu_env.env_debug) {
          mesa_logw("TU_DEBUG_FILE is set (%s), but TU_DEBUG is also set. "
                    "Any runtime options (0x%" PRIx64 ") in TU_DEBUG will be ignored.",
-                   debug_file, tu_env.debug & ~tu_runtime_debug_flags);
+                   debug_file, tu_env.debug & tu_runtime_debug_flags);
       }
 
       if (TU_DEBUG(STARTUP))
