@@ -1242,7 +1242,7 @@ static void
 tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
                      struct tu_cs *cs,
                      const struct tu_tile_config *tile,
-                     bool fdm, const VkOffset2D *fdm_offsets)
+                     const VkOffset2D *fdm_offsets)
 {
    struct tu_physical_device *phys_dev = cmd->device->physical_device;
    const struct tu_tiling_config *tiling = cmd->state.tiling;
@@ -1312,7 +1312,7 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
    tu_cs_emit_pkt7(cs, CP_SET_MODE, 1);
    tu_cs_emit(cs, 0x0);
 
-   if (fdm) {
+   if (cmd->fdm_bin_patchpoints.size != 0) {
       unsigned views =
          cmd->state.pass->num_views ? cmd->state.pass->num_views : 1;
       VkRect2D bin = {
@@ -2518,12 +2518,12 @@ template <chip CHIP>
 static void
 tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                 const struct tu_tile_config *tile,
-                bool fdm, const VkOffset2D *fdm_offsets,
+                const VkOffset2D *fdm_offsets,
                 struct tu_renderpass_result *autotune_result,
                 const struct tu_vsc_config *vsc)
 {
    uint32_t tile_idx = (tile->pos.y * vsc->tile_count.width) + tile->pos.x;
-   tu6_emit_tile_select<CHIP>(cmd, &cmd->cs, tile, fdm, fdm_offsets);
+   tu6_emit_tile_select<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
    tu_lrz_before_tile<CHIP>(cmd, &cmd->cs);
 
    trace_start_draw_ib_gmem(&cmd->trace, &cmd->cs, cmd);
@@ -2883,7 +2883,7 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
             continue;
 
          tu6_render_tile<CHIP>(cmd, &cmd->cs, &tiles[tile_idx],
-                               true, fdm_offsets,
+                               fdm_offsets,
                                autotune_result, vsc);
       }
    }
@@ -2966,7 +2966,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                if (has_fdm)
                   tu_calc_frag_area(cmd, &tile, fdm, fdm_offsets);
 
-               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, has_fdm,
+               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile,
                                      fdm_offsets,
                                      autotune_result, vsc);
             }
