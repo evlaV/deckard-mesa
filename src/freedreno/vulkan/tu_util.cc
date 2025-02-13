@@ -50,6 +50,7 @@ static const struct debug_control tu_debug_options[] = {
    { "nobinmerging", TU_DEBUG_NO_BIN_MERGING },
    { "preempt", TU_DEBUG_PREEMPT },
    { "deck_emu", TU_DEBUG_DECK_EMU },
+   { "at_bgmem", TU_DEBUG_AT_BGMEM },
    { NULL, 0 }
 };
 

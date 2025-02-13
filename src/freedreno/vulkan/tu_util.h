@@ -70,6 +70,7 @@ enum tu_debug_flags
    TU_DEBUG_NO_BIN_MERGING = 1ULL << 30,
    TU_DEBUG_PREEMPT = 1ULL << 31,
    TU_DEBUG_DECK_EMU = 1ULL << 32,
+   TU_DEBUG_AT_BGMEM = 1ULL << 33,
 };
 
 struct tu_env {
