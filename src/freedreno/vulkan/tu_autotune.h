@@ -18,6 +18,7 @@ struct tu_renderpass_history;
 enum tu_autotune_mode {
    TU_AUTOTUNE_MODE_NORMAL,
    TU_AUTOTUNE_MODE_GMEM_BIG,
+   TU_AUTOTUNE_MODE_PROFILED,
 };
 
 /**
@@ -103,6 +104,8 @@ struct PACKED tu_renderpass_samples {
    uint64_t __pad0;
    uint64_t samples_end;
    uint64_t __pad1;
+   uint64_t ts_start;
+   uint64_t ts_end;
 };
 
 /* Necessary when writing sample counts using CP_EVENT_WRITE7::ZPASS_DONE. */
@@ -127,6 +130,8 @@ struct tu_renderpass_result {
    struct list_head node;
    uint32_t fence;
    uint64_t samples_passed;
+   uint64_t duration;
+   bool sysmem;
 };
 
 VkResult tu_autotune_init(struct tu_autotune *at, struct tu_device *dev);
@@ -154,7 +159,8 @@ struct tu_autotune_results_buffer;
 template <chip CHIP>
 void tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                                   struct tu_cs *cs,
-                                  struct tu_renderpass_result *autotune_result);
+                                  struct tu_renderpass_result *autotune_result,
+                                  bool sysmem);
 
 template <chip CHIP>
 void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
