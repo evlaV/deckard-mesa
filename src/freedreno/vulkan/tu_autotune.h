@@ -15,6 +15,11 @@
 
 struct tu_renderpass_history;
 
+enum tu_autotune_mode {
+   TU_AUTOTUNE_MODE_NORMAL,
+   TU_AUTOTUNE_MODE_GMEM_BIG,
+};
+
 /**
  * "autotune" our decisions about bypass vs GMEM rendering, based on historical
  * data about a given render target.
@@ -50,6 +55,8 @@ struct tu_autotune {
     * renderpasses in-flight.
     */
    bool enabled;
+
+   tu_autotune_mode mode;
 
    struct tu_device *device;
 
