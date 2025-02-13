@@ -1196,7 +1196,17 @@ struct tu_tile_config {
    VkOffset2D pos;
    uint32_t pipe;
    uint32_t slot_mask;
-   VkExtent2D extent;
+   uint32_t visible_views;
+
+   /* For merged tiles, the extent in tiles when resolved to system memory.
+    */
+   VkExtent2D sysmem_extent;
+
+   /* For merged tiles, the extent in tiles in GMEM. This can only be more
+    * than 1 if there is extra free space from an unused view.
+    */
+   VkExtent2D gmem_extent;
+
    VkExtent2D frag_areas[MAX_VIEWS];
 };
 
@@ -1259,8 +1269,13 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
       tu_emit_vsc<CHIP>(cmd, &cmd->cs);
    }
 
+   /* The GMEM stride is hardcoded when we emit input attachments and 3d
+    * loads, so the width can't be changed currently.
+    */
+   assert(tile->gmem_extent.width == 1);
+
    tu6_emit_bin_size<CHIP>(
-      cs, tiling->tile0.width, tiling->tile0.height,
+      cs, tiling->tile0.width, tiling->tile0.height * tile->gmem_extent.height,
       {
          .render_mode = RENDERING_PASS,
          .force_lrz_write_dis = !phys_dev->info->a6xx.has_lrz_feedback,
@@ -1279,7 +1294,9 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
    const uint32_t y1 = tiling->tile0.height * tile->pos.y;
 
    const uint32_t x2 = MIN2(x1 + tiling->tile0.width, MAX_VIEWPORT_SIZE);
-   const uint32_t y2 = MIN2(y1 + tiling->tile0.height, MAX_VIEWPORT_SIZE);
+   const uint32_t y2 =
+      MIN2(y1 + tiling->tile0.height * tile->gmem_extent.height,
+           MAX_VIEWPORT_SIZE);
    tu6_emit_window_scissor(cs, x1, y1, x2 - 1, y2 - 1);
    tu6_emit_window_offset<CHIP>(cs, x1, y1);
 
@@ -1319,10 +1336,22 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
       unsigned views = tu_fdm_num_layers(cmd);
       VkRect2D bin = {
          { x1, y1 },
-         { (x2 - x1) * tile->extent.width, (y2 - y1) * tile->extent.height }
+         {
+            tiling->tile0.width * tile->sysmem_extent.width,
+            tiling->tile0.height * tile->sysmem_extent.height
+         }
       };
       VkRect2D bins[views];
       for (unsigned i = 0; i < views; i++) {
+         /* This makes the bin empty for non-visible views, which makes us not
+          * render anything. This frees up the GMEM space for the non-visible
+          * view to be used to combine tiles.
+          */
+         if (!(tile->visible_views & (1u << i))) {
+            bins[i] = { { 0, 0 }, { 0, 0 } };
+            continue;
+         }
+
          if (!fdm_offsets || cmd->state.rp.shared_viewport) {
             bins[i] = bin;
             continue;
@@ -2854,15 +2883,64 @@ tu_identity_frag_area(struct tu_cmd_buffer *cmd,
 }
 
 static bool
+rects_intersect(VkRect2D a, VkRect2D b)
+{
+   return a.offset.x < b.offset.x + (int32_t)b.extent.width &&
+          b.offset.x < a.offset.x + (int32_t)a.extent.width &&
+          a.offset.y < b.offset.y + (int32_t)b.extent.height &&
+          b.offset.y < a.offset.y + (int32_t)a.extent.height;
+}
+
+/* Use the render area(s) to figure out which views of the bin are visible.
+ */
+static void
+tu_calc_bin_visibility(struct tu_cmd_buffer *cmd,
+                       struct tu_tile_config *tile,
+                       const VkOffset2D *offsets)
+{
+   const struct tu_render_pass *pass = cmd->state.pass;
+   const struct tu_tiling_config *tiling = cmd->state.tiling;
+   uint32_t views = MAX2(pass->num_views, 1);
+   VkRect2D bin = {
+      {
+         tile->pos.x * tiling->tile0.width,
+         tile->pos.y * tiling->tile0.height
+      },
+      tiling->tile0
+   };
+
+   tile->visible_views = 0;
+   for (unsigned i = 0; i < views; i++) {
+      VkRect2D offsetted_bin = bin;
+      if (offsets && !cmd->state.rp.shared_viewport) {
+         VkOffset2D bin_offset = tu_bin_offset(offsets[i], tiling);
+         offsetted_bin.offset.x -= bin_offset.x;
+         offsetted_bin.offset.y -= bin_offset.y;
+      }
+
+      if (rects_intersect(offsetted_bin,
+                          cmd->state.per_layer_render_area ?
+                          cmd->state.render_areas[i] :
+                          cmd->state.render_areas[0])) {
+         tile->visible_views |= (1u << i);
+      }
+   }
+}
+
+static bool
 try_merge_tiles(struct tu_tile_config *dst, const struct tu_tile_config *src,
-                unsigned views, bool has_abs_bin_mask)
+                unsigned views, bool has_abs_bin_mask, bool shared_viewport)
 {
    uint32_t slot_mask = dst->slot_mask | src->slot_mask;
+   uint32_t visible_views = dst->visible_views | src->visible_views;
 
-   /* The fragment areas must be the same. */
+   /* The fragment areas must be the same for views where both bins are
+    * visible.
+    */
    for (unsigned i = 0; i < views; i++) {
-      if (dst->frag_areas[i].width != src->frag_areas[i].width ||
-          dst->frag_areas[i].height != src->frag_areas[i].height)
+      if ((dst->visible_views & src->visible_views & (1u << i)) &&
+          (dst->frag_areas[i].width != src->frag_areas[i].width ||
+           dst->frag_areas[i].height != src->frag_areas[i].height))
          return false;
    }
 
@@ -2870,14 +2948,18 @@ try_merge_tiles(struct tu_tile_config *dst, const struct tu_tile_config *src,
     * compatible width/height.
     */
    if (dst->pos.x == src->pos.x) {
-      if (dst->extent.height != src->extent.height)
+      if (dst->sysmem_extent.height != src->sysmem_extent.height)
          return false;
    } else if (dst->pos.y == src->pos.y) {
-      if (dst->extent.width != src->extent.width)
+      if (dst->sysmem_extent.width != src->sysmem_extent.width)
          return false;
    } else {
       return false;
    }
+
+   if (dst->gmem_extent.width != src->gmem_extent.width ||
+       dst->gmem_extent.height != src->gmem_extent.height)
+      return false;
 
    if (!has_abs_bin_mask) {
       /* The mask of the combined tile has to fit in 16 bits */
@@ -2890,28 +2972,54 @@ try_merge_tiles(struct tu_tile_config *dst, const struct tu_tile_config *src,
     * how we call this function below.
     */
    VkExtent2D extent = {
-      dst->extent.width + (dst->pos.x - src->pos.x),
-      dst->extent.height + (dst->pos.y - src->pos.y),
+      dst->sysmem_extent.width + (dst->pos.x - src->pos.x),
+      dst->sysmem_extent.height + (dst->pos.y - src->pos.y),
    };
 
-   assert(dst->extent.height > 0);
+   assert(dst->sysmem_extent.height > 0);
 
-   /* The common fragment areas must not be smaller than the combined bin
+   /* If only the first view is visible in both tiles, we can reuse the GMEM
+    * space meant for the rest of the views to multiply the height of the
+    * tile. We can't do this if we can't override the scissor for different
+    * views though.
+    */
+   unsigned height_multiplier = 1;
+   if (visible_views == 1 && views > 1 && dst->gmem_extent.height == 1 &&
+       !shared_viewport)
+      height_multiplier = views;
+   else
+      height_multiplier = dst->gmem_extent.height;
+
+   /* The combined fragment areas must not be smaller than the combined bin
     * extent, so that the combined bin is not larger than the original
     * unscaled bin.
     */
    for (unsigned i = 0; i < views; i++) {
-      if (dst->frag_areas[i].width < extent.width ||
-          dst->frag_areas[i].height < extent.height)
+      if ((dst->visible_views & (1u << i)) &&
+          (dst->frag_areas[i].width < extent.width ||
+           dst->frag_areas[i].height * height_multiplier < extent.height))
+         return false;
+      if ((src->visible_views & (1u << i)) &&
+          (src->frag_areas[i].width < extent.width ||
+           src->frag_areas[i].height * height_multiplier < extent.height))
          return false;
    }
 
    /* Ok, let's combine them. dst is below or to the right of src, so it takes
     * src's position.
     */
-   dst->extent = extent;
+   for (unsigned i = 0; i < views; i++) {
+      if (src->visible_views & ~dst->visible_views & (1u << i))
+         dst->frag_areas[i] = src->frag_areas[i];
+      if (((src->visible_views | dst->visible_views) & (1u << i)) &&
+          dst->frag_areas[i].height < extent.height)
+         dst->gmem_extent.height = height_multiplier;
+   }
+   dst->sysmem_extent = extent;
+   dst->visible_views = visible_views;
    dst->pos = src->pos;
    dst->slot_mask = slot_mask;
+
    return true;
 }
 
@@ -2927,6 +3035,7 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
    unsigned views = tu_fdm_num_layers(cmd);
    bool has_abs_mask =
       cmd->device->physical_device->info->a7xx.has_abs_bin_mask;
+   bool shared_viewport = cmd->state.rp.shared_viewport;
 
    struct tu_tile_config tiles[width * height];
 
@@ -2935,9 +3044,11 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
       for (uint32_t x = 0; x < width; x++) {
          struct tu_tile_config *tile = &tiles[width * y + x];
          tile->pos = { x + tx1, y + ty1 };
-         tile->extent = { 1, 1 };
+         tile->sysmem_extent = { 1, 1 };
+         tile->gmem_extent = { 1, 1 };
          tile->pipe = pipe;
          tile->slot_mask = 1u << (width * y + x);
+         tu_calc_bin_visibility(cmd, tile, fdm_offsets);
          tu_calc_frag_area(cmd, tile, fdm, fdm_offsets);
       }
    }
@@ -2948,9 +3059,12 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
    for (uint32_t y = 0; y < height; y++) {
       for (uint32_t x = 0; x < width; x++) {
          struct tu_tile_config *tile = &tiles[width * y + x];
+         if (tile->visible_views == 0)
+            continue;
          if (x > 0) {
             struct tu_tile_config *prev_x_tile = &tiles[width * y + x - 1];
-            if (try_merge_tiles(tile, prev_x_tile, views, has_abs_mask)) {
+            if (try_merge_tiles(tile, prev_x_tile, views, has_abs_mask,
+                                shared_viewport)) {
                merged_tiles |= prev_x_tile->slot_mask;
             }
          }
@@ -2962,7 +3076,8 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
              * merged horizontally into its neighbor in the previous row.
              */
             if (!(merged_tiles & (1u << prev_y_idx)) &&
-                try_merge_tiles(tile, prev_y_tile, views, has_abs_mask)) {
+                try_merge_tiles(tile, prev_y_tile, views, has_abs_mask,
+                                shared_viewport)) {
                merged_tiles |= prev_y_tile->slot_mask;
             }
          }
@@ -2982,7 +3097,11 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
          if (merged_tiles & (1u << tile_idx))
             continue;
 
-         tu6_render_tile<CHIP>(cmd, &cmd->cs, &tiles[tile_idx], fdm_offsets);
+         struct tu_tile_config *tile = &tiles[tile_idx];
+         if (tile->visible_views == 0)
+            continue;
+
+         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
       }
    }
 }
@@ -3002,6 +3121,13 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
    }
 
    bool has_fdm = fdm || (TU_DEBUG(FDM) && cmd->state.pass->has_fdm);
+   /* TODO: we should also be able to merge tiles when only
+    * per_view_render_areas is used without FDM. That requires using another
+    * method to force disable draws since we don't want to force the viewport
+    * to be re-emitted, like overriding the view mask. It would also require
+    * disabling stores, and adding patchpoints for CmdClearAttachments in
+    * secondaries or making it use the view mask.
+    */
    bool merge_tiles = has_fdm && !TU_DEBUG(NO_BIN_MERGING) &&
       cmd->device->physical_device->info->a6xx.has_bin_mask;
 
@@ -3059,8 +3185,10 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                   .pos = { tx1 + tx, ty },
                   .pipe = pipe,
                   .slot_mask = 1u << (slot_row + tx),
-                  .extent = { 1, 1 },
+                  .sysmem_extent = { 1, 1 },
+                  .gmem_extent = { 1, 1 },
                };
+               tu_calc_bin_visibility(cmd, &tile, fdm_offsets);
                if (has_fdm)
                   tu_calc_frag_area(cmd, &tile, fdm, fdm_offsets);
                else
