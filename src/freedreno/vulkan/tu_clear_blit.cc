@@ -4756,6 +4756,47 @@ tu_clear_gmem_attachment(struct tu_cmd_buffer *cmd,
 }
 TU_GENX(tu_clear_gmem_attachment);
 
+struct apply_generic_clear_coords_state {
+   unsigned view;
+   bool per_layer_render_area;
+};
+
+static void
+fdm_apply_generic_clear_coords(struct tu_cmd_buffer *cmd,
+                              struct tu_cs *cs,
+                              void *data,
+                              VkOffset2D common_bin_offset,
+                              unsigned views,
+                              const VkExtent2D *frag_areas,
+                              const VkRect2D *bins)
+{
+   const struct apply_generic_clear_coords_state *state =
+      (const struct apply_generic_clear_coords_state *)data;
+
+   VkRect2D bin = bins[state->view];
+   if (bin.extent.width == 0 && bin.extent.height == 0) {
+      /* clear a 0 area rectangle to skip this clear */
+      tu_cs_emit_regs(cs,
+                      A6XX_RB_BLIT_SCISSOR_TL(.x = 1, .y = 1),
+                      A6XX_RB_BLIT_SCISSOR_BR(.x = 0, .y = 0));
+      /* If FDM offset is used then tu6_emit_blit_scissor will emit a
+       * different scissor for sysmem clears, implemented with
+       * CP_COND_REG_EXEC plus another write to the registers. Pad with NOPs
+       * to match the size.
+       */
+      if (tu_enable_fdm_offset(cmd)) {
+         tu_cs_emit_pkt7(cs, CP_NOP, 3 + 3 - 1);
+         for (unsigned i = 0; i < 3 + 3 - 1; i++) {
+            tu_cs_emit(cs, 0);
+         }
+      }
+   } else {
+      tu6_emit_blit_scissor(cmd, cs,
+                            state->per_layer_render_area ? state->view : 0,
+                            false, true);
+   }
+}
+
 void
 tu7_generic_clear_attachment(struct tu_cmd_buffer *cmd,
                              struct tu_cs *cs,
@@ -4776,7 +4817,28 @@ tu7_generic_clear_attachment(struct tu_cmd_buffer *cmd,
       uint32_t layer = i;
       uint32_t mask =
          aspect_write_mask_generic_clear(format, att->clear_mask);
-      if (per_layer_render_area) {
+      /* We need a patchpoint here to be able to turn off clearing views that
+       * aren't visible so that we can merge bins when only the left eye is
+       * visible.
+       */
+      if (cmd->state.pass->has_fdm && i > 0) {
+         struct apply_generic_clear_coords_state state {
+            .view = i,
+            .per_layer_render_area = per_layer_render_area,
+         };
+         tu_cs_set_writeable(cs, true);
+
+         /* If FDM offset is used then tu6_emit_blit_scissor will emit a
+          * different scissor for sysmem clears, implemented with
+          * CP_COND_REG_EXEC plus another write to the registers.
+          */
+         uint32_t dwords = 3 + (tu_enable_fdm_offset(cmd) ? 3 + 3 : 0);
+
+         tu_create_fdm_bin_patchpoint(cmd, cs, dwords, TU_FDM_SKIP_BINNING,
+                                      fdm_apply_generic_clear_coords,
+                                      state);
+         tu_cs_set_writeable(cs, false);
+      } else if (per_layer_render_area) {
          tu6_emit_blit_scissor(cmd, cs, layer, false, true);
       }
       if (att->format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
@@ -5422,16 +5484,27 @@ fdm_apply_store_coords(struct tu_cmd_buffer *cmd,
    uint32_t scaled_width = bin.extent.width / frag_area.width;
    uint32_t scaled_height = bin.extent.height / frag_area.height;
 
-   tu_cs_emit_regs(cs,
-      A6XX_GRAS_2D_DST_TL(.x = bin.offset.x,
-                          .y = bin.offset.y),
-      A6XX_GRAS_2D_DST_BR(.x = bin.offset.x + bin.extent.width - 1,
-                          .y = bin.offset.y + bin.extent.height - 1));
-   tu_cs_emit_regs(cs,
-                   A6XX_GRAS_2D_SRC_TL_X(common_bin_offset.x),
-                   A6XX_GRAS_2D_SRC_BR_X(common_bin_offset.x + scaled_width - 1),
-                   A6XX_GRAS_2D_SRC_TL_Y(common_bin_offset.y),
-                   A6XX_GRAS_2D_SRC_BR_Y(common_bin_offset.y + scaled_height - 1));
+   if (bin.extent.width == 0 && bin.extent.height == 0) {
+      tu_cs_emit_regs(cs,
+         A6XX_GRAS_2D_DST_TL(.x = 1, .y = 1),
+         A6XX_GRAS_2D_DST_BR(.x = 0, .y = 0));
+      tu_cs_emit_regs(cs,
+                      A6XX_GRAS_2D_SRC_TL_X(1),
+                      A6XX_GRAS_2D_SRC_BR_X(0),
+                      A6XX_GRAS_2D_SRC_TL_Y(1),
+                      A6XX_GRAS_2D_SRC_BR_Y(0));
+   } else {
+      tu_cs_emit_regs(cs,
+         A6XX_GRAS_2D_DST_TL(.x = bin.offset.x,
+                             .y = bin.offset.y),
+         A6XX_GRAS_2D_DST_BR(.x = bin.offset.x + bin.extent.width - 1,
+                             .y = bin.offset.y + bin.extent.height - 1));
+      tu_cs_emit_regs(cs,
+                      A6XX_GRAS_2D_SRC_TL_X(common_bin_offset.x),
+                      A6XX_GRAS_2D_SRC_BR_X(common_bin_offset.x + scaled_width - 1),
+                      A6XX_GRAS_2D_SRC_TL_Y(common_bin_offset.y),
+                      A6XX_GRAS_2D_SRC_BR_Y(common_bin_offset.y + scaled_height - 1));
+   }
 }
 
 template <chip CHIP>
