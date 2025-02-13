@@ -73,6 +73,7 @@ enum tu_debug_flags : uint64_t
    TU_DEBUG_CHECK_CMD_BUFFER_STATUS  = BITFIELD64_BIT(32),
    TU_DEBUG_COMM                     = BITFIELD64_BIT(33),
    TU_DEBUG_DECK_EMU                 = BITFIELD64_BIT(34),
+   TU_DEBUG_AT_BGMEM                 = BITFIELD64_BIT(35),
 };
 
 struct tu_env {
