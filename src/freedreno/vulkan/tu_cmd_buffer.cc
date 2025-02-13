@@ -2631,7 +2631,7 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_regs(cs, A7XX_RB_BIN_SCALE());
    }
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result);
+   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, true);
 
    tu_cs_sanity_check(cs);
 }
@@ -2756,7 +2756,7 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_qw(cs, global_iova(cmd, vsc_state));
    }
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result);
+   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, false);
 
    tu_cs_sanity_check(cs);
 }
