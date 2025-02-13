@@ -37,6 +37,7 @@
 #include "util/u_debug.h"
 #include "util/disk_cache.h"
 #include "util/disk_cache_os.h"
+#include "util/os_misc.h"
 
 #if DETECT_OS_WINDOWS
 
@@ -878,7 +879,7 @@ disk_cache_write_item_to_disk(struct disk_cache_put_job *dc_job,
  *   $HOME/.cache/mesa_shader_cache
  *   <pwd.pw_dir>/.cache/mesa_shader_cache
  */
-char *
+const char *
 disk_cache_generate_cache_dir(void *mem_ctx, const char *gpu_name,
                               const char *driver_id,
                               enum disk_cache_type cache_type)
@@ -889,14 +890,15 @@ disk_cache_generate_cache_dir(void *mem_ctx, const char *gpu_name,
    else if (cache_type == DISK_CACHE_DATABASE)
       cache_dir_name = CACHE_DIR_NAME_DB;
 
-   char *path = secure_getenv("MESA_SHADER_CACHE_DIR");
-
+   const char *path = os_get_option_secure("MESA_SHADER_CACHE_DIR");
    if (!path) {
-      path = secure_getenv("MESA_GLSL_CACHE_DIR");
-      if (path)
-         fprintf(stderr,
-                 "*** MESA_GLSL_CACHE_DIR is deprecated; "
-                 "use MESA_SHADER_CACHE_DIR instead ***\n");
+      if (!path) {
+         path = secure_getenv("MESA_GLSL_CACHE_DIR");
+         if(path)
+            fprintf(stderr,
+                    "*** MESA_GLSL_CACHE_DIR is deprecated; "
+                    "use MESA_SHADER_CACHE_DIR instead ***\n");
+      }
    }
 
    if (path) {
@@ -980,26 +982,31 @@ disk_cache_generate_cache_dir(void *mem_ctx, const char *gpu_name,
 bool
 disk_cache_enabled()
 {
-   /* Disk cache is not enabled for android, but android's EGL layer
-    * uses EGL_ANDROID_blob_cache to manage the cache itself:
-    */
-   if (DETECT_OS_ANDROID)
-      return false;
-
    /* If running as a users other than the real user disable cache */
    if (!__normal_user())
       return false;
 
-   /* At user request, disable shader cache entirely. */
-#ifdef SHADER_CACHE_DISABLE_BY_DEFAULT
+   /* At user request, disable shader cache entirely.
+    * Disk cache is not enabled by default for android, for most
+    * applications the EGL layer uses EGL_ANDROID_blob_cache to
+    * manage the cache itself, however those that wish to use the
+    * cache directly can set `MESA_SHADER_CACHE_DISABLE=false`.
+    * Note that on Android, setting environment variables can be
+    * difficult, so a fallback to properties is supported, which
+    * gets transformed into `mesa.shader.cache.disable=false`.
+    * Don't forget to also set the shader cache path to something
+    * readable by the application via `mesa.shader.cache.dir`.
+    */
+#if defined(SHADER_CACHE_DISABLE_BY_DEFAULT) || defined(DETECT_OS_ANDROID)
    bool disable_by_default = true;
 #else
    bool disable_by_default = false;
 #endif
+
    char *envvar_name = "MESA_SHADER_CACHE_DISABLE";
    if (!getenv(envvar_name)) {
-      envvar_name = "MESA_GLSL_CACHE_DISABLE";
-      if (getenv(envvar_name))
+      char *deprecated_envvar_name = "MESA_GLSL_CACHE_DISABLE";
+      if (getenv(deprecated_envvar_name))
          fprintf(stderr,
                  "*** MESA_GLSL_CACHE_DISABLE is deprecated; "
                  "use MESA_SHADER_CACHE_DISABLE instead ***\n");
@@ -1077,13 +1084,12 @@ disk_cache_touch_cache_user_marker(char *path)
 }
 
 bool
-disk_cache_mmap_cache_index(void *mem_ctx, struct disk_cache *cache,
-                            char *path)
+disk_cache_mmap_cache_index(void *mem_ctx, struct disk_cache *cache)
 {
    int fd = -1;
    bool mapped = false;
 
-   path = ralloc_asprintf(mem_ctx, "%s/index", cache->path);
+   char *path = ralloc_asprintf(mem_ctx, "%s/index", cache->path);
    if (path == NULL)
       goto path_fail;
 
@@ -1231,7 +1237,7 @@ void
 disk_cache_delete_old_cache(void)
 {
    void *ctx = ralloc_context(NULL);
-   char *dirname = disk_cache_generate_cache_dir(ctx, NULL, NULL, DISK_CACHE_MULTI_FILE);
+   const char *dirname = disk_cache_generate_cache_dir(ctx, NULL, NULL, DISK_CACHE_MULTI_FILE);
    if (!dirname)
       goto finish;
 

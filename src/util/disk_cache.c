@@ -122,7 +122,7 @@ disk_cache_type_create(const char *gpu_name,
    if (!disk_cache_enabled())
       goto path_fail;
 
-   char *path = disk_cache_generate_cache_dir(local, gpu_name, driver_id,
+   const char *path = disk_cache_generate_cache_dir(local, gpu_name, driver_id,
                                               cache_type);
    if (!path)
       goto path_fail;
@@ -154,7 +154,7 @@ disk_cache_type_create(const char *gpu_name,
    cache->stats.enabled = debug_get_bool_option("MESA_SHADER_CACHE_SHOW_STATS",
                                                 false);
 
-   if (!disk_cache_mmap_cache_index(local, cache, path))
+   if (!disk_cache_mmap_cache_index(local, cache))
       goto path_fail;
 
    max_size = 0;
