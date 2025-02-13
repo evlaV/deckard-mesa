@@ -415,6 +415,10 @@ VkResult
 tu_autotune_init(struct tu_autotune *at, struct tu_device *dev)
 {
    at->enabled = true;
+   if (TU_DEBUG(AT_BGMEM))
+      at->mode = TU_AUTOTUNE_MODE_GMEM_BIG;
+   else
+      at->mode = TU_AUTOTUNE_MODE_NORMAL;
    at->device = dev;
    at->ht = _mesa_hash_table_create(NULL,
                                     renderpass_key_hash,
@@ -588,6 +592,16 @@ tu_autotune_use_bypass(struct tu_autotune *at,
 
    if (!at->enabled || simultaneous_use)
       return fallback_use_bypass(pass, framebuffer, cmd_buffer);
+
+   if (at->mode == TU_AUTOTUNE_MODE_GMEM_BIG &&
+       cmd_buffer->state.rp.drawcall_count >= 10) {
+      if (TU_AUTOTUNE_DEBUG_LOG) {
+         mesa_logi("autotune %016" PRIx64 ": %u draw calls >= 10, using gmem",
+               hash_renderpass_instance(pass, framebuffer, cmd_buffer),
+               cmd_buffer->state.rp.drawcall_count);
+      }
+      return false;
+   }
 
    /* We use 64bit hash as a key since we don't fear rare hash collision,
     * the worst that would happen is sysmem being selected when it should
