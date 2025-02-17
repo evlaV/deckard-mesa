@@ -57,6 +57,7 @@ def find_result_types(spirv):
                 'OpExtInstImport',
                 'OpDecorationGroup',
                 'OpLabel',
+                'OpAsmTargetINTEL',
             ]
             assert name.startswith('OpType') or name.startswith('OpAlias') or name in untyped_insts
 
