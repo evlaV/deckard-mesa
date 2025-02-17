@@ -32,6 +32,7 @@
 #include "os_file.h"
 #include "ralloc.h"
 #include "simple_mtx.h"
+#include "u_debug.h"
 
 #include <stdarg.h>
 
@@ -207,12 +208,30 @@ os_get_option(const char *name)
    return (size > 0 && size < _MAX_ENV) ? value : NULL;
 }
 
+const char *
+os_get_option_secure(const char *name)
+{
+   return os_get_option(name);
+}
+
 #else
 
 const char *
 os_get_option(const char *name)
 {
    const char *opt = getenv(name);
+#if DETECT_OS_ANDROID
+   if (!opt) {
+      opt = os_get_android_option(name);
+   }
+#endif
+   return opt;
+}
+
+const char *
+os_get_option_secure(const char *name)
+{
+   const char *opt = secure_getenv(name);
 #if DETECT_OS_ANDROID
    if (!opt) {
       opt = os_get_android_option(name);
