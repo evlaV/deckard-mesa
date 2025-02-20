@@ -72,6 +72,7 @@ enum tu_debug_flags
    TU_DEBUG_DECK_EMU = 1ULL << 32,
    TU_DEBUG_AT_BGMEM = 1ULL << 33,
    TU_DEBUG_AT_PROF = 1ULL << 34,
+   TU_DEBUG_AT_PROF_IMM = 1ULL << 35,
 };
 
 struct tu_env {
