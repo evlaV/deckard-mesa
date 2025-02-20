@@ -290,26 +290,55 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
    }
 
    uint32_t sysmem_probability = history->sysmem_probability;
-   if (history->sysmem_count < 5 || history->gmem_count < 5) {
-      /* Not enough data to make a decision, bias towards least used. */
-      sysmem_probability = history->sysmem_count < history->gmem_count ? 75 : 25;
-   } else {
-      /* Compute average durations */
-      uint64_t avg_gmem = history->total_gmem_duration / history->gmem_count;
-      uint64_t avg_sysmem =
-         history->total_sysmem_duration / history->sysmem_count;
+   if (TU_DEBUG(AT_PROF_IMM)) {
+      /* Try to immediately resolve the probability, this is useful for CI
+       * running a single trace of frames where the probablities aren't
+       * expected to change from run to run. */
+      if (history->sysmem_count < 1) {
+         sysmem_probability = 100;
+      } else if (history->gmem_count < 1) {
+         sysmem_probability = 0;
+      } else {
+         uint64_t avg_gmem =
+            history->total_gmem_duration / history->gmem_count;
+         uint64_t avg_sysmem =
+            history->total_sysmem_duration / history->sysmem_count;
 
-      /* Adjust probability based on timing results */
-      const uint32_t delta = 5;
-      if (avg_gmem < avg_sysmem && history->sysmem_probability > 5) {
-          sysmem_probability = MAX2(history->sysmem_probability - delta, 5);
-      } else if (avg_sysmem < avg_gmem && history->sysmem_probability < 95) {
-          sysmem_probability = MIN2(history->sysmem_probability + delta, 95);
+         sysmem_probability = avg_gmem < avg_sysmem ? 0 : 100;
+
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi(
+               "autotune imm: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               avg_gmem, avg_sysmem, sysmem_probability);
+         }
       }
+   } else {
+      const uint32_t min_count = 5;
+      if (history->sysmem_count < min_count || history->gmem_count < min_count) {
+         /* Not enough data to make a decision, bias towards least used. */
+         sysmem_probability = history->sysmem_count < history->gmem_count ? 75 : 25;
+      } else {
+         /* Compute average durations */
+         uint64_t avg_gmem =
+            history->total_gmem_duration / history->gmem_count;
+         uint64_t avg_sysmem =
+            history->total_sysmem_duration / history->sysmem_count;
 
-      if (TU_AUTOTUNE_DEBUG_LOG) {
-          mesa_logi("autotune update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
-                    avg_gmem, avg_sysmem, sysmem_probability);
+         /* Adjust probability based on timing results */
+         const uint32_t delta = 5;
+         if (avg_gmem < avg_sysmem && history->sysmem_probability > 5) {
+            sysmem_probability = MAX2(history->sysmem_probability - delta, 5);
+         } else if (avg_sysmem < avg_gmem &&
+                    history->sysmem_probability < 95) {
+            sysmem_probability =
+               MIN2(history->sysmem_probability + delta, 95);
+         }
+
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi(
+               "autotune update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               avg_gmem, avg_sysmem, sysmem_probability);
+         }
       }
    }
 
@@ -467,7 +496,7 @@ tu_autotune_init(struct tu_autotune *at, struct tu_device *dev)
    at->enabled = true;
    if (TU_DEBUG(AT_BGMEM))
       at->mode = TU_AUTOTUNE_MODE_GMEM_BIG;
-   else if (TU_DEBUG(AT_PROF))
+   else if (TU_DEBUG(AT_PROF) || TU_DEBUG(AT_PROF_IMM))
       at->mode = TU_AUTOTUNE_MODE_PROFILED;
    else
       at->mode = TU_AUTOTUNE_MODE_NORMAL;
