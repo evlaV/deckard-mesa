@@ -77,6 +77,7 @@ enum tu_debug_flags : uint64_t
    TU_DEBUG_AT_BGMEM                 = BITFIELD64_BIT(36),
    TU_DEBUG_AT_PROF                  = BITFIELD64_BIT(37),
    TU_DEBUG_AT_PROF_IMM              = BITFIELD64_BIT(38),
+   TU_DEBUG_AT_LAT_SEN               = BITFIELD64_BIT(39),
 };
 
 struct tu_env {
