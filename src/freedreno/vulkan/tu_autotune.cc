@@ -80,8 +80,12 @@ struct tu_renderpass_history {
    uint64_t total_gmem_duration;
    uint32_t gmem_count;
    uint64_t total_sysmem_duration;
+   uint64_t total_sysmem_draws;
    uint32_t sysmem_count;
-   uint32_t sysmem_probability; /* Range [0 (GMEM), 100 (SYSMEM)], where 50 means no preference. */
+   uint32_t sysmem_probability; /* Range [0 (GMEM), 100 (SYSMEM)], where 50
+                                   means no preference. */
+   bool latency_risk; /* If the renderpass has long draws which are at risk of
+                         causing high preemptible latency. */
 };
 
 /* Holds per-submission cs which writes the fence. */
@@ -213,7 +217,8 @@ static bool
 get_history(struct tu_autotune *at,
             uint64_t rp_key,
             uint32_t *avg_samples,
-            uint32_t *sysmem_probability)
+            uint32_t *sysmem_probability,
+            bool *latency_risk)
 {
    bool has_history = false;
 
@@ -229,6 +234,7 @@ get_history(struct tu_autotune *at,
       if (history->num_results > 0) {
          *avg_samples = p_atomic_read(&history->avg_samples);
          *sysmem_probability = p_atomic_read(&history->sysmem_probability);
+         *latency_risk = p_atomic_read(&history->latency_risk);
          has_history = true;
       }
    }
@@ -238,11 +244,14 @@ get_history(struct tu_autotune *at,
 }
 
 static struct tu_renderpass_result *
-create_history_result(struct tu_autotune *at, uint64_t rp_key)
+create_history_result(struct tu_autotune *at,
+                      uint64_t rp_key,
+                      uint32_t draw_count)
 {
    struct tu_renderpass_result *result =
       (struct tu_renderpass_result *) calloc(1, sizeof(*result));
    result->rp_key = rp_key;
+   result->draw_count = draw_count;
 
    return result;
 }
@@ -283,6 +292,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
        *  accessed from this function which should be single-threaded.
        */
       history->total_sysmem_duration += result->duration;
+      history->total_sysmem_draws += result->draw_count;
       history->sysmem_count++;
    } else {
       history->total_gmem_duration += result->duration;
@@ -290,6 +300,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
    }
 
    uint32_t sysmem_probability = history->sysmem_probability;
+   const uint32_t min_count = 5;
    if (TU_DEBUG(AT_PROF_IMM)) {
       /* Try to immediately resolve the probability, this is useful for CI
        * running a single trace of frames where the probablities aren't
@@ -313,7 +324,6 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
          }
       }
    } else {
-      const uint32_t min_count = 5;
       if (history->sysmem_count < min_count || history->gmem_count < min_count) {
          /* Not enough data to make a decision, bias towards least used. */
          sysmem_probability = history->sysmem_count < history->gmem_count ? 75 : 25;
@@ -343,6 +353,26 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
    }
 
    p_atomic_set(&history->sysmem_probability, sysmem_probability);
+
+   if (TU_DEBUG(AT_LAT_SEN) && history->sysmem_count > min_count) {
+      /* Try to estimate the minimum non-preemptible duration for draw-level
+       * preemption, by dividing the total time by the RP by the amount of
+       * draws. This isn't very accurate as it's skewed by the time taken by
+       * commands other than draws (e.g. clears or blits), but it's a good
+       * enough estimate to catch the worst offenders. If the average draw
+       * duration is above a certain threshold, we mark the RP as latency
+       * sensitive which should bias the decision towards GMEM.
+       */
+
+      uint64_t avg_sysmem_draw =
+         history->total_sysmem_duration / history->total_sysmem_draws;
+
+      const uint64_t always_on_frequency = 19200000;
+      const uint64_t draw_duration_threshold =
+         1000000 * always_on_frequency; /* 10ms */
+
+      p_atomic_set(&history->latency_risk, avg_sysmem_draw > draw_duration_threshold);
+   }
 }
 
 static void
@@ -695,10 +725,26 @@ tu_autotune_use_bypass(struct tu_autotune *at,
     */
    uint64_t renderpass_key = hash_renderpass_instance(pass, framebuffer, cmd_buffer);
 
-   *autotune_result = create_history_result(at, renderpass_key);
+   *autotune_result = create_history_result(
+      at, renderpass_key, cmd_buffer->state.rp.drawcall_count);
 
    uint32_t avg_samples = 0, sysmem_probability = 50;
-   if (get_history(at, renderpass_key, &avg_samples, &sysmem_probability)) {
+   bool latency_risk = false;
+   if (get_history(at, renderpass_key, &avg_samples, &sysmem_probability,
+                   &latency_risk)) {
+      if (TU_DEBUG(AT_LAT_SEN) && latency_risk) {
+         /* Try to mitigate the risk of high preemption latency by always
+          * using GMEM, which should break up any larger draws into smaller
+          * ones with tiling.
+          */
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi("autotune %016" PRIx64
+                      ": high preemption latency risk, using GMEM",
+                      renderpass_key);
+         }
+         return false;
+      }
+
       if (at->mode == TU_AUTOTUNE_MODE_PROFILED) {
          uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
          bool select_sysmem =

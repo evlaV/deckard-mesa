@@ -126,6 +126,7 @@ struct tu_renderpass_result {
     * Below here, only used internally within autotune
     */
    uint64_t rp_key;
+   uint32_t draw_count;
    struct tu_renderpass_history *history;
    struct list_head node;
    uint32_t fence;
