@@ -55,6 +55,7 @@ static const struct debug_control tu_debug_options[] = {
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "at_bgmem", TU_DEBUG_AT_BGMEM },
    { "at_prof", TU_DEBUG_AT_PROF },
+   { "at_prof_imm", TU_DEBUG_AT_PROF_IMM },
    { NULL, 0 }
 };
 
