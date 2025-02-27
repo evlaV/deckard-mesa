@@ -319,7 +319,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
-               "autotune imm: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               "autotune imm: avg_gmem: %" PRIu64 "  avg_sysmem: %" PRIu64 "  = sysmem_probability: %u",
                avg_gmem, avg_sysmem, sysmem_probability);
          }
       }
@@ -346,7 +346,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
-               "autotune update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               "autotune update: avg_gmem: %" PRIu64 " avg_sysmem: %" PRIu64 " = sysmem_probability: %u",
                avg_gmem, avg_sysmem, sysmem_probability);
          }
       }
