@@ -221,7 +221,7 @@ tu_at_durations_get_avg(struct tu_at_durations *durations,
       if (entry->expiry_timestamp && entry->expiry_timestamp < now) {
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
-               "autotune: removing old draw duration entry %lu ticks - %u draws, %lu < %lu",
+               "autotune: removing old draw duration entry %" PRIu64 " ticks - %" PRIu32 " draws, %" PRIu64 " < %" PRIu64,
                entry->duration, entry->draw_count, entry->expiry_timestamp,
                now);
          }
@@ -563,7 +563,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
-               "autotune imm: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               "autotune imm: avg_gmem: %" PRIu64 "  avg_sysmem: %" PRIu64 "  = sysmem_probability: %u",
                avg_gmem, avg_sysmem, sysmem_probability);
          }
       }
@@ -584,7 +584,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
-               "autotune update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+               "autotune update: avg_gmem: %" PRIu64 " avg_sysmem: %" PRIu64 " = sysmem_probability: %u",
                avg_gmem, avg_sysmem, sysmem_probability);
          }
       }
@@ -610,7 +610,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
             "autotune %016" PRIx64
             ": latrisk: %u, sysmem: %u, sysmem_count: %u, gmem_count: %u"
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-            ", preemption_latency: %lu us"
+            ", preemption_latency: %" PRIu64 " us"
 #endif
             ,
             history->key, history->latency_risk, result->sysmem, 
@@ -643,9 +643,9 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
          if (TU_AUTOTUNE_DEBUG_LOG) {
             mesa_logi(
                "autotune %016" PRIx64
-               ": avg_sysmem_draw: %lu us (%u), latency_risk: %u"
+               ": avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-               ", preemption_latency: %lu us"
+               ", preemption_latency: %" PRIu64 " us"
 #endif
                ,
                history->key, ticks_to_us(avg_sysmem_draw),
@@ -664,7 +664,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
             p_atomic_set(&history->latency_risk, true);
             if (TU_AUTOTUNE_DEBUG_LOG) {
                mesa_logi("autotune %016" PRIx64
-                         ": high sysmem draw duration %lu us, marking as latency sensitive",
+                         ": high sysmem draw duration %" PRIu64 " us, marking as latency sensitive",
                          ticks_to_us(avg_sysmem_draw), history->key);
             }
          }
@@ -691,7 +691,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
                   if (TU_AUTOTUNE_DEBUG_LOG) {
                      mesa_logi(
                         "autotune %016" PRIx64
-                        ": high gmem tile duration %lu, marking as latency sensitive",
+                        ": high gmem tile duration %" PRIu64 ", marking as latency sensitive",
                         avg_gmem_tile, history->key);
                   }
                }
@@ -701,9 +701,9 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
                if (TU_AUTOTUNE_DEBUG_LOG) {
                   mesa_logi(
                      "autotune %016" PRIx64
-                     ": avg_gmem_tile: %lu us (%u), latency_risk: %u, tile_size_divisor: %u"
+                     ": avg_gmem_tile: %" PRIu64 " us (%u), latency_risk: %u, tile_size_divisor: %" PRIu32
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-                     ", preemption_latency: %lu us"
+                     ", preemption_latency: %" PRIu64 " us"
 #endif
                      ,
                      history->key, ticks_to_us(avg_gmem_tile),
@@ -825,7 +825,7 @@ process_results(struct tu_autotune *at, uint32_t current_fence)
 
          outValue = sample.end - sample.begin;
          if (sample.end < sample.begin) {
-            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %lu < %lu",
+            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %" PRIu64 " < %" PRIu64,
                       result->rp_key, name, sample.end, sample.begin);
             outValue = 0;
          }
@@ -844,7 +844,7 @@ process_results(struct tu_autotune *at, uint32_t current_fence)
       if (result->preemption_reaction_delay || num_preemptions) {
          mesa_logi(
             "autotune %016" PRIx64
-            ": preemption_reaction_delay: %lu us, always_count: %lu us, num_preemptions: %lu",
+            ": preemption_reaction_delay: %" PRIu64 " us, always_count: %" PRIu64 " us, num_preemptions: %" PRIu64,
             result->rp_key, ticks_to_us(result->preemption_reaction_delay),
             ticks_to_us(always_count), num_preemptions);
       }
