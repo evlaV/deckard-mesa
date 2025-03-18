@@ -138,6 +138,7 @@ struct tu_render_pass
    struct tu_render_pass_attachment *attachments;
    bool has_cond_load_store;
    bool has_fdm;
+   bool has_layered_fdm;
 
    struct tu_subpass_barrier end_barrier;
    struct tu_subpass subpasses[0];
