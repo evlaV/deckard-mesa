@@ -452,7 +452,20 @@ struct tu_cmd_state
 
    bool has_fdm;
    bool per_view_viewport;
+   bool per_layer_viewport;
    bool fake_single_viewport;
+
+   /* If per_layer_viewport is true, the maximum number of layers rendered to.
+    * We need to save this because we might not necessarily know the number of
+    * layers in some corner cases and we need to know this in order to know
+    * how many viewports to emit.
+    */
+   uint8_t max_fdm_layers;
+
+   /* Set in CmdBeginRendering/CmdBeginRenderPass2, whether the FDM should be
+    * sampled per layer.
+    */
+   bool fdm_per_layer;
 
    /* saved states to re-emit in TU_CMD_DIRTY_DRAW_STATE case */
    struct tu_draw_state dynamic_state[TU_DYNAMIC_STATE_COUNT];

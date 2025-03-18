@@ -115,6 +115,7 @@ struct tu_program_state
        * across views before transforming it.
        */
       bool fake_single_viewport;
+      bool per_layer_viewport;
       bool writes_shading_rate;
       bool reads_shading_rate;
       bool accesses_smask;
