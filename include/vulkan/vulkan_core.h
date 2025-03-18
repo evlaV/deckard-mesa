@@ -1235,6 +1235,9 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_MEMORY_GET_METAL_HANDLE_INFO_EXT = 1000602002,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_KHR = 1000421000,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_ROBUSTNESS_FEATURES_EXT = 1000608000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE = 1000611000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE = 1000611001,
+    VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE = 1000611002,
 #ifdef VK_ENABLE_BETA_EXTENSIONS
     VK_STRUCTURE_TYPE_SET_PRESENT_CONFIG_NV = 1000613000,
 #endif
@@ -2982,6 +2985,7 @@ typedef VkFlags VkFramebufferCreateFlags;
 
 typedef enum VkRenderPassCreateFlagBits {
     VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM = 0x00000002,
+    VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE = 0x00000004,
     VK_RENDER_PASS_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
 } VkRenderPassCreateFlagBits;
 typedef VkFlags VkRenderPassCreateFlags;
@@ -6949,6 +6953,7 @@ typedef enum VkRenderingFlagBits {
     VK_RENDERING_RESUMING_BIT = 0x00000004,
     VK_RENDERING_ENABLE_LEGACY_DITHERING_BIT_EXT = 0x00000008,
     VK_RENDERING_CONTENTS_INLINE_BIT_KHR = 0x00000010,
+    VK_RENDERING_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE = 0x00000020,
     VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT,
     VK_RENDERING_SUSPENDING_BIT_KHR = VK_RENDERING_SUSPENDING_BIT,
     VK_RENDERING_RESUMING_BIT_KHR = VK_RENDERING_RESUMING_BIT,
@@ -7908,6 +7913,7 @@ static const VkPipelineCreateFlagBits2 VK_PIPELINE_CREATE_2_DESCRIPTOR_BUFFER_BI
 static const VkPipelineCreateFlagBits2 VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM = 0x2000000000ULL;
 static const VkPipelineCreateFlagBits2 VK_PIPELINE_CREATE_2_CAPTURE_DATA_BIT_KHR = 0x80000000ULL;
 static const VkPipelineCreateFlagBits2 VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT = 0x4000000000ULL;
+static const VkPipelineCreateFlagBits2 VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE = 0x10000000000ULL;
 
 typedef VkFlags64 VkBufferUsageFlags2;
 
@@ -21391,6 +21397,30 @@ typedef struct VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT {
     void*              pNext;
     VkBool32           vertexAttributeRobustness;
 } VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT;
+
+
+
+// VK_VALVE_fragment_density_map_layered is a preprocessor guard. Do not pass it to API calls.
+#define VK_VALVE_fragment_density_map_layered 1
+#define VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_SPEC_VERSION 1
+#define VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME "VK_VALVE_fragment_density_map_layered"
+typedef struct VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE {
+    VkStructureType    sType;
+    void*              pNext;
+    VkBool32           fragmentDensityMapLayered;
+} VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE;
+
+typedef struct VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE {
+    VkStructureType    sType;
+    void*              pNext;
+    uint32_t           maxFragmentDensityMapLayers;
+} VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE;
+
+typedef struct VkPipelineFragmentDensityMapLayeredCreateInfoVALVE {
+    VkStructureType    sType;
+    const void*        pNext;
+    uint32_t           maxFragmentDensityMapLayers;
+} VkPipelineFragmentDensityMapLayeredCreateInfoVALVE;
 
 
 

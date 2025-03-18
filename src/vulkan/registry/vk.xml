@@ -10189,6 +10189,21 @@ typedef void* <name>MTLSharedEvent_id</name>;
             <member optional="true"><type>void</type>*                           <name>pNext</name></member>
             <member><type>VkBool32</type>                                        <name>presentMetering</name></member>
         </type>
+        <type category="struct" name="VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE" returnedonly="true" structextends="VkPhysicalDeviceProperties2">
+            <member values="VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE"><type>VkStructureType</type> <name>sType</name></member>
+            <member optional="true"><type>void</type>*                            <name>pNext</name></member>
+            <member limittype="max"><type>uint32_t</type>                         <name>maxFragmentDensityMapLayers</name></member>
+        </type>
+        <type category="struct" name="VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE" returnedonly="true" structextends="VkPhysicalDeviceFeatures2,VkDeviceCreateInfo">
+            <member values="VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE"><type>VkStructureType</type> <name>sType</name></member>
+            <member optional="true"><type>void</type>*                            <name>pNext</name></member>
+            <member><type>VkBool32</type>                                         <name>fragmentDensityMapLayered</name></member>
+        </type>
+        <type category="struct" name="VkPipelineFragmentDensityMapLayeredCreateInfoVALVE" structextends="VkGraphicsPipelineCreateInfo">
+            <member values="VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE"><type>VkStructureType</type> <name>sType</name></member>
+            <member optional="true">const <type>void</type>*                      <name>pNext</name></member>
+            <member><type>uint32_t</type>                                         <name>maxFragmentDensityMapLayers</name></member>
+        </type>
     </types>
 
 
@@ -27108,13 +27123,20 @@ typedef void* <name>MTLSharedEvent_id</name>;
                 <enum value="&quot;VK_NV_extension_611&quot;"               name="VK_NV_EXTENSION_611_EXTENSION_NAME"/>
             </require>
         </extension>
-        <extension name="VK_VALVE_extension_612" number="612" author="EXT" contact="Mike Blumenkrantz @zmike" supported="disabled">
+        <extension name="VK_VALVE_fragment_density_map_layered" number="612" type="device" depends="(VK_KHR_get_physical_device_properties2,VK_VERSION_1_1)+(VK_KHR_maintenance5,VK_VERSION_1_4)+VK_EXT_fragment_density_map+(VK_VERSION_1_3,VK_KHR_dynamic_rendering)" author="VALVE" contact="Connor Abbott @cwabbott0" supported="vulkan">
             <require>
-                <enum value="0"                                             name="VK_VALVE_EXTENSION_612_SPEC_VERSION"/>
-                <enum value="&quot;VK_VALVE_extension_612&quot;"            name="VK_VALVE_EXTENSION_612_EXTENSION_NAME"/>
-                <enum bitpos="2" extends="VkRenderPassCreateFlagBits"       name="VK_RENDER_PASS_CREATE_RESERVED_2_BIT_VALVE"/>
-                <enum bitpos="5" extends="VkRenderingFlagBits"              name="VK_RENDERING_RESERVED_5_BIT_VALVE"/>
-                <enum bitpos="40" extends="VkPipelineCreateFlagBits2"       name="VK_PIPELINE_CREATE_2_RESERVED_40_BIT_VALVE"/>
+                <enum value="1"                                               name="VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_SPEC_VERSION"/>
+                <enum value="&quot;VK_VALVE_fragment_density_map_layered&quot;" name="VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME"/>
+                <enum offset="0"  extends="VkStructureType"                   name="VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_FEATURES_VALVE"/>
+                <enum offset="1"  extends="VkStructureType"                   name="VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_LAYERED_PROPERTIES_VALVE"/>
+                <enum offset="2"  extends="VkStructureType"                   name="VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE"/>
+                <enum bitpos="2" extends="VkRenderPassCreateFlagBits"         name="VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE"/>
+                <enum bitpos="5" extends="VkRenderingFlagBits"                name="VK_RENDERING_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE"/>
+                <enum bitpos="40" extends="VkPipelineCreateFlagBits2"         name="VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE"/>
+		<type name="VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE"/>
+		<type name="VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE"/>
+		<type name="VkPipelineFragmentDensityMapLayeredCreateInfoVALVE"/>
+                <feature name="fragmentDensityMapLayered" struct="VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE"/>
             </require>
         </extension>
         <extension name="VK_KHR_extension_613" number="613" author="KHR" contact="Piers Daniell @pdaniell-nv" supported="disabled">
