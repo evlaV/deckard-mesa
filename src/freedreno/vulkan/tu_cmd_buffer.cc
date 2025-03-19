@@ -2791,6 +2791,17 @@ tu_calc_frag_area(struct tu_cmd_buffer *cmd,
    }
 }
 
+static void
+tu_identity_frag_area(struct tu_cmd_buffer *cmd,
+                      struct tu_tile_config *tile)
+{
+   unsigned views =
+      cmd->state.pass->num_views ? cmd->state.pass->num_views : 1;
+
+   for (unsigned i = 0; i < views; i++)
+      tile->frag_areas[i] = (VkExtent2D) { 1, 1 };
+}
+
 static bool
 rects_intersect(VkRect2D a, VkRect2D b)
 {
@@ -3104,6 +3115,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                tu_calc_bin_visibility(cmd, &tile, fdm_offsets);
                if (has_fdm)
                   tu_calc_frag_area(cmd, &tile, fdm, fdm_offsets);
+               else
+                  tu_identity_frag_area(cmd, &tile);
 
                tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile,
                                      fdm_offsets,
