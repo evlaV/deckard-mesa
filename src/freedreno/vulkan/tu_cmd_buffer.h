@@ -452,6 +452,7 @@ struct tu_cmd_state
 
    uint32_t max_vbs_bound;
 
+   bool has_fdm;
    bool per_view_viewport;
    bool fake_single_viewport;
 
