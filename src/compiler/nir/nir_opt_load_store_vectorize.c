@@ -822,15 +822,28 @@ vectorize_loads(nir_builder *b, struct vectorize_ctx *ctx,
 
    /* update the offset */
    if (first != low && info->base_src >= 0) {
-      /* let nir_opt_algebraic() remove this addition. this doesn't have much
-       * issues with subtracting 16 from expressions like "(i + 1) * 16" because
-       * nir_opt_algebraic() turns them into "i * 16 + 16" */
-      b->cursor = nir_before_instr(first->instr);
+      int base_diff = (int)(high_start / 8u / first->info->offset_scale);
 
-      nir_def *new_base = first->intrin->src[info->base_src].ssa;
-      new_base = nir_iadd_imm(b, new_base, -(int)(high_start / 8u / first->info->offset_scale));
+      if (nir_intrinsic_has_base(first->intrin) &&
+          nir_intrinsic_base(first->intrin) >= base_diff) {
+         /* When BASE is large enough, subtract the difference from that. This
+          * saves a NIR addition and prevents negative values in the offset
+          * source. The latter can happen, for example, when a load with
+          * BASE=20 gets combined with one with BASE=16.
+          */
+         nir_intrinsic_set_base(first->intrin,
+                                nir_intrinsic_base(first->intrin) - base_diff);
+      } else {
+         /* let nir_opt_algebraic() remove this addition. this doesn't have much
+          * issues with subtracting 16 from expressions like "(i + 1) * 16"
+          * because nir_opt_algebraic() turns them into "i * 16 + 16" */
+         b->cursor = nir_before_instr(first->instr);
 
-      nir_src_rewrite(&first->intrin->src[info->base_src], new_base);
+         nir_def *new_base = first->intrin->src[info->base_src].ssa;
+         new_base = nir_iadd_imm(b, new_base, -base_diff);
+
+         nir_src_rewrite(&first->intrin->src[info->base_src], new_base);
+      }
    }
 
    /* update the deref */
