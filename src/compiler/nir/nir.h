@@ -6109,6 +6109,9 @@ typedef struct nir_opt_offsets_options {
    /** nir_load/store_buffer_amd max base offset */
    uint32_t buffer_max;
 
+   /** nir_load/store_ssbo max base offset */
+   uint32_t ssbo_max;
+
    /**
     * Callback to get the max base offset for instructions for which the
     * corresponding value above is zero.
