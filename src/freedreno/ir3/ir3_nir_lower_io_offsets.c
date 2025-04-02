@@ -223,6 +223,17 @@ lower_offset_for_ssbo(nir_intrinsic_instr *intrinsic, nir_builder *b,
 
    nir_intrinsic_copy_const_indices(new_intrinsic, intrinsic);
 
+   if (nir_intrinsic_has_base(new_intrinsic)) {
+      /* The base needs to be shifted just like the offset. */
+      unsigned base = nir_intrinsic_base(new_intrinsic);
+
+      /* All offset calculations should have come from properly aligned derefs
+       * so the base should also be aligned.
+       */
+      assert(util_is_aligned(base, 1 << shift));
+      nir_intrinsic_set_base(new_intrinsic, base >> shift);
+   }
+
    new_intrinsic->num_components = intrinsic->num_components;
 
    /* If we managed to propagate the division by 4, just use the new offset
@@ -314,23 +325,58 @@ ir3_nir_lower_io_offsets(nir_shader *shader)
    return progress;
 }
 
-uint32_t
-ir3_nir_max_imm_offset(nir_intrinsic_instr *intrin, const void *data)
+static uint32_t
+max_encoded_imm_offset(nir_intrinsic_instr *intrin,
+                       const struct ir3_compiler *compiler)
 {
-   const struct ir3_compiler *compiler = data;
-
    if (!compiler->has_ssbo_imm_offsets)
       return 0;
 
    switch (intrin->intrinsic) {
+   case nir_intrinsic_load_ssbo:
    case nir_intrinsic_load_ssbo_ir3:
       if ((nir_intrinsic_access(intrin) & ACCESS_CAN_REORDER) &&
           !(compiler->options.storage_8bit && intrin->def.bit_size == 8))
          return 255; /* isam.v */
       return 127;    /* ldib.b */
+   case nir_intrinsic_store_ssbo:
    case nir_intrinsic_store_ssbo_ir3:
       return 127; /* stib.b */
    default:
       return 0;
    }
+}
+
+uint32_t
+ir3_nir_max_imm_offset(nir_intrinsic_instr *intrin, const void *data)
+{
+   const struct ir3_compiler *compiler = data;
+   uint32_t max_encoded_offset = max_encoded_imm_offset(intrin, compiler);
+
+   if (max_encoded_offset == 0) {
+      return 0;
+   }
+
+   if (intrin->intrinsic == nir_intrinsic_load_ssbo_ir3 ||
+       intrin->intrinsic == nir_intrinsic_store_ssbo_ir3) {
+      return max_encoded_offset;
+   }
+
+   assert(intrin->intrinsic == nir_intrinsic_store_ssbo ||
+          intrin->intrinsic == nir_intrinsic_load_ssbo);
+
+   /* load/store_ssbo offsets are in units of bytes while our instructions use
+    * bit_size units. Adjust the maximum accordingly, this will get adjusted
+    * back when lowering to load/store_ssbo_ir3.
+    */
+   unsigned bit_size = intrin->intrinsic == nir_intrinsic_store_ssbo
+                          ? intrin->src[0].ssa->bit_size
+                          : intrin->def.bit_size;
+
+   if (bit_size > 32) {
+      /* 64b loads/stores will get lowered to 32b eventually. */
+      bit_size = 32;
+   }
+
+   return max_encoded_offset * bit_size / 8;
 }

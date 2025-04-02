@@ -379,6 +379,7 @@ ir3_optimize_loop(struct ir3_compiler *compiler,
          .shared_max = (1 << 12) - 1,
 
          .buffer_max = 0,
+         .ssbo_max = 0,
          .max_offset_cb = ir3_nir_max_imm_offset,
          .max_offset_data = compiler,
          .allow_offset_wrap = true,
