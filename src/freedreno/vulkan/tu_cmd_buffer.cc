@@ -9,6 +9,10 @@
 
 #include "tu_cmd_buffer.h"
 
+#include "common/freedreno_gpu_event.h"
+#include "common/freedreno_lrz.h"
+
+#include "vk_command_pool.h"
 #include "vk_common_entrypoints.h"
 #include "vk_render_pass.h"
 #include "vk_util.h"
@@ -18,10 +22,170 @@
 #include "tu_cs.h"
 #include "tu_event.h"
 #include "tu_image.h"
+#include "tu_knl.h"
 #include "tu_tracepoints.h"
 
-#include "common/freedreno_gpu_event.h"
-#include "common/freedreno_lrz.h"
+enum tu_cmd_buffer_status {
+   TU_CMD_BUFFER_STATUS_INITIAL = 0,
+   TU_CMD_BUFFER_STATUS_START = 1,
+   TU_CMD_BUFFER_STATUS_END = 2,
+};
+
+VKAPI_ATTR VkResult VKAPI_CALL
+tu_CreateCommandPool(VkDevice _device,
+                     const VkCommandPoolCreateInfo *pCreateInfo,
+                     const VkAllocationCallbacks *pAllocator,
+                     VkCommandPool *pCommandPool)
+{
+   VK_FROM_HANDLE(tu_device, device, _device);
+   struct tu_cmd_pool *pool;
+   VkResult result;
+
+   pool = (struct tu_cmd_pool *) vk_alloc2(&device->vk.alloc, pAllocator,
+                                           sizeof(*pool), 8,
+                                           VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+   if (unlikely(pool == NULL))
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS)) {
+      size_t min_mem_map_alignment =
+         device->vk.physical->properties.minMemoryMapAlignment;
+
+      assert(min_mem_map_alignment <= UINT32_MAX);
+      const uint32_t bo_size = min_mem_map_alignment;
+      const uint32_t slot_count = bo_size / 4;
+
+      result = tu_bo_init_new_explicit_iova(
+         device, NULL, &pool->cmd_buff_status.bo, bo_size, 0,
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+         (enum tu_bo_alloc_flags)(TU_BO_ALLOC_INTERNAL_RESOURCE |
+                                  TU_BO_ALLOC_ALLOW_DUMP |
+                                  TU_BO_ALLOC_REPLAYABLE),
+         "cmd_buffer_status");
+      if (unlikely(result != VK_SUCCESS))
+         goto err_free_cmd_pool;
+
+      result = tu_bo_map(device, pool->cmd_buff_status.bo, NULL);
+      if (unlikely(result != VK_SUCCESS))
+         goto err_cmd_buffer_status_bo_finish;
+
+      uint32_t *slots = (uint32_t *) pool->cmd_buff_status.bo->map;
+      STATIC_ASSERT(TU_CMD_BUFFER_STATUS_INITIAL == 0);
+      memset(slots, 0, slot_count * sizeof(uint32_t));
+
+      util_idalloc_init(&pool->cmd_buff_status.slot_alloc, slot_count);
+      pool->cmd_buff_status.max_slot_count = slot_count;
+   }
+
+   result =
+      vk_command_pool_init(&device->vk, &pool->vk, pCreateInfo, pAllocator);
+   if (unlikely(result != VK_SUCCESS))
+      goto err_cmd_buff_status_slot_alloc_finish;
+
+   *pCommandPool = tu_cmd_pool_to_handle(pool);
+   return VK_SUCCESS;
+
+err_cmd_buff_status_slot_alloc_finish:
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS)) {
+      util_idalloc_fini(&pool->cmd_buff_status.slot_alloc);
+      tu_bo_unmap(device, pool->cmd_buff_status.bo, false);
+   }
+
+err_cmd_buffer_status_bo_finish:
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS))
+      tu_bo_finish(device, pool->cmd_buff_status.bo);
+
+err_free_cmd_pool:
+   vk_free2(&device->vk.alloc, pAllocator, pool);
+
+   return result;
+}
+
+static inline uint32_t *
+tu_cmd_buff_status_slot_cpu(const struct tu_cmd_buffer *cmd_buffer)
+{
+   struct tu_cmd_pool *pool =
+      container_of(cmd_buffer->vk.pool, struct tu_cmd_pool, vk);
+   uint32_t *slots = (uint32_t *) pool->cmd_buff_status.bo->map;
+
+   return &slots[cmd_buffer->status_slot_idx];
+}
+
+static uint64_t
+tu_cmd_buff_status_slot_gpu(const struct tu_cmd_buffer *cmd_buffer)
+{
+   struct tu_cmd_pool *pool =
+      container_of(cmd_buffer->vk.pool, struct tu_cmd_pool, vk);
+   uint64_t slots = pool->cmd_buff_status.bo->iova;
+
+   return slots + cmd_buffer->status_slot_idx * sizeof(uint32_t);
+}
+
+static void
+tu_cmd_buff_status_slot_gpu_write(struct tu_cmd_buffer *cmd_buffer,
+                                  enum tu_cmd_buffer_status status)
+{
+   struct tu_cs *cs = &cmd_buffer->cs;
+
+   tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 3);
+   tu_cs_emit_qw(cs, tu_cmd_buff_status_slot_gpu(cmd_buffer));
+   tu_cs_emit(cs, (uint32_t) status);
+}
+
+#define tu_cmd_buff_status_slot_reset(_cmd_buffer)                           \
+   _tu_cmd_buff_status_slot_reset(_cmd_buffer, __FILE__, __LINE__, __func__)
+
+static void
+_tu_cmd_buff_status_slot_reset(const struct tu_cmd_buffer *cmd_buffer,
+                               const char *file,
+                               int line,
+                               const char *function)
+{
+   uint32_t status = p_atomic_xchg(tu_cmd_buff_status_slot_cpu(cmd_buffer),
+                                   TU_CMD_BUFFER_STATUS_INITIAL);
+
+   switch (status) {
+   case TU_CMD_BUFFER_STATUS_INITIAL:
+      /* Command buffer was not submitted. */
+      break;
+   case TU_CMD_BUFFER_STATUS_START:
+      mesa_loge(
+         "Trying to reset or destroy cmd_buffer %p before it completed "
+         "execution - %s:%d %s",
+         (void *) cmd_buffer, file, line, function);
+      break;
+   case TU_CMD_BUFFER_STATUS_END:
+      /* Command buffer was submitted and has completed execution. */
+      break;
+   default:
+      unreachable("Unknown cmd buffer status slot value");
+   }
+}
+
+VKAPI_ATTR void VKAPI_CALL
+tu_DestroyCommandPool(VkDevice _device,
+                      VkCommandPool commandPool,
+                      const VkAllocationCallbacks *pAllocator)
+{
+   VK_FROM_HANDLE(tu_device, device, _device);
+   VK_FROM_HANDLE(tu_cmd_pool, pool, commandPool);
+
+   if (pool == NULL)
+      return;
+
+   vk_command_pool_finish(&pool->vk);
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS)) {
+      tu_bo_finish(device, pool->cmd_buff_status.bo);
+
+      assert(pool->cmd_buff_status.slot_alloc.num_set_elements == 0);
+      util_idalloc_fini(&pool->cmd_buff_status.slot_alloc);
+   }
+
+   vk_free2(&device->vk.alloc, pAllocator, pool);
+}
 
 static void
 tu_clone_trace_range(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
@@ -2973,12 +3137,13 @@ static void tu_reset_render_pass(struct tu_cmd_buffer *cmd_buffer)
 }
 
 static VkResult
-tu_create_cmd_buffer(struct vk_command_pool *pool,
+tu_create_cmd_buffer(struct vk_command_pool *_pool,
                      VkCommandBufferLevel level,
                      struct vk_command_buffer **cmd_buffer_out)
 {
+   struct tu_cmd_pool *pool = container_of(_pool, struct tu_cmd_pool, vk);
    struct tu_device *device =
-      container_of(pool->base.device, struct tu_device, vk);
+      container_of(pool->vk.base.device, struct tu_device, vk);
    struct tu_cmd_buffer *cmd_buffer;
 
    cmd_buffer = (struct tu_cmd_buffer *) vk_zalloc2(
@@ -2988,7 +3153,7 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    if (cmd_buffer == NULL)
       return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
-   VkResult result = vk_command_buffer_init(pool, &cmd_buffer->vk,
+   VkResult result = vk_command_buffer_init(&pool->vk, &cmd_buffer->vk,
                                             &tu_cmd_buffer_ops, level);
    if (result != VK_SUCCESS) {
       vk_free2(&device->vk.alloc, NULL, cmd_buffer);
@@ -2996,6 +3161,18 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    }
 
    cmd_buffer->device = device;
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS) &&
+       level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      unsigned slot_idx =
+         util_idalloc_alloc(&pool->cmd_buff_status.slot_alloc);
+      if (slot_idx >= pool->cmd_buff_status.max_slot_count) {
+         mesa_loge("Out of cmd buffer status slots");
+         slot_idx = 0;
+      } else {
+         cmd_buffer->status_slot_idx = slot_idx;
+      }
+   }
 
    u_trace_init(&cmd_buffer->trace, &device->trace_context);
    list_inithead(&cmd_buffer->renderpass_autotune_results);
@@ -3021,6 +3198,16 @@ tu_cmd_buffer_destroy(struct vk_command_buffer *vk_cmd_buffer)
 {
    struct tu_cmd_buffer *cmd_buffer =
       container_of(vk_cmd_buffer, struct tu_cmd_buffer, vk);
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS) &&
+       vk_cmd_buffer->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      struct tu_cmd_pool *pool =
+         container_of(vk_cmd_buffer->pool, struct tu_cmd_pool, vk);
+
+      tu_cmd_buff_status_slot_reset(cmd_buffer);
+      util_idalloc_free(&pool->cmd_buff_status.slot_alloc,
+                        cmd_buffer->status_slot_idx);
+   }
 
    tu_cs_finish(&cmd_buffer->cs);
    tu_cs_finish(&cmd_buffer->draw_cs);
@@ -3058,6 +3245,11 @@ tu_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
 {
    struct tu_cmd_buffer *cmd_buffer =
       container_of(vk_cmd_buffer, struct tu_cmd_buffer, vk);
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS) &&
+       vk_cmd_buffer->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      tu_cmd_buff_status_slot_reset(cmd_buffer);
+   }
 
    vk_command_buffer_reset(&cmd_buffer->vk);
 
@@ -3140,6 +3332,13 @@ tu_cmd_buffer_begin(struct tu_cmd_buffer *cmd_buffer,
    tu_cs_begin(&cmd_buffer->cs);
    tu_cs_begin(&cmd_buffer->draw_cs);
    tu_cs_begin(&cmd_buffer->draw_epilogue_cs);
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS) &&
+       cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      tu_cmd_buff_status_slot_reset(cmd_buffer);
+      tu_cmd_buff_status_slot_gpu_write(cmd_buffer,
+                                        TU_CMD_BUFFER_STATUS_START);
+   }
 
    return VK_SUCCESS;
 }
@@ -4078,6 +4277,12 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
       trace_end_secondary_cmd_buffer(
          &cmd_buffer->trace,
          cmd_buffer->state.pass ? &cmd_buffer->draw_cs : &cmd_buffer->cs);
+   }
+
+   if (TU_DEBUG(CHECK_CMD_BUFFER_STATUS) &&
+       cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      tu_cmd_buff_status_slot_reset(cmd_buffer);
+      tu_cmd_buff_status_slot_gpu_write(cmd_buffer, TU_CMD_BUFFER_STATUS_END);
    }
 
    tu_cs_end(&cmd_buffer->cs);

@@ -12,6 +12,8 @@
 
 #include "tu_common.h"
 
+#include "util/u_idalloc.h"
+
 #include "tu_cs.h"
 #include "tu_descriptor_set.h"
 #include "tu_device.h"
@@ -644,11 +646,27 @@ struct tu_cmd_buffer
    bool vsc_initialized;
 
    bool prev_fsr_is_null;
+
+   uint32_t status_slot_idx;
 };
 VK_DEFINE_HANDLE_CASTS(tu_cmd_buffer, vk.base, VkCommandBuffer,
                        VK_OBJECT_TYPE_COMMAND_BUFFER)
 
 extern const struct vk_command_buffer_ops tu_cmd_buffer_ops;
+
+struct tu_cmd_pool {
+   struct vk_command_pool vk;
+
+   struct {
+      struct tu_bo *bo;
+      struct util_idalloc slot_alloc;
+      uint32_t max_slot_count;
+   } cmd_buff_status;
+};
+VK_DEFINE_HANDLE_CASTS(tu_cmd_pool,
+                       vk.base,
+                       VkCommandPool,
+                       VK_OBJECT_TYPE_COMMAND_POOL)
 
 static inline uint32_t
 tu_attachment_gmem_offset(struct tu_cmd_buffer *cmd,
