@@ -4073,7 +4073,7 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
    }
 
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
-      trace_end_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs);
+      trace_end_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs, cmd_buffer);
    } else {
       trace_end_secondary_cmd_buffer(
          &cmd_buffer->trace,
@@ -5098,6 +5098,9 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
                }
             }
          }
+
+         cmd->state.total_renderpasses += secondary->state.total_renderpasses;
+         cmd->state.total_dispatches += secondary->state.total_dispatches;
       }
 
       cmd->state.index_size = secondary->state.index_size; /* for restart index update */
@@ -7656,6 +7659,8 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
    if (emit_instrlen_workaround) {
       tu_emit_event_write<CHIP>(cmd, cs, FD_LABEL);
    }
+
+   cmd->state.total_dispatches++;
 }
 
 template <chip CHIP>
@@ -7763,6 +7768,8 @@ tu_CmdEndRenderPass2(VkCommandBuffer commandBuffer,
    vk_free(&cmd_buffer->vk.pool->alloc, cmd_buffer->state.attachments);
 
    tu_reset_render_pass(cmd_buffer);
+
+   cmd_buffer->state.total_renderpasses++;
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -7834,6 +7841,10 @@ tu_CmdEndRendering2EXT(VkCommandBuffer commandBuffer,
       default:
          unreachable("suspending render pass not followed by resuming pass");
       }
+   }
+
+   if (!cmd_buffer->state.suspending) {
+      cmd_buffer->state.total_renderpasses++;
    }
 }
 
