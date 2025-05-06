@@ -5422,7 +5422,12 @@ tu_choose_gmem_layout(struct tu_cmd_buffer *cmd)
       }
    }
 
-   cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
+   cmd->state.gmem_layout_divisor =
+      tu_autotune_get_tile_size_divisor(&cmd->device->autotune, cmd);
+
+   cmd->state.tiling = tu_framebuffer_get_tiling_config(
+      cmd->state.framebuffer, cmd->state.gmem_layout,
+      cmd->state.gmem_layout_divisor);
 }
 
 struct apply_store_coords_state {
