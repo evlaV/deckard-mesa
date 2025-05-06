@@ -13,6 +13,10 @@
 
 #include "tu_suballoc.h"
 
+/* Compile-time toggle for debugging preemption latency with CP preemption
+ * performance counters. */
+#define TU_AUTOTUNE_DEBUG_PERFCTR 1
+
 struct tu_renderpass_history;
 
 enum tu_autotune_mode {
@@ -89,7 +93,24 @@ struct tu_autotune {
 
    uint32_t fence_counter;
    uint32_t idx_counter;
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   const fd_perfcntr_group *cp_group;
+   const fd_perfcntr_countable *preemption_reaction_delay, *num_preemptions,
+      *always_count;
+#endif
 };
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+struct PACKED tu_perf_ctr_sample {
+   uint64_t begin;
+   uint64_t end;
+   /* The selector value at the beginning/end, used to validate that the
+    * countable wasn't changed during a preemption. */
+   uint32_t selector_begin;
+   uint32_t selector_end;
+};
+#endif
 
 /**
  * From the cmdstream, the captured samples-passed values are recorded
@@ -106,10 +127,24 @@ struct PACKED tu_renderpass_samples {
    uint64_t __pad1;
    uint64_t ts_start;
    uint64_t ts_end;
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   struct tu_perf_ctr_sample preemption_reaction_delay, num_preemptions, always_count;
+   uint64_t cntrs_ready;
+   constexpr static uint64_t CNTRS_READY_MAGIC = 0xABCDEFEFE;
+#endif
 };
 
 /* Necessary when writing sample counts using CP_EVENT_WRITE7::ZPASS_DONE. */
 static_assert(offsetof(struct tu_renderpass_samples, samples_end) == 16);
+
+/* Per-tile values for GMEM rendering, this structure is appended to the
+ * tu_renderpass_samples structure for each tile when GMEM rendering is used.
+ */
+struct PACKED tu_tile_samples {
+   uint64_t ts_start;
+   uint64_t ts_end;
+};
 
 /**
  * Tracks the results from an individual renderpass. Initially created
@@ -131,13 +166,25 @@ struct tu_renderpass_result {
    struct list_head node;
    uint32_t fence;
    uint64_t samples_passed;
-   uint64_t duration;
+   uint64_t duration; /* in cycles */
    bool sysmem;
+   uint32_t tile_count;
+   /* The amount of cycles spent in the longest tile. This is used to calculate
+    * the average draw duration for determining the largest non-preemptible
+    * duration.
+    */
+   uint64_t tile_duration;
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   uint64_t preemption_reaction_delay;
+#endif
 };
 
 VkResult tu_autotune_init(struct tu_autotune *at, struct tu_device *dev);
 void tu_autotune_fini(struct tu_autotune *at, struct tu_device *dev);
 
+uint32_t tu_autotune_get_tile_size_divisor(struct tu_autotune *at,
+                                          struct tu_cmd_buffer *cmd_buffer);
 bool tu_autotune_use_bypass(struct tu_autotune *at,
                             struct tu_cmd_buffer *cmd_buffer,
                             struct tu_renderpass_result **autotune_result);
@@ -161,11 +208,23 @@ template <chip CHIP>
 void tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                                   struct tu_cs *cs,
                                   struct tu_renderpass_result *autotune_result,
-                                  bool sysmem);
+                                  bool sysmem, uint32_t tile_count);
 
 template <chip CHIP>
 void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
                                 struct tu_cs *cs,
                                 struct tu_renderpass_result *autotune_result);
+
+template <chip CHIP>
+void tu_autotune_begin_tile(struct tu_cmd_buffer *cmd,
+                            struct tu_cs *cs,
+                            struct tu_renderpass_result *autotune_result,
+                            uint32_t tile_idx);
+
+template <chip CHIP>
+void tu_autotune_end_tile(struct tu_cmd_buffer *cmd,
+                          struct tu_cs *cs,
+                          struct tu_renderpass_result *autotune_result,
+                          uint32_t tile_idx);
 
 #endif /* TU_AUTOTUNE_H */
