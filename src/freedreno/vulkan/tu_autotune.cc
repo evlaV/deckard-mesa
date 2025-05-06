@@ -55,10 +55,187 @@ tu_autotune_free_results_locked(struct tu_device *dev, struct list_head *results
 #define TU_AUTOTUNE_LOG_AT_FINISH 0
 
 /* How many last renderpass stats are taken into account. */
-#define MAX_HISTORY_RESULTS 5
+constexpr uint32_t MAX_HISTORY_RESULTS = 5;
 /* For how many submissions we store renderpass stats. */
-#define MAX_HISTORY_LIFETIME 128
+constexpr uint32_t MAX_HISTORY_LIFETIME = 128;
+/* How long we keep the duration entries. */
+constexpr uint32_t MAX_DURATION_COUNT = 500;
+constexpr uint64_t DEFAULT_SAMPLE_EXPIRY_TIME = 500'000'000; /* 500ms */
 
+/* GPU always-on timer constants */
+constexpr uint64_t ALWAYS_ON_FREQUENCY_HZ = 19'200'000;
+constexpr uint64_t GPU_TICKS_PER_US = ALWAYS_ON_FREQUENCY_HZ / 1'000'000;
+
+struct tu_duration_entry {
+   struct list_head node;
+   uint64_t duration;
+   uint32_t draw_count;
+   uint64_t expiry_timestamp; /* The timestamp when the sample will be deleted. */
+};
+
+struct tu_at_durations {
+   struct list_head list;
+   struct list_head *tail;
+   uint32_t entry_count;
+   uint64_t expiry_duration; /* The duration after which the entry is deleted. */
+};
+
+/**
+ * Note: If expiry_duration is set to 0, the entry will never be deleted.
+ */
+static void
+tu_at_durations_init(struct tu_at_durations *durations,
+                     uint64_t expiry_duration = 0)
+{
+   list_inithead(&durations->list);
+   durations->tail = &durations->list;
+   durations->expiry_duration = expiry_duration;
+   durations->entry_count = 0;
+}
+
+static void
+tu_at_durations_del(struct tu_at_durations *durations,
+                     struct tu_duration_entry *entry)
+{
+   if (durations->tail == &entry->node)
+      durations->tail = entry->node.prev;
+
+   list_del(&entry->node);
+   free(entry);
+   durations->entry_count--;
+}
+
+static void
+tu_at_durations_clear(struct tu_at_durations *durations)
+{
+   list_for_each_entry_safe(struct tu_duration_entry, entry, &durations->list,
+                            node)
+   {
+      tu_at_durations_del(durations, entry);
+   }
+   assert(durations->entry_count == 0);
+}
+
+static void
+tu_at_durations_add(struct tu_at_durations *durations,
+                      uint64_t duration,
+                      uint32_t draw_count)
+{
+   struct tu_duration_entry *entry =
+      (struct tu_duration_entry *) calloc(1, sizeof(*entry));
+   entry->duration = duration;
+   entry->draw_count = draw_count;
+   if (durations->expiry_duration) {
+      entry->expiry_timestamp =
+         os_time_get_nano() + durations->expiry_duration;
+   }
+
+   if (++durations->entry_count >= MAX_DURATION_COUNT) {
+      /* Once above the limit, start popping old results off the
+       * tail of the list.
+       */
+      assert(durations->tail != &durations->list);
+      struct tu_duration_entry *tail_entry =
+         list_entry(durations->tail, struct tu_duration_entry, node);
+      tu_at_durations_del(durations, tail_entry);
+   }
+
+   list_add(&entry->node, &durations->list);
+   if (durations->tail == &durations->list)
+      durations->tail = &entry->node;
+}
+
+/**
+ * Calculates the average duration of the entries in the list.
+ * It can optionally divide the duration by the draw count.
+ *
+ * It can also apply a recency bias to the average, where more recent
+ * entries are given more weight in the average calculation. This is
+ * based on the recency_bias_base parameter, which is the base of
+ * the exponential function used to calculate the weight.
+ *
+ * A value of 1.0 means no recency bias, while any value < 1.0 will apply a
+ * bias towards more recent entries, while any value > 1.0 will apply a bias
+ * towards older entries. Any value <= 0.0 will lead to UB.
+ *
+ * Note: This function clears old entries while calculating the average, so
+ *       the list will be modified after this function is called.
+ */
+static void
+tu_at_durations_get_avg(struct tu_at_durations *durations,
+                        uint64_t *avg_duration,
+                        uint32_t *entry_count,
+                        bool divide_by_draw_count = false,
+                        double recency_bias_base = 1.0)
+{
+   uint64_t total_duration = 0;
+   uint32_t count = 0;
+   double total_weighted = 0.0;
+   double total_weight = 0.0;
+   double weight = 1.0;
+   uint64_t now = os_time_get_nano();
+
+   /* Clear old entries while calculating the average, since we don't depend
+    * on stable indices for the entries, we can safely mutate the list while
+    * iterating over it.
+    */
+   list_for_each_entry_safe(struct tu_duration_entry, entry, &durations->list,
+                            node)
+   {
+      if (entry->expiry_timestamp && entry->expiry_timestamp < now) {
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi(
+               "autotune: removing old draw duration entry %lu ticks - %u draws, %lu < %lu",
+               entry->duration, entry->draw_count, entry->expiry_timestamp,
+               now);
+         }
+
+         tu_at_durations_del(durations, entry);
+         continue;
+      }
+
+      uint64_t effective_duration = entry->duration;
+      if (divide_by_draw_count) {
+         if (entry->draw_count > 0)
+            effective_duration /= entry->draw_count;
+         else
+            effective_duration = 0;
+      }
+
+      if (recency_bias_base == 1.0) {
+         /* Apply recency exponential bias with the supplied base to the
+          * duration. We implicitly depend on the order of iteration going
+          * from latest to oldest. */
+         total_weighted += (double) effective_duration * weight;
+         total_weight += weight;
+
+         weight *= recency_bias_base;
+         if (weight < 0.01) {
+            /* Quit early when the weight becomes negligible. */
+            break;
+         }
+      } else {
+         /* No recency bias, just use the effective duration. */
+         total_duration += effective_duration;
+      }
+
+      count++;
+   }
+
+   if (count > 0) {
+      if (recency_bias_base == 1.0 && total_weight > 0.0) {
+         /* Calculate the average using the weighted sum. */
+         *avg_duration = total_weighted / total_weight;
+      } else {
+         /* Calculate the average using the total duration. */
+         *avg_duration = total_duration / count;
+      }
+      *entry_count = count;
+   } else {
+      *avg_duration = 0;
+      *entry_count = 0;
+   }
+}
 
 /**
  * Tracks results for a given renderpass key
@@ -77,15 +254,26 @@ struct tu_renderpass_history {
 
    uint32_t avg_samples;
 
-   uint64_t total_gmem_duration;
-   uint32_t gmem_count;
-   uint64_t total_sysmem_duration;
-   uint64_t total_sysmem_draws;
-   uint32_t sysmem_count;
+   struct tu_at_durations gmem_tile_durations;
+   struct tu_at_durations gmem_durations;
+   struct tu_at_durations sysmem_durations;
    uint32_t sysmem_probability; /* Range [0 (GMEM), 100 (SYSMEM)], where 50
                                    means no preference. */
    bool latency_risk; /* If the renderpass has long draws which are at risk of
                          causing high preemptible latency. */
+   uint32_t tile_size_divisor; /* The factor by which the tile size was
+                                 divided to reduce preemption latency. */
+   uint64_t latency_update_ts; /* The next timestamp to update the latency
+                                  sensitivity parameters at. */
+   uint64_t divisor_decrement_ts; /* The timestamp where it's allowed to next
+                                     decrement the divisor. */
+   uint64_t latency_switch_ts; /* The timestamp where it's allowed to mark
+                                  the RP as no longer latency sensitive. */
+   
+#ifdef TU_AUTOTUNE_DEBUG_PERFCTR
+   uint64_t preemption_latency; /* The highest preemption reaction delay
+                                   recorded for the RP since the last update. */
+#endif
 };
 
 /* Holds per-submission cs which writes the fence. */
@@ -209,6 +397,9 @@ free_result(struct tu_device *dev, struct tu_renderpass_result *result)
 static void
 free_history(struct tu_device *dev, struct tu_renderpass_history *history)
 {
+   tu_at_durations_clear(&history->gmem_tile_durations);
+   tu_at_durations_clear(&history->gmem_durations);
+   tu_at_durations_clear(&history->sysmem_durations);
    tu_autotune_free_results_locked(dev, &history->results);
    free(history);
 }
@@ -252,8 +443,14 @@ create_history_result(struct tu_autotune *at,
       (struct tu_renderpass_result *) calloc(1, sizeof(*result));
    result->rp_key = rp_key;
    result->draw_count = draw_count;
+   result->tile_duration = 0;
 
    return result;
+}
+
+static uint64_t
+ticks_to_us(uint64_t ticks) {
+   return ticks / GPU_TICKS_PER_US;
 }
 
 static void
@@ -291,30 +488,41 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
       /** These stores don't need to be atomic since they are only
        *  accessed from this function which should be single-threaded.
        */
-      history->total_sysmem_duration += result->duration;
-      history->total_sysmem_draws += result->draw_count;
-      history->sysmem_count++;
+      tu_at_durations_add(&history->sysmem_durations,
+                               result->duration, result->draw_count);
    } else {
-      history->total_gmem_duration += result->duration;
-      history->gmem_count++;
+      if (result->tile_count > 0) {
+         tu_at_durations_add(&history->gmem_tile_durations,
+                               result->tile_duration, result->draw_count);
+      } else {
+         mesa_loge("autotune %016" PRIx64 ": zero tile duration", history->key);
+      }
+      tu_at_durations_add(&history->gmem_durations,
+                               result->duration, result->draw_count);
    }
 
    uint32_t sysmem_probability = history->sysmem_probability;
    const uint32_t min_count = 5;
+   const double recency_bias_default = 0.99;
+
+   uint32_t gmem_count, sysmem_count;
+   uint64_t avg_gmem, avg_sysmem;
+   tu_at_durations_get_avg(&history->gmem_durations, &avg_gmem, &gmem_count,
+                           false, recency_bias_default);
+   tu_at_durations_get_avg(&history->sysmem_durations, &avg_sysmem,
+                           &sysmem_count, false, recency_bias_default);
+
    if (TU_DEBUG(AT_PROF_IMM)) {
       /* Try to immediately resolve the probability, this is useful for CI
        * running a single trace of frames where the probablities aren't
-       * expected to change from run to run. */
-      if (history->sysmem_count < 1) {
+       * expected to change from run to run.
+       */
+
+      if (sysmem_count < 1) {
          sysmem_probability = 100;
-      } else if (history->gmem_count < 1) {
+      } else if (gmem_count < 1) {
          sysmem_probability = 0;
       } else {
-         uint64_t avg_gmem =
-            history->total_gmem_duration / history->gmem_count;
-         uint64_t avg_sysmem =
-            history->total_sysmem_duration / history->sysmem_count;
-
          sysmem_probability = avg_gmem < avg_sysmem ? 0 : 100;
 
          if (TU_AUTOTUNE_DEBUG_LOG) {
@@ -324,16 +532,10 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
          }
       }
    } else {
-      if (history->sysmem_count < min_count || history->gmem_count < min_count) {
+      if (sysmem_count < min_count || gmem_count < min_count) {
          /* Not enough data to make a decision, bias towards least used. */
-         sysmem_probability = history->sysmem_count < history->gmem_count ? 75 : 25;
+         sysmem_probability = sysmem_count < gmem_count ? 75 : 25;
       } else {
-         /* Compute average durations */
-         uint64_t avg_gmem =
-            history->total_gmem_duration / history->gmem_count;
-         uint64_t avg_sysmem =
-            history->total_sysmem_duration / history->sysmem_count;
-
          /* Adjust probability based on timing results */
          const uint32_t delta = 5;
          if (avg_gmem < avg_sysmem && history->sysmem_probability > 5) {
@@ -354,24 +556,194 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
    p_atomic_set(&history->sysmem_probability, sysmem_probability);
 
-   if (TU_DEBUG(AT_LAT_SEN) && history->sysmem_count > min_count) {
-      /* Try to estimate the minimum non-preemptible duration for draw-level
-       * preemption, by dividing the total time by the RP by the amount of
-       * draws. This isn't very accurate as it's skewed by the time taken by
-       * commands other than draws (e.g. clears or blits), but it's a good
-       * enough estimate to catch the worst offenders. If the average draw
-       * duration is above a certain threshold, we mark the RP as latency
-       * sensitive which should bias the decision towards GMEM.
-       */
+   if (TU_DEBUG(AT_LAT_SEN)) {
+      const uint64_t target_threshold = GPU_TICKS_PER_US * 500; /* 500us */
+      
+      const uint64_t default_update_duration_ns = 100'000'000; /* 100ms */
+      const uint64_t change_update_duration_ns = 500'000'000; /* 500ms */
+      const uint64_t downward_update_duration_ns = 10'000'000'000; /* 10s */
+      const uint64_t latency_insensitive_duration_ns = 30'000'000'000; /* 30s */
 
-      uint64_t avg_sysmem_draw =
-         history->total_sysmem_duration / history->total_sysmem_draws;
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      history->preemption_latency =
+         MAX2(history->preemption_latency, result->preemption_reaction_delay);
+#endif
 
-      const uint64_t always_on_frequency = 19200000;
-      const uint64_t draw_duration_threshold =
-         1000000 * always_on_frequency; /* 10ms */
+      if (TU_AUTOTUNE_DEBUG_LOG) {
+         mesa_logi(
+            "autotune %016" PRIx64
+            ": latrisk: %u, sysmem: %u, sysmem_count: %u, gmem_count: %u"
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+            ", preemption_latency: %lu us"
+#endif
+            ,
+            history->key, history->latency_risk, result->sysmem, 
+            sysmem_count, gmem_count
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+            , ticks_to_us(history->preemption_latency)
+#endif
+         );
+      }
 
-      p_atomic_set(&history->latency_risk, avg_sysmem_draw > draw_duration_threshold);
+      uint64_t now = os_time_get_nano();
+      if (result->sysmem && !history->latency_risk) {
+         /* Try to estimate the minimum non-preemptible duration for
+          * draw-level preemption, by dividing the total time by the RP by the
+          * amount of draws. This isn't very accurate as it's skewed by the
+          * time taken by commands other than draws (e.g. clears or blits),
+          * but it's a good enough estimate to catch the worst offenders.
+          *
+          * If the average draw duration is above a certain threshold, we mark
+          * the RP as latency sensitive which should bias the decision towards
+          * GMEM.
+          */
+
+         uint64_t avg_sysmem_draw;
+         uint32_t sysmem_draw_count;
+         tu_at_durations_get_avg(&history->sysmem_durations, &avg_sysmem_draw,
+                                 &sysmem_draw_count, true,
+                                 recency_bias_default);
+
+         if (TU_AUTOTUNE_DEBUG_LOG) {
+            mesa_logi(
+               "autotune %016" PRIx64
+               ": avg_sysmem_draw: %lu us (%u), latency_risk: %u"
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+               ", preemption_latency: %lu us"
+#endif
+               ,
+               history->key, ticks_to_us(avg_sysmem_draw),
+               avg_sysmem_draw > target_threshold,
+               p_atomic_read(&history->latency_risk),
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+               ticks_to_us(history->preemption_latency)
+#endif
+            );
+
+            history->preemption_latency = 0;
+         }
+
+         if (sysmem_draw_count >= min_count &&
+             avg_sysmem_draw > target_threshold) {
+            p_atomic_set(&history->latency_risk, true);
+            if (TU_AUTOTUNE_DEBUG_LOG) {
+               mesa_logi("autotune %016" PRIx64
+                         ": high sysmem draw duration %lu us, marking as latency sensitive",
+                         ticks_to_us(avg_sysmem_draw), history->key);
+            }
+         }
+      } else if (!result->sysmem && history->latency_update_ts <= now) {
+         /* If the RP is latency sensitive and we're using GMEM, we should
+          * check if it's worth reducing the tile size to reduce the latency
+          * risk further or if it's already low enough that it's not worth the
+          * performance hit.
+          */
+
+         uint64_t avg_gmem_tile; /* Average duration of the longest tile in
+                                    the RP. */
+         uint32_t entry_count;
+         tu_at_durations_get_avg(&history->gmem_tile_durations,
+                                 &avg_gmem_tile, &entry_count, false);
+
+         uint64_t update_duration_ns = default_update_duration_ns;
+         if (entry_count > 1) {
+            if (!p_atomic_read(&history->latency_risk)) {
+               if (avg_gmem_tile > target_threshold) {
+                  p_atomic_set(&history->latency_risk, true);
+                  history->latency_switch_ts =
+                     now + latency_insensitive_duration_ns;
+                  if (TU_AUTOTUNE_DEBUG_LOG) {
+                     mesa_logi(
+                        "autotune %016" PRIx64
+                        ": high gmem tile duration %lu, marking as latency sensitive",
+                        avg_gmem_tile, history->key);
+                  }
+               }
+            } else {
+               uint32_t tile_size_divisor =
+                  p_atomic_read(&history->tile_size_divisor);
+               if (TU_AUTOTUNE_DEBUG_LOG) {
+                  mesa_logi(
+                     "autotune %016" PRIx64
+                     ": avg_gmem_tile: %lu us (%u), latency_risk: %u, tile_size_divisor: %u"
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                     ", preemption_latency: %lu us"
+#endif
+                     ,
+                     history->key, ticks_to_us(avg_gmem_tile),
+                     avg_gmem_tile > target_threshold,
+                     p_atomic_read(&history->latency_risk), tile_size_divisor,
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                     ticks_to_us(history->preemption_latency)
+#endif
+                  );
+
+                  history->preemption_latency = 0;
+               }
+
+               int delta = 0;
+               if (avg_gmem_tile > target_threshold &&
+                   tile_size_divisor < TU_GMEM_LAYOUT_DIVISOR_MAX) {
+                  /* If the average tile duration is high, we should reduce
+                   * the tile size to reduce the latency risk.
+                   */
+                  delta = 1;
+
+                  history->divisor_decrement_ts =
+                     now + downward_update_duration_ns;
+               } else if (avg_gmem_tile * 4 < target_threshold &&
+                          tile_size_divisor > 1 &&
+                          history->divisor_decrement_ts <= now) {
+                  /* If the average tile duration is low enough that we can
+                   * get away with a larger tile size, we should increase the
+                   * tile size to reduce the performance hit of the smaller
+                   * tiles.
+                   *
+                   * Note: The 4x factor is to account for the tile duration
+                   * being halved when we increase the tile size divisor by 1,
+                   * with an additional 2x factor to generally be conservative
+                   * about reducing the divisor since it can lead to
+                   * oscillation between tile sizes.
+                   *
+                   * Similarly, the divisor_decrement_ts is used to limit how
+                   * often we can reduce the divisor to avoid oscillation.
+                   */
+                  delta = -1;
+                  history->latency_switch_ts =
+                     now + latency_insensitive_duration_ns;
+               } else if (avg_gmem_tile * 10 < target_threshold &&
+                          tile_size_divisor == 1 &&
+                          history->latency_switch_ts <= now) {
+                  /* If the average tile duration is low enough that we no
+                   * longer consider the RP latency sensitive, we can switch
+                   * it back to non-latency sensitive.
+                   */
+                  p_atomic_set(&history->latency_risk, false);
+               }
+
+               if (delta != 0) {
+                  /* Clear all the results to avoid biasing the decision based
+                   * on the old tile size.
+                   */
+                  tu_at_durations_clear(&history->gmem_tile_durations);
+
+                  if (TU_AUTOTUNE_DEBUG_LOG) {
+                     mesa_logi("autotune %016" PRIx64
+                               ": updating tile size divisor: %u -> %u",
+                               history->key, tile_size_divisor,
+                               tile_size_divisor + delta);
+                  }
+
+                  p_atomic_set(&history->tile_size_divisor,
+                               tile_size_divisor + delta);
+
+                  update_duration_ns = change_update_duration_ns;
+               }
+            }
+
+            history->latency_update_ts = now + update_duration_ns;
+         }
+      }
    }
 }
 
@@ -389,6 +761,58 @@ process_results(struct tu_autotune *at, uint32_t current_fence)
       result->samples_passed =
          result->samples->samples_end - result->samples->samples_start;
       result->duration = result->samples->ts_end - result->samples->ts_start;
+      struct tu_tile_samples *tiles =
+         (struct tu_tile_samples *) (result->samples + 1);
+      for (uint32_t i = 0; i < result->tile_count; i++) {
+         struct tu_tile_samples *tile = &tiles[i];
+         result->tile_duration =
+            MAX2(result->tile_duration, tile->ts_end - tile->ts_start);
+      }
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      /* Just spin until the counter values are written out. */
+      while (p_atomic_read(&result->samples->cntrs_ready) !=
+             tu_renderpass_samples::CNTRS_READY_MAGIC) {
+      }
+
+      auto read_counter = [&](const struct tu_perf_ctr_sample &sample,
+                              const struct fd_perfcntr_countable *ctbl,
+                              uint64_t &outValue, const char *name) {
+         if (sample.selector_begin != sample.selector_end ||
+             sample.selector_begin != ctbl->selector) {
+            mesa_loge("autotune %016" PRIx64
+                      ": %s: selector mismatch %u != %u (%u - %u)",
+                      result->rp_key, ctbl->name, sample.selector_begin,
+                      sample.selector_end, sample.selector_begin,
+                      ctbl->selector);
+         }
+
+         outValue = sample.end - sample.begin;
+         if (sample.end < sample.begin) {
+            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %lu < %lu",
+                      result->rp_key, name, sample.end, sample.begin);
+            outValue = 0;
+         }
+      };
+
+      uint64_t num_preemptions, always_count;
+      read_counter(result->samples->preemption_reaction_delay,
+                   at->preemption_reaction_delay,
+                   result->preemption_reaction_delay,
+                   "preemption_reaction_delay");
+      read_counter(result->samples->num_preemptions, at->num_preemptions,
+                   num_preemptions, "num_preemptions");
+      read_counter(result->samples->always_count, at->always_count,
+                   always_count, "always_count");
+
+      if (result->preemption_reaction_delay || num_preemptions) {
+         mesa_logi(
+            "autotune %016" PRIx64
+            ": preemption_reaction_delay: %lu us, always_count: %lu us, num_preemptions: %lu",
+            result->rp_key, ticks_to_us(result->preemption_reaction_delay),
+            ticks_to_us(always_count), num_preemptions);
+      }
+#endif
 
       history_add_result(dev, history, result);
    }
@@ -454,6 +878,10 @@ tu_autotune_on_submit(struct tu_device *dev,
                (struct tu_renderpass_history *) calloc(1, sizeof(*history));
             history->key = result->rp_key;
             list_inithead(&history->results);
+            tu_at_durations_init(&history->gmem_tile_durations, DEFAULT_SAMPLE_EXPIRY_TIME);
+            tu_at_durations_init(&history->gmem_durations);
+            tu_at_durations_init(&history->sysmem_durations);
+            history->tile_size_divisor = 1;
 
             u_rwlock_wrlock(&at->ht_lock);
             _mesa_hash_table_insert(at->ht, &history->key, history);
@@ -542,6 +970,54 @@ tu_autotune_init(struct tu_autotune *at, struct tu_device *dev)
 
    /* start from 1 because tu6_global::autotune_fence is initialized to 0 */
    at->fence_counter = 1;
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   uint32_t group_count;
+   const struct fd_perfcntr_group *groups =
+      fd_perfcntrs(&dev->physical_device->dev_id, &group_count);
+
+   const struct fd_perfcntr_group *cp_group = NULL;
+   for (uint32_t i = 0; i < group_count; i++) {
+      if (strcmp(groups[i].name, "CP") == 0) {
+         cp_group = &groups[i];
+         break;
+      }
+   }
+
+   at->cp_group = cp_group;
+
+   if (!cp_group) {
+      mesa_loge("autotune: CP group not found");
+      return VK_ERROR_INITIALIZATION_FAILED;
+   } else if (cp_group->num_countables < 5) {
+      mesa_loge("autotune: CP group has too few countables");
+      return VK_ERROR_INITIALIZATION_FAILED;
+   }
+
+   auto get_perfcntr_countable = [](const struct fd_perfcntr_group *group,
+                                    const char *name) {
+      for (uint32_t i = 0; i < group->num_countables; i++) {
+         if (strcmp(group->countables[i].name, name) == 0)
+            return &group->countables[i];
+      }
+
+      mesa_loge("autotune: %s not found in group %s", name, group->name);
+      return (const struct fd_perfcntr_countable *) NULL;
+   };
+
+   at->preemption_reaction_delay =
+      get_perfcntr_countable(cp_group, "PERF_CP_PREEMPTION_REACTION_DELAY");
+   at->num_preemptions =
+      get_perfcntr_countable(cp_group, "PERF_CP_NUM_PREEMPTIONS");
+   at->always_count =
+      get_perfcntr_countable(cp_group, "PERF_CP_ALWAYS_COUNT");
+
+   if (!at->preemption_reaction_delay || !at->num_preemptions ||
+       !at->always_count) {
+      mesa_loge("autotune: preemption countables not found");
+      return VK_ERROR_INITIALIZATION_FAILED;
+   }
+#endif
 
    return VK_SUCCESS;
 }
@@ -807,21 +1283,54 @@ tu_autotune_use_bypass(struct tu_autotune *at,
    return fallback_use_bypass(pass, framebuffer, cmd_buffer);
 }
 
+uint32_t
+tu_autotune_get_tile_size_divisor(struct tu_autotune *at,
+                                 struct tu_cmd_buffer *cmd_buffer)
+{
+   const struct tu_render_pass *pass = cmd_buffer->state.pass;
+   const struct tu_framebuffer *framebuffer = cmd_buffer->state.framebuffer;
+
+   if (!at->enabled || !TU_DEBUG(AT_LAT_SEN) || pass->has_fdm)
+      return 1;
+
+   uint64_t renderpass_key = hash_renderpass_instance(pass, framebuffer, cmd_buffer);
+
+   uint32_t tile_size_divisor = 1;
+   u_rwlock_rdlock(&at->ht_lock);
+   struct hash_entry *entry = _mesa_hash_table_search(at->ht, &renderpass_key);
+   if (entry) {
+      struct tu_renderpass_history *history =
+         (struct tu_renderpass_history *) entry->data;
+      tile_size_divisor = p_atomic_read(&history->tile_size_divisor);
+   }
+   u_rwlock_rdunlock(&at->ht_lock);
+
+   if (TU_AUTOTUNE_DEBUG_LOG) {
+      mesa_logi("autotune %016" PRIx64 ": tile_size_divisor=%u",
+                renderpass_key, tile_size_divisor);
+   }
+
+   return tile_size_divisor;
+}
+
 template <chip CHIP>
 void
 tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                              struct tu_cs *cs,
                              struct tu_renderpass_result *autotune_result,
-                             bool sysmem)
+                             bool sysmem, uint32_t tile_count)
 {
    if (!autotune_result)
       return;
 
    autotune_result->sysmem = sysmem;
+   autotune_result->tile_count = tile_count;
 
    struct tu_device *dev = cmd->device;
 
-   static const uint32_t size = sizeof(struct tu_renderpass_samples);
+   uint32_t size = sizeof(struct tu_renderpass_samples);
+   if (!sysmem)
+      size += sizeof(struct tu_tile_samples) * tile_count;
 
    mtx_lock(&dev->autotune_mutex);
    VkResult ret = tu_suballoc_bo_alloc(&autotune_result->bo, &dev->autotune_suballoc, size, 32);
@@ -836,6 +1345,7 @@ tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
    autotune_result->samples =
       (struct tu_renderpass_samples *) tu_suballoc_bo_map(
          &autotune_result->bo);
+   memset(autotune_result->samples, 0, size);
 
    tu_cs_emit_regs(cs, A6XX_RB_SAMPLE_COUNTER_CNTL(.copy = true));
    if (cmd->device->physical_device->info->a7xx.has_event_write_sample_count) {
@@ -870,6 +1380,46 @@ tu_autotune_begin_renderpass(struct tu_cmd_buffer *cmd,
                   CP_REG_TO_MEM_0_CNT(2) |
                   CP_REG_TO_MEM_0_64B);
    tu_cs_emit_qw(cs, result_iova + offsetof(struct tu_renderpass_samples, ts_start));
+   
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   struct tu_autotune *at = &dev->autotune;
+
+   auto countable_begin = [&](const struct fd_perfcntr_countable *ctbl,
+                              uint32_t cntr_idx, uint32_t offset) {
+      const struct fd_perfcntr_counter *ctr =
+         &at->cp_group->counters[cntr_idx];
+      uint64_t offset_iova = result_iova + offset;
+      assert(!ctr->enable); /* CP counters shouldn't use it. */
+
+      tu_cs_emit_pkt4(cs, ctr->select_reg, 1);
+      tu_cs_emit(cs, ctbl->selector);
+
+      tu_cs_emit_wfi(cs);
+
+      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+      tu_cs_emit(
+         cs, CP_REG_TO_MEM_0_REG(ctr->select_reg) | CP_REG_TO_MEM_0_CNT(1));
+      tu_cs_emit_qw(cs, offset_iova + offsetof(struct tu_perf_ctr_sample,
+                                               selector_begin));
+
+      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+      tu_cs_emit(
+         cs, CP_REG_TO_MEM_0_REG(ctr->counter_reg_lo) | CP_REG_TO_MEM_0_64B);
+      tu_cs_emit_qw(cs,
+                    offset_iova + offsetof(struct tu_perf_ctr_sample, begin));
+   };
+
+   countable_begin(
+      at->preemption_reaction_delay, 10,
+      offsetof(struct tu_renderpass_samples, preemption_reaction_delay));
+   countable_begin(at->num_preemptions, 11,
+                   offsetof(struct tu_renderpass_samples, num_preemptions));
+   countable_begin(at->always_count, 12,
+                   offsetof(struct tu_renderpass_samples, always_count));
+
+   tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+   tu_cs_emit_wfi(cs);
+#endif
 }
 TU_GENX(tu_autotune_begin_renderpass);
 
@@ -909,10 +1459,12 @@ void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
                                        .write_accum_sample_count_diff = true).value);
       tu_cs_emit_qw(cs, result_iova);
    } else {
-      result_iova += offsetof(struct tu_renderpass_samples, samples_end);
-
-      tu_cs_emit_regs(cs,
-                        A6XX_RB_SAMPLE_COUNTER_BASE(.qword = result_iova));
+      tu_cs_emit_regs(
+         cs,
+         A6XX_RB_SAMPLE_COUNTER_BASE(.qword =
+                                       result_iova +
+                                       offsetof(struct tu_renderpass_samples,
+                                                samples_end)));
       tu_cs_emit_pkt7(cs, CP_EVENT_WRITE, 1);
       tu_cs_emit(cs, ZPASS_DONE);
    }
@@ -922,5 +1474,87 @@ void tu_autotune_end_renderpass(struct tu_cmd_buffer *cmd,
                   CP_REG_TO_MEM_0_CNT(2) |
                   CP_REG_TO_MEM_0_64B);
    tu_cs_emit_qw(cs, result_iova + offsetof(struct tu_renderpass_samples, ts_end));
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   tu_cs_emit_wfi(cs);
+
+   auto countable_end = [&, at = &cmd->device->autotune](
+                                 uint32_t cntr_idx, uint64_t offset) {
+      const struct fd_perfcntr_counter *ctr =
+         &at->cp_group->counters[cntr_idx];
+      uint64_t offset_iova = result_iova + offset;
+
+      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+      tu_cs_emit(
+         cs, CP_REG_TO_MEM_0_REG(ctr->select_reg) | CP_REG_TO_MEM_0_CNT(1));
+      tu_cs_emit_qw(
+         cs, offset_iova + offsetof(struct tu_perf_ctr_sample, selector_end));
+
+      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+      tu_cs_emit(
+         cs, CP_REG_TO_MEM_0_REG(ctr->counter_reg_lo) | CP_REG_TO_MEM_0_64B);
+      tu_cs_emit_qw(cs,
+                    offset_iova + offsetof(struct tu_perf_ctr_sample, end));
+   };
+
+   countable_end(
+      10, offsetof(struct tu_renderpass_samples, preemption_reaction_delay));
+   countable_end(11, offsetof(struct tu_renderpass_samples, num_preemptions));
+   countable_end(12, offsetof(struct tu_renderpass_samples, always_count));
+
+   tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+   tu_cs_emit_wfi(cs);
+
+   tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
+   tu_cs_emit_qw(
+      cs, result_iova + offsetof(struct tu_renderpass_samples, cntrs_ready));
+   tu_cs_emit_qw(cs, tu_renderpass_samples::CNTRS_READY_MAGIC);
+#endif
 }
 TU_GENX(tu_autotune_end_renderpass);
+
+template <chip CHIP>
+void
+tu_autotune_begin_tile(struct tu_cmd_buffer *cmd,
+                       struct tu_cs *cs,
+                       struct tu_renderpass_result *autotune_result,
+                       uint32_t tile_idx)
+{
+   if (!autotune_result || autotune_result->tile_count < tile_idx)
+      return;
+
+   assert(!autotune_result->sysmem);
+
+   uint32_t offset = sizeof(struct tu_renderpass_samples) +
+                     (sizeof(struct tu_tile_samples) * tile_idx);
+   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(REG_A6XX_CP_ALWAYS_ON_COUNTER) |
+                  CP_REG_TO_MEM_0_CNT(2) |
+                  CP_REG_TO_MEM_0_64B);
+   tu_cs_emit_qw(cs, autotune_result->bo.iova + offset +
+                        offsetof(struct tu_tile_samples, ts_start));
+}
+TU_GENX(tu_autotune_begin_tile);
+
+template <chip CHIP>
+void
+tu_autotune_end_tile(struct tu_cmd_buffer *cmd,
+                       struct tu_cs *cs,
+                       struct tu_renderpass_result *autotune_result,
+                       uint32_t tile_idx)
+{
+   if (!autotune_result || autotune_result->tile_count < tile_idx)
+      return;
+
+   assert(!autotune_result->sysmem);
+
+   uint32_t offset = sizeof(struct tu_renderpass_samples) +
+                     (sizeof(struct tu_tile_samples) * tile_idx);
+   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(REG_A6XX_CP_ALWAYS_ON_COUNTER) |
+                  CP_REG_TO_MEM_0_CNT(2) |
+                  CP_REG_TO_MEM_0_64B);
+   tu_cs_emit_qw(cs, autotune_result->bo.iova + offset +
+                        offsetof(struct tu_tile_samples, ts_end));
+}
+TU_GENX(tu_autotune_end_tile);
