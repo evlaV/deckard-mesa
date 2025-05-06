@@ -530,7 +530,7 @@ struct tu_framebuffer
    uint32_t height;
    uint32_t layers;
 
-   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT];
+   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;
    struct tu_attachment_info attachments[0];

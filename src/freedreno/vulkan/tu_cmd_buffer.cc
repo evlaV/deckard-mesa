@@ -2510,7 +2510,7 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    tu_cs_emit_pkt7(cs, CP_SET_MODE, 1);
    tu_cs_emit(cs, 0x0);
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, true);
+   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, true, 0);
 
    tu_cs_sanity_check(cs);
 }
@@ -2635,7 +2635,9 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_qw(cs, global_iova(cmd, vsc_state));
    }
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, false);
+   uint32_t tile_count = vsc->tile_count.width * vsc->tile_count.height;
+   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result, false,
+                                      tile_count);
 
    tu_cs_sanity_check(cs);
 }
@@ -2644,12 +2646,17 @@ template <chip CHIP>
 static void
 tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                 const struct tu_tile_config *tile,
-                const VkOffset2D *fdm_offsets)
+                const VkOffset2D *fdm_offsets,
+                struct tu_renderpass_result *autotune_result,
+                const struct tu_vsc_config *vsc)
 {
+   uint32_t tile_idx = (tile->pos.y * vsc->tile_count.width) + tile->pos.x;
    tu6_emit_tile_select<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
    tu_lrz_before_tile<CHIP>(cmd, &cmd->cs);
 
    trace_start_draw_ib_gmem(&cmd->trace, &cmd->cs, cmd);
+
+   tu_autotune_begin_tile<CHIP>(cmd, cs, autotune_result, tile_idx);
 
    /* Primitives that passed all tests are still counted in in each
     * tile even with HW binning beforehand. Do not permit it.
@@ -2692,6 +2699,8 @@ tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    tu_cs_emit_pkt7(cs, CP_SET_MARKER, 1);
    tu_cs_emit(cs, A6XX_CP_SET_MARKER_0_MODE(RM6_BIN_RENDER_END));
+   
+   tu_autotune_end_tile<CHIP>(cmd, cs, autotune_result, tile_idx);
 
    tu_cs_sanity_check(cs);
 
@@ -3042,7 +3051,9 @@ void
 tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
                    uint32_t tx1, uint32_t ty1, uint32_t tx2, uint32_t ty2,
                    const struct tu_image_view *fdm,
-                   const VkOffset2D *fdm_offsets)
+                   const VkOffset2D *fdm_offsets,
+                   struct tu_renderpass_result *autotune_result,
+                   const struct tu_vsc_config *vsc)
 {
    uint32_t width = tx2 - tx1;
    uint32_t height = ty2 - ty1;
@@ -3115,7 +3126,8 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
          if (tile->visible_views == 0)
             continue;
 
-         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
+         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets,
+                               autotune_result, vsc);
       }
    }
 }
@@ -3181,7 +3193,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
          if (merge_tiles) {
             tu_render_pipe_fdm<CHIP>(cmd, pipe, tx1, ty1, tx2, ty2, fdm,
-                                     fdm_offsets);
+                                     fdm_offsets, autotune_result, vsc);
             continue;
          }
 
@@ -3208,7 +3220,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                else
                   tu_identity_frag_area(cmd, &tile);
 
-               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets);
+               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets,
+                                     autotune_result, vsc);
             }
             slot_row += tile_row_stride;
          }
@@ -3304,6 +3317,7 @@ static void tu_reset_render_pass(struct tu_cmd_buffer *cmd_buffer)
    cmd_buffer->state.attachments = NULL;
    cmd_buffer->state.clear_values = NULL;
    cmd_buffer->state.gmem_layout = TU_GMEM_LAYOUT_COUNT; /* invalid value to prevent looking up gmem offsets */
+   cmd_buffer->state.gmem_layout_divisor = 0;
    memset(&cmd_buffer->state.rp, 0, sizeof(cmd_buffer->state.rp));
 
    /* LRZ is not valid next time we use it */
@@ -5254,7 +5268,10 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
           sizeof(cmd->state.render_areas));
    cmd->state.per_layer_render_area = suspended->state.per_layer_render_area;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
-   cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
+   cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
+   cmd->state.tiling = tu_framebuffer_get_tiling_config(
+      cmd->state.framebuffer, cmd->state.gmem_layout,
+      cmd->state.gmem_layout_divisor);
    cmd->state.lrz = suspended->state.suspended_pass.lrz;
 }
 
