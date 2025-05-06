@@ -138,6 +138,11 @@ __tu_finishme(const char *file, int line, const char *format, ...)
       tu_finishme("stub %s", __func__);                                      \
    } while (0)
 
+const struct tu_tiling_config *
+tu_framebuffer_get_tiling_config(const struct tu_framebuffer *fb,
+                                 int gmem_layout,
+                                 uint32_t divisor);
+
 void
 tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
                              const struct tu_device *device,

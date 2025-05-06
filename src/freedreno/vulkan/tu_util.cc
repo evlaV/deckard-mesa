@@ -357,6 +357,51 @@ is_hw_binning_possible(const struct tu_vsc_config *vsc)
 }
 
 static void
+tu_tiling_config_divide_tile(const struct tu_device *dev,
+                             const struct tu_render_pass *pass,
+                             const struct tu_framebuffer *fb,
+                             const struct tu_tiling_config *tiling,
+                             struct tu_tiling_config *new_tiling,
+                             uint32_t divisor)
+{
+   assert(divisor > 0);
+
+   *new_tiling = *tiling;
+   if (divisor == 1 || !tiling->possible || tiling->tile0.width == ~0) {
+      /* If the divisor is 1, or if the tiling is not possible, or if the
+       * tiling is invalid, just return the original tiling. */
+      return;
+   }
+
+   /* Get the hardware-specified alignment values. */
+   const uint32_t tile_align_w = pass->tile_align_w;
+   const uint32_t tile_align_h = dev->physical_device->info->tile_align_h;
+
+   /* Divide the current tile dimensions by the divisor. */
+   uint32_t new_tile_width = tiling->tile0.width / divisor;
+   uint32_t new_tile_height = tiling->tile0.height / divisor;
+
+   /* Clamp to the minimum alignment if necessary and align down. */
+   if (new_tile_width < tile_align_w)
+      new_tile_width = tile_align_w;
+   else
+      new_tile_width = ROUND_DOWN_TO_NPOT(new_tile_width, tile_align_w);
+
+   if (new_tile_height < tile_align_h)
+      new_tile_height = tile_align_h;
+   else
+      new_tile_height = ROUND_DOWN_TO_NPOT(new_tile_height, tile_align_h);
+
+   new_tiling->tile0.width = new_tile_width;
+   new_tiling->tile0.height = new_tile_height;
+
+   /* Recalculate the tile count from the framebuffer dimensions to ensure
+    * full coverage. */
+   new_tiling->vsc.tile_count.width = DIV_ROUND_UP(fb->width, new_tile_width);
+   new_tiling->vsc.tile_count.height = DIV_ROUND_UP(fb->height, new_tile_height);
+}
+
+static void
 tu_tiling_config_update_pipe_layout(struct tu_vsc_config *vsc,
                                     const struct tu_device *dev,
                                     bool fdm)
@@ -463,6 +508,15 @@ tu_tiling_config_update_binning(struct tu_vsc_config *vsc, const struct tu_devic
    }
 }
 
+const struct tu_tiling_config *
+tu_framebuffer_get_tiling_config(const struct tu_framebuffer *fb,
+                                 int gmem_layout,
+                                 uint32_t divisor)
+{
+   assert(divisor >= 1 && divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX);
+   return &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
+}
+
 void
 tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
                              const struct tu_device *device,
@@ -488,6 +542,34 @@ tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
          tu_tiling_config_update_pipe_layout(fdm_offset_vsc, device, true);
          tu_tiling_config_update_pipes(fdm_offset_vsc, device);
          tu_tiling_config_update_binning(fdm_offset_vsc, device);
+      }
+   }
+
+   if (!pass->has_fdm) {
+      /* Divide the tiling configurations for each divisor. This isn't done
+       * for FDM because it's expected that the FDM alone will be sufficient
+       * to appropriately size the tiles for the framebuffer.
+       */
+      for (int divisor = 2; divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX; divisor++) {
+         for (int gmem_layout = 0; gmem_layout < TU_GMEM_LAYOUT_COUNT; gmem_layout++) {
+            const struct tu_tiling_config *tiling = &fb->tiling[gmem_layout];
+            struct tu_tiling_config *new_tiling =
+               &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
+            tu_tiling_config_divide_tile(device, pass, fb, tiling, new_tiling, divisor);
+
+            if (!new_tiling->possible)
+               continue;
+
+            struct tu_vsc_config *vsc = &new_tiling->vsc;
+            tu_tiling_config_update_pipe_layout(vsc, device, false);
+            tu_tiling_config_update_pipes(vsc, device);
+            tu_tiling_config_update_binning(vsc, device);
+
+            struct tu_vsc_config *fdm_offset_vsc = &new_tiling->fdm_offset_vsc;
+            fdm_offset_vsc->tile_count = (VkExtent2D) {
+               ~1, ~1
+            };
+         }
       }
    }
 }
