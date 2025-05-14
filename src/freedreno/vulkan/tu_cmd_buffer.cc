@@ -2268,7 +2268,7 @@ template <chip CHIP>
 static void
 tu_trace_end_render_pass(struct tu_cmd_buffer *cmd, bool gmem)
 {
-   if (!u_trace_enabled(&cmd->device->trace_context))
+   if (!u_trace_enabled(&cmd->device->trace_context) || cmd->state.suspending)
       return;
 
    uint32_t avg_per_sample_bandwidth =
@@ -3234,6 +3234,14 @@ tu_cmd_buffer_begin(struct tu_cmd_buffer *cmd_buffer,
 
    tu_cmd_buffer_status_gpu_write(cmd_buffer, TU_CMD_BUFFER_STATUS_ACTIVE);
 
+   if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+      if (u_trace_enabled(&cmd_buffer->device->trace_context)) {
+         trace_start_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs,
+                                cmd_buffer, tu_env_debug_as_string(),
+                                ir3_shader_debug_as_string());
+      }
+   }
+
    return VK_SUCCESS;
 }
 
@@ -3248,12 +3256,6 @@ tu_BeginCommandBuffer(VkCommandBuffer commandBuffer,
 
    /* setup initial configuration into command buffer */
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
-      if (u_trace_enabled(&cmd_buffer->device->trace_context)) {
-         trace_start_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs,
-                                cmd_buffer, tu_env_debug_as_string(),
-                                ir3_shader_debug_as_string());
-      }
-
       switch (cmd_buffer->queue_family_index) {
       case TU_QUEUE_GENERAL:
          TU_CALLX(cmd_buffer->device, tu6_init_hw)(cmd_buffer, &cmd_buffer->cs);
@@ -4165,6 +4167,20 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
       tu_emit_cache_flush<CHIP>(cmd_buffer);
    }
 
+   if (cmd_buffer->state.suspending) {
+      cmd_buffer->trace_rp_drawcalls_end =
+         u_trace_end_iterator(&cmd_buffer->trace);
+
+      if (cmd_buffer->trace_rp_start.chunk != NULL &&
+          (cmd_buffer->state.suspend_resume == SR_IN_CHAIN ||
+           cmd_buffer->state.suspend_resume == SR_IN_CHAIN_AFTER_PRE_CHAIN)) {
+         auto rp_it_begin = cmd_buffer->trace_rp_start;
+         auto rp_it_end = rp_it_begin;
+         rp_it_end.event_idx++;
+         u_trace_disable_event_range(rp_it_begin, rp_it_end);
+      }
+   }
+
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
       trace_end_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs, cmd_buffer);
    } else {
@@ -4946,6 +4962,13 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
    cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
    cmd->state.lrz = suspended->state.suspended_pass.lrz;
+
+   /* Re-emit tracepoint only when renderpass was started in
+    * some previous command buffer and it's being reconstructed
+    * in the internal command buffer.
+    */
+   if (cmd != suspended)
+      tu_trace_start_render_pass(cmd);
 }
 
 /* Take the saved pre-chain in "secondary" and copy its commands to "cmd",
@@ -5671,11 +5694,12 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       cmd->state.suspended_pass.gmem_layout = cmd->state.gmem_layout;
    }
 
-   if (!resuming)
+   if (!resuming) {
+      cmd->trace_rp_start = u_trace_end_iterator(&cmd->trace);
       tu_trace_start_render_pass(cmd);
+   }
 
    if (!resuming || cmd->state.suspend_resume == SR_NONE) {
-      tu_trace_start_render_pass(cmd);
       cmd->trace_rp_drawcalls_start = u_trace_end_iterator(&cmd->trace);
    }
 
