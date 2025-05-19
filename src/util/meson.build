@@ -86,6 +86,8 @@ files_mesa_util = files(
   'pb_slab.c',
   'pb_slab.h',
   'ptralloc.h',
+  'perf/u_linux_trace_events.c',
+  'perf/u_linux_trace_events.h',
   'perf/u_trace.h',
   'perf/u_trace.c',
   'perf/u_trace_priv.h',
