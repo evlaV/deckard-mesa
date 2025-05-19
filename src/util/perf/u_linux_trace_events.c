@@ -68,6 +68,9 @@ util_linux_trace_events_unregister_tracepoint(struct util_linux_trace_events_tra
    ralloc_free(tracepoint->data);
 }
 
+__attribute__((weak)) util_linux_trace_events_for_each_tracepoint tu_linux_trace_events_register_tracepoints;
+__attribute__((weak)) util_linux_trace_events_for_each_tracepoint tu_linux_trace_events_unregister_tracepoints;
+
 static void util_linux_trace_events_deinit(void);
 
 static void
@@ -80,9 +83,8 @@ util_linux_trace_events_init_once(void)
       return;
    }
 
-   /* Corresponding weak symbols to entrypoints generated for each
-    * tracepoint group should be tested and invoked here.
-    */
+   if (tu_linux_trace_events_register_tracepoints)
+      tu_linux_trace_events_register_tracepoints(util_linux_trace_events_register_tracepoint);
 
    atexit(util_linux_trace_events_deinit);
 }
@@ -99,9 +101,8 @@ util_linux_trace_events_deinit(void)
    if (util_linux_trace_events_state.user_events_data_fd == -1)
       return;
 
-   /* Corresponding weak symbols to entrypoints generated for each
-    * tracepoint group should be tested and invoked here.
-    */
+   if (tu_linux_trace_events_unregister_tracepoints)
+      tu_linux_trace_events_unregister_tracepoints(util_linux_trace_events_unregister_tracepoint);
 }
 
 void
