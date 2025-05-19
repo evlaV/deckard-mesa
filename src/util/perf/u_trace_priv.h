@@ -39,6 +39,10 @@
 extern "C" {
 #endif
 
+#ifdef HAVE_LINUX_USER_EVENTS_H
+struct util_linux_trace_events_tracepoint;
+#endif
+
 /**
  * Tracepoint descriptor.
  */
@@ -75,6 +79,9 @@ struct u_tracepoint {
                     const void *flush_data,
                     const void *payload,
                     const void *indirect);
+#endif
+#ifdef HAVE_LINUX_USER_EVENTS_H
+   struct util_linux_trace_events_tracepoint *lte_tracepoint;
 #endif
 };
 

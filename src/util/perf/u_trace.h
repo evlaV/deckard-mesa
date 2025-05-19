@@ -189,6 +189,7 @@ enum u_trace_type {
    U_TRACE_TYPE_MARKERS = 1u << 4,
    U_TRACE_TYPE_INDIRECTS = 1u << 5,
    U_TRACE_TYPE_CSV = 1u << 6,
+   U_TRACE_TYPE_LINUX_TRACE_EVENTS = 1u << 7,
 
    U_TRACE_TYPE_PRINT_CSV = U_TRACE_TYPE_PRINT | U_TRACE_TYPE_CSV,
    U_TRACE_TYPE_PRINT_JSON = U_TRACE_TYPE_PRINT | U_TRACE_TYPE_JSON,
@@ -198,12 +199,12 @@ enum u_trace_type {
    /*
     * A mask of traces that require appending to the tracepoint chunk list.
     */
-   U_TRACE_TYPE_REQUIRE_QUEUING = U_TRACE_TYPE_PRINT | U_TRACE_TYPE_PERFETTO,
+   U_TRACE_TYPE_REQUIRE_QUEUING = U_TRACE_TYPE_PRINT | U_TRACE_TYPE_PERFETTO | U_TRACE_TYPE_LINUX_TRACE_EVENTS,
    /*
     * A mask of traces that require processing the tracepoint chunk list.
     */
    U_TRACE_TYPE_REQUIRE_PROCESSING =
-      U_TRACE_TYPE_PRINT | U_TRACE_TYPE_PERFETTO_ACTIVE,
+      U_TRACE_TYPE_PRINT | U_TRACE_TYPE_PERFETTO_ACTIVE | U_TRACE_TYPE_LINUX_TRACE_EVENTS,
 };
 
 /**
