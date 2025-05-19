@@ -29,6 +29,7 @@ Header('vk_format.h')
 Header('util/sha1/sha1.h')
 Header('tu_cmd_buffer.h', scope=HeaderScope.SOURCE)
 Header('tu_device.h', scope=HeaderScope.SOURCE)
+Header('util/perf/u_linux_trace_events.h', scope=HeaderScope.SOURCE)
 Header('common/freedreno_lrz.h')
 Header('vulkan/vulkan_core.h', scope=HeaderScope.SOURCE|HeaderScope.PERFETTO)
 
@@ -213,5 +214,6 @@ utrace_generate(cpath=args.utrace_src,
                 hpath=args.utrace_hdr,
                 ctx_param='struct tu_device *dev',
                 trace_toggle_name='tu_gpu_tracepoint',
-                trace_toggle_defaults=tu_default_tps)
+                trace_toggle_defaults=tu_default_tps,
+                linux_trace_events='tu')
 utrace_generate_perfetto_utils(hpath=args.perfetto_hdr)
