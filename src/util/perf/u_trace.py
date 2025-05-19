@@ -112,6 +112,47 @@ class Tracepoint(object):
                                         trace_toggle_name.upper(),
                                         self.toggle_name.upper())
 
+    def linux_trace_event_fields(self):
+        type_map = {
+            "uint8_t": "u8", "int8_t": "s8",
+            "uint16_t": "u16", "int16_t": "s16",
+            "uint32_t": "u32", "int32_t": "s32",
+            "uint64_t": "u64", "int64_t": "s64",
+            "bool": "u8",
+            "VkCommandBuffer": "u64",
+            "enum VkFormat": "u32",
+        }
+
+        class Field(object):
+            def __init__(self, name):
+               self.name = name
+               self.struct_member = None
+               self.field_type = None
+               self.struct_init, self.str_init = None, None
+               self.str_data = None
+
+        fields = []
+        for x in self.tp_struct:
+            field = Field(x.name)
+            if x.type == "str" and x.length_arg.isdigit():
+                length_arg = int(x.length_arg) + 1
+                field.struct_member = f"char {x.name}[{length_arg}]"
+                field.field_type = f"char[{length_arg}]"
+                field.str_init = f"memcpy(write_struct.{x.name}, payload_struct->{x.name}, {length_arg})";
+            elif (x.type == "str" and not x.length_arg.isdigit()) or x.type == "const char *":
+                field.struct_member = f"__u32 {x.name}"
+                field.field_type = "__rel_loc char[]"
+                struct_name = f"struct linux_trace_events_write_struct_{self.name}"
+                field.struct_init = f"(256 << 16) | (offsetof({struct_name}, {x.name}_data) - offsetof({struct_name}, {x.name}) - sizeof(__u32))"
+                field.str_init = f"copy_string_buffer(write_struct.{x.name}_data, payload_struct->{x.name}, 255)"
+                field.str_data = f"char {x.name}_data[256]"
+            else:
+                field.field_type = type_map.get(x.type, "unknown_type")
+                field.struct_member = f"__{field.field_type} {x.name}"
+                field.struct_init = f"(__{field.field_type}) payload_struct->{x.name}"
+            fields.append(field)
+        return fields
+
 class TracepointArgStruct():
     """Represents struct that is being passed as an argument
     """
@@ -443,6 +484,13 @@ ${trace_toggle_name}_config_variable(void)
 }
 % endif
 
+static ALWAYS_INLINE void copy_string_buffer(char *dst, const char *src, size_t dsize)
+{
+   if (!src)
+      src = "(null)";
+   strncpy(dst, src, dsize);
+}
+
 % for index, (trace_name, trace) in enumerate(TRACEPOINTS.items()):
 /*
  * ${trace_name}
@@ -506,6 +554,49 @@ static void __print_json_${trace_name}(FILE *out, const void *arg, const void *i
 #define __print_${trace_name} NULL
 #define __print_json_${trace_name} NULL
  % endif
+ % if linux_trace_events is not None:
+#ifdef HAVE_LINUX_USER_EVENTS_H
+struct PACKED linux_trace_events_write_struct_${trace_name} {
+ % for field in trace.linux_trace_event_fields():
+    ${field.struct_member};
+ % endfor
+ % for field in trace.linux_trace_event_fields():
+  % if field.str_data is not None:
+    ${field.str_data};
+  % endif
+ % endfor
+};
+static ALWAYS_INLINE void __linux_trace_events_write_${trace_name}(const struct util_linux_trace_events_tracepoint *tp, const void *payload, const void *indirect)
+{
+    const struct trace_${trace_name} *payload_struct = (const struct trace_${trace_name} *) payload;
+    (void) payload_struct;
+
+    struct linux_trace_events_write_struct_${trace_name} write_struct = {
+ % for field in trace.linux_trace_event_fields():
+  % if field.struct_init is not None:
+        .${field.name} = ${field.struct_init},
+  % endif
+ % endfor
+    };
+ % for field in trace.linux_trace_event_fields():
+  % if field.str_init is not None:
+    ${field.str_init};
+  % endif
+ % endfor
+
+    util_linux_trace_events_write(tp, &write_struct, sizeof(write_struct));
+}
+static struct util_linux_trace_events_tracepoint __linux_trace_events_tracepoint_${trace_name} {
+    .name = "${linux_trace_events}_${trace.name}",
+    .command = "${linux_trace_events}_${trace.name}"
+  % for field in trace.linux_trace_event_fields():
+        " ${field.field_type} ${field.name};"
+  % endfor
+    ,
+    .write = &__linux_trace_events_write_${trace_name},
+};
+#endif
+ % endif
  % if trace.tp_markers is not None:
 
 __attribute__((format(printf, 3, 4))) void ${trace.tp_markers}(struct u_trace_context *utctx, void *, const char *, ...);
@@ -539,11 +630,20 @@ static const struct u_tracepoint __tp_${trace_name} = {
     ${index},
     __print_${trace_name},
     __print_json_${trace_name},
- % if trace.tp_perfetto is not None:
 #ifdef HAVE_PERFETTO
+ % if trace.tp_perfetto is not None:
     (void (*)(void *pctx, uint64_t, uint16_t, const void *, const void *, const void *))${trace.tp_perfetto},
-#endif
+ % else:
+    NULL,
  % endif
+#endif
+#ifdef HAVE_LINUX_USER_EVENTS_H
+ % if linux_trace_events is not None:
+    &__linux_trace_events_tracepoint_${trace_name},
+ % else:
+    NULL,
+ % endif
+#endif
 };
 void __trace_${trace_name}(
      struct u_trace *ut
@@ -596,6 +696,9 @@ void __trace_${trace_name}(
    if (queueing)
    % endif
      ${arg.copy_func}(__entry->${arg.name}, ${arg.var}, ${arg.length_arg});
+   % if arg.type == "str":
+   __entry->${arg.name}[${arg.length_arg}] = '\\0';
+   % endif
   % endif
  % endfor
  % if trace.tp_markers is not None:
@@ -605,10 +708,33 @@ void __trace_${trace_name}(
 }
 
 % endfor
+% if linux_trace_events is not None:
+#if HAVE_LINUX_USER_EVENTS_H
+static void __${linux_trace_events}_linux_trace_events_register_tracepoints_impl(void (*register_tracepoint)(struct util_linux_trace_events_tracepoint *))
+{
+%  for trace_name in TRACEPOINTS.keys():
+    register_tracepoint(&__linux_trace_events_tracepoint_${trace_name});
+%  endfor
+}
+
+static void __${linux_trace_events}_linux_trace_events_unregister_tracepoints_impl(void (*unregister_tracepoint)(struct util_linux_trace_events_tracepoint *))
+{
+%  for trace_name in TRACEPOINTS.keys():
+    unregister_tracepoint(&__linux_trace_events_tracepoint_${trace_name});
+%  endfor
+}
+
+extern "C" {
+util_linux_trace_events_for_each_tracepoint ${linux_trace_events}_linux_trace_events_register_tracepoints = __${linux_trace_events}_linux_trace_events_register_tracepoints_impl;
+util_linux_trace_events_for_each_tracepoint ${linux_trace_events}_linux_trace_events_unregister_tracepoints = __${linux_trace_events}_linux_trace_events_unregister_tracepoints_impl;
+}
+#endif
+
+% endif
 """
 
 def utrace_generate(cpath, hpath, ctx_param, trace_toggle_name=None,
-                    trace_toggle_defaults=[]):
+                    trace_toggle_defaults=[], linux_trace_events=None):
     """Parameters:
 
     - cpath: c file to generate.
@@ -617,6 +743,8 @@ def utrace_generate(cpath, hpath, ctx_param, trace_toggle_name=None,
     - trace_toggle_name: (optional) name of the environment variable
       enabling/disabling tracepoints.
     - trace_toggle_defaults: (optional) list of tracepoints enabled by default.
+    - linux_trace_events: (optional) prefix that will enable generation of
+      tracepoint data usable for user events under the Linux tracing system
     """
     if cpath is not None:
         hdr = os.path.basename(cpath).rsplit('.', 1)[0] + '.h'
@@ -627,6 +755,7 @@ def utrace_generate(cpath, hpath, ctx_param, trace_toggle_name=None,
                     ctx_param=ctx_param,
                     trace_toggle_name=trace_toggle_name,
                     trace_toggle_defaults=trace_toggle_defaults,
+                    linux_trace_events=linux_trace_events,
                     HEADERS=[h for h in HEADERS if h.scope & HeaderScope.SOURCE],
                     TRACEPOINTS=TRACEPOINTS,
                     TRACEPOINTS_TOGGLES=TRACEPOINTS_TOGGLES))

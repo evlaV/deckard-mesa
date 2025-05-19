@@ -25,6 +25,7 @@
 
 #include <inttypes.h>
 
+#include "u_linux_trace_events.h"
 #include "util/list.h"
 #include "util/u_call_once.h"
 #include "util/u_debug.h"
@@ -446,6 +447,9 @@ static const struct debug_named_value config_control[] = {
 #endif
    { "markers", U_TRACE_TYPE_MARKERS, "Enable marker trace" },
    { "indirects", U_TRACE_TYPE_INDIRECTS, "Enable indirect data capture" },
+#ifdef HAVE_LINUX_USER_EVENTS_H
+   { "linux_trace_events", U_TRACE_TYPE_LINUX_TRACE_EVENTS, "Enable trace events" },
+#endif
    DEBUG_NAMED_VALUE_END
 };
 
@@ -473,6 +477,11 @@ u_trace_state_init_once(void)
    if (!u_trace_state.trace_file) {
       u_trace_state.trace_file = stdout;
    }
+
+#ifdef HAVE_LINUX_USER_EVENTS_H
+   if (u_trace_state.enabled_traces & U_TRACE_TYPE_LINUX_TRACE_EVENTS)
+      util_linux_trace_events_init();
+#endif
 }
 
 void
@@ -724,6 +733,13 @@ process_chunk(void *job, void *gdata, int thread_index)
            U_TRACE_TYPE_PERFETTO_ACTIVE)) {
          evt->tp->perfetto(utctx->pctx, ns, evt->tp->tp_idx, chunk->flush_data,
                            evt->payload, indirect_data);
+      }
+#endif
+#ifdef HAVE_LINUX_USER_EVENTS_H
+      if (evt->tp->lte_tracepoint &&
+          (p_atomic_read_relaxed(&utctx->enabled_traces) &
+           U_TRACE_TYPE_LINUX_TRACE_EVENTS)) {
+         evt->tp->lte_tracepoint->write(evt->tp->lte_tracepoint, evt->payload, indirect_data);
       }
 #endif
 
