@@ -230,6 +230,9 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
    
    bool is_mutable = layout->is_mutable && tile_mode == TILE6_3;
 
+   if (texture_format == FMT6_P010 && ubwc_enabled)
+      texture_format = FMT6_TP10;
+
    view->descriptor[0] =
       A6XX_TEX_CONST_0_TILE_MODE(tile_mode) |
       COND(util_format_is_srgb(args->format), A6XX_TEX_CONST_0_SRGB) |
