@@ -66,6 +66,42 @@ constexpr uint64_t DEFAULT_SAMPLE_EXPIRY_TIME = 500'000'000; /* 500ms */
 constexpr uint64_t ALWAYS_ON_FREQUENCY_HZ = 19'200'000;
 constexpr uint64_t GPU_TICKS_PER_US = ALWAYS_ON_FREQUENCY_HZ / 1'000'000;
 
+enum tu_at_flags {
+   TU_AT_BGMEM = 1U << 0,
+   TU_AT_PROF = 1U << 1,
+   TU_AT_PROF_IMM = 1U << 2,
+   TU_AT_LAT_SEN = 1U << 3,
+};
+
+static const struct debug_control tu_at_options[] = {
+   { "bgmem", TU_AT_BGMEM },
+   { "prof", TU_AT_PROF },
+   { "prof_imm", TU_AT_PROF_IMM },
+   { "latsen", TU_AT_LAT_SEN },
+   { NULL, 0 }
+};
+
+static uint32_t tu_at_option;
+
+static void
+tu_at_options_init_once()
+{
+   tu_at_option =
+      parse_debug_string(os_get_option("TU_AUTOTUNE"), tu_at_options);
+   if (TU_DEBUG(STARTUP)) {
+      mesa_logi("TU_AUTOTUNE=0x%x", tu_at_option);
+   }
+}
+
+static inline void
+tu_at_options_init()
+{
+   static once_flag once = ONCE_FLAG_INIT;
+   call_once(&once, tu_at_options_init_once);
+}
+
+#define TU_AT_OPTION(x) (tu_at_option & (TU_AT_ ## x))
+
 struct tu_duration_entry {
    struct list_head node;
    uint64_t duration;
@@ -512,7 +548,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
    tu_at_durations_get_avg(&history->sysmem_durations, &avg_sysmem,
                            &sysmem_count, false, recency_bias_default);
 
-   if (TU_DEBUG(AT_PROF_IMM)) {
+   if (TU_AT_OPTION(PROF_IMM)) {
       /* Try to immediately resolve the probability, this is useful for CI
        * running a single trace of frames where the probablities aren't
        * expected to change from run to run.
@@ -556,7 +592,7 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
 
    p_atomic_set(&history->sysmem_probability, sysmem_probability);
 
-   if (TU_DEBUG(AT_LAT_SEN)) {
+   if (TU_AT_OPTION(LAT_SEN)) {
       const uint64_t target_threshold = GPU_TICKS_PER_US * 500; /* 500us */
       
       const uint64_t default_update_duration_ns = 100'000'000; /* 100ms */
@@ -951,10 +987,12 @@ renderpass_key_hash(const void *_a)
 VkResult
 tu_autotune_init(struct tu_autotune *at, struct tu_device *dev)
 {
+   tu_at_options_init();
+
    at->enabled = true;
-   if (TU_DEBUG(AT_BGMEM))
+   if (TU_AT_OPTION(BGMEM))
       at->mode = TU_AUTOTUNE_MODE_GMEM_BIG;
-   else if (TU_DEBUG(AT_PROF) || TU_DEBUG(AT_PROF_IMM))
+   else if (TU_AT_OPTION(PROF) || TU_AT_OPTION(PROF_IMM))
       at->mode = TU_AUTOTUNE_MODE_PROFILED;
    else
       at->mode = TU_AUTOTUNE_MODE_NORMAL;
@@ -1208,7 +1246,7 @@ tu_autotune_use_bypass(struct tu_autotune *at,
    bool latency_risk = false;
    if (get_history(at, renderpass_key, &avg_samples, &sysmem_probability,
                    &latency_risk)) {
-      if (TU_DEBUG(AT_LAT_SEN) && latency_risk) {
+      if (TU_AT_OPTION(LAT_SEN) && latency_risk) {
          /* Try to mitigate the risk of high preemption latency by always
           * using GMEM, which should break up any larger draws into smaller
           * ones with tiling.
@@ -1290,7 +1328,7 @@ tu_autotune_get_tile_size_divisor(struct tu_autotune *at,
    const struct tu_render_pass *pass = cmd_buffer->state.pass;
    const struct tu_framebuffer *framebuffer = cmd_buffer->state.framebuffer;
 
-   if (!at->enabled || !TU_DEBUG(AT_LAT_SEN) || pass->has_fdm)
+   if (!at->enabled || !TU_AT_OPTION(LAT_SEN) || pass->has_fdm)
       return 1;
 
    uint64_t renderpass_key = hash_renderpass_instance(pass, framebuffer, cmd_buffer);
