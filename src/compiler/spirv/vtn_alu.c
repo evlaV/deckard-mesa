@@ -562,6 +562,9 @@ vtn_value_is_relaxed_precision_cb(struct vtn_builder *b,
 bool
 vtn_value_is_relaxed_precision(struct vtn_builder *b, struct vtn_value *val)
 {
+   if (b->entry_point_stage == MESA_SHADER_FRAGMENT)
+      return true;
+
    bool result = false;
    vtn_foreach_decoration(b, val,
                           vtn_value_is_relaxed_precision_cb, &result);
