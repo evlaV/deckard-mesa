@@ -1588,7 +1588,8 @@ trace_context_create_fence_fd(struct pipe_context *_pipe,
 
 static void
 trace_context_fence_server_sync(struct pipe_context *_pipe,
-                                struct pipe_fence_handle *fence)
+                                struct pipe_fence_handle *fence,
+                                uint64_t timeline_value)
 {
    struct trace_context *tr_ctx = trace_context(_pipe);
    struct pipe_context *pipe = tr_ctx->pipe;
@@ -1597,8 +1598,9 @@ trace_context_fence_server_sync(struct pipe_context *_pipe,
 
    trace_dump_arg(ptr, pipe);
    trace_dump_arg(ptr, fence);
+   trace_dump_arg(uint, timeline_value);
 
-   pipe->fence_server_sync(pipe, fence);
+   pipe->fence_server_sync(pipe, fence, timeline_value);
 
    trace_dump_call_end();
 }
@@ -1606,7 +1608,8 @@ trace_context_fence_server_sync(struct pipe_context *_pipe,
 
 static void
 trace_context_fence_server_signal(struct pipe_context *_pipe,
-                                struct pipe_fence_handle *fence)
+                                struct pipe_fence_handle *fence,
+                                uint64_t timeline_value)
 {
    struct trace_context *tr_ctx = trace_context(_pipe);
    struct pipe_context *pipe = tr_ctx->pipe;
@@ -1615,8 +1618,9 @@ trace_context_fence_server_signal(struct pipe_context *_pipe,
 
    trace_dump_arg(ptr, pipe);
    trace_dump_arg(ptr, fence);
+   trace_dump_arg(uint, timeline_value);
 
-   pipe->fence_server_signal(pipe, fence);
+   pipe->fence_server_signal(pipe, fence, timeline_value);
 
    trace_dump_call_end();
 }
