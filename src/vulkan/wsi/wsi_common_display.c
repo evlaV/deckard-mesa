@@ -157,9 +157,8 @@ struct wsi_display {
  * property associated with the object.
  */
 static bool
-find_properties(struct wsi_display_connector *connector, uint32_t type)
+find_properties(struct wsi_display_connector *connector, int fd, uint32_t type)
 {
-   int fd = connector->wsi->fd;
    uint32_t *prop_id, prop_count, obj_id;
    drmModeObjectProperties *props;
 
@@ -437,6 +436,7 @@ wsi_display_is_crtc_available(const struct wsi_display * const wsi,
 
 static struct wsi_display_connector *
 wsi_display_alloc_connector(struct wsi_display *wsi,
+                            int fd,
                             uint32_t connector_id)
 {
    struct wsi_display_connector *connector =
@@ -455,7 +455,7 @@ wsi_display_alloc_connector(struct wsi_display *wsi,
    /* note: drmModeConnector has props pointer, the extra
     * drmModeObjectGetProperties here could be avoided
     */
-   if (!find_properties(connector, DRM_MODE_OBJECT_CONNECTOR)) {
+   if (!find_properties(connector, fd, DRM_MODE_OBJECT_CONNECTOR)) {
       vk_free(wsi->alloc, connector);
       return NULL;
    }
@@ -484,7 +484,7 @@ wsi_display_get_connector(struct wsi_device *wsi_device,
       wsi_display_find_connector(wsi_device, connector_id);
 
    if (!connector) {
-      connector = wsi_display_alloc_connector(wsi, connector_id);
+      connector = wsi_display_alloc_connector(wsi, drm_fd, connector_id);
       if (!connector) {
          drmModeFreeConnector(drm_connector);
          return NULL;
@@ -1858,7 +1858,7 @@ wsi_display_setup_connector(wsi_display_connector *connector,
       connector->crtc_id = wsi_display_select_crtc(connector, mode_res,
                                                    drm_connector);
       if (!connector->crtc_id ||
-          !find_properties(connector, DRM_MODE_OBJECT_CRTC)) {
+          !find_properties(connector, wsi->fd, DRM_MODE_OBJECT_CRTC)) {
          result = VK_ERROR_SURFACE_LOST_KHR;
          goto bail_connector;
       }
@@ -1867,7 +1867,7 @@ wsi_display_setup_connector(wsi_display_connector *connector,
        * format/modifier lists for that plane */
       connector->plane_id = wsi_display_select_plane(connector, mode_res);
       if (!connector->plane_id ||
-          !find_properties(connector, DRM_MODE_OBJECT_PLANE)) {
+          !find_properties(connector, wsi->fd, DRM_MODE_OBJECT_PLANE)) {
          result = VK_ERROR_SURFACE_LOST_KHR;
          goto bail_connector;
       }
@@ -2982,7 +2982,7 @@ wsi_display_get_output(struct wsi_device *wsi_device,
       connector = wsi_display_find_connector(wsi_device, connector_id);
 
       if (connector == NULL) {
-         connector = wsi_display_alloc_connector(wsi, connector_id);
+         connector = wsi_display_alloc_connector(wsi, wsi->fd, connector_id);
          if (!connector) {
             return NULL;
          }
