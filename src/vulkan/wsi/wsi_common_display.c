@@ -2402,9 +2402,16 @@ wsi_display_surface_create_swapchain(
    if (chain == NULL)
       return VK_ERROR_OUT_OF_HOST_MEMORY;
 
+   const uint64_t modifiers[] = {DRM_FORMAT_MOD_LINEAR, DRM_FORMAT_MOD_QCOM_COMPRESSED};
+   uint32_t num_modifiers = ARRAY_SIZE(modifiers);
+   const uint64_t *mods_ptr = modifiers;
+
    struct wsi_drm_image_params image_params = {
       .base.image_type = WSI_IMAGE_TYPE_DRM,
       .same_gpu = true,
+      .num_modifier_lists = 1,
+      .num_modifiers = &num_modifiers,
+      .modifiers = &mods_ptr,
    };
 
    int ret = mtx_init(&chain->present_id_mutex, mtx_plain);
