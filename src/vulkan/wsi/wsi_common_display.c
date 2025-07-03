@@ -445,6 +445,8 @@ wsi_display_alloc_connector(struct wsi_display *wsi,
    if (!connector)
       return NULL;
 
+   drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+
    connector->id = connector_id;
    connector->wsi = wsi;
    connector->active = false;
@@ -2584,11 +2586,8 @@ wsi_display_init_wsi(struct wsi_device *wsi_device,
 
    wsi->syncobj_fd = wsi->fd;
 
-   if (wsi->fd >= 0) {
+   if (wsi->fd >= 0)
       drmSetClientCap(wsi->fd, DRM_CLIENT_CAP_ATOMIC, 1);
-      /* We understand universal planes */
-      drmSetClientCap(wsi->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
-   }
 
    wsi->alloc = alloc;
 
