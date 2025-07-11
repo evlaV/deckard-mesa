@@ -127,7 +127,7 @@ set -x
 # src/**/ci/gitlab-ci*.yml)
 set +e
 deqp-runner -V
-deqp-runner \
+choom -n -1000 -- deqp-runner \
     suite \
     --suite $INSTALL/deqp-$DEQP_SUITE.toml \
     --output $RESULTS_DIR \
