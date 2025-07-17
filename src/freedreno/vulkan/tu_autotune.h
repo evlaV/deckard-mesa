@@ -15,7 +15,7 @@
 
 /* Compile-time toggle for debugging preemption latency with CP preemption
  * performance counters. */
-#define TU_AUTOTUNE_DEBUG_PERFCTR 1
+#define TU_AUTOTUNE_DEBUG_PERFCTR 0
 
 struct tu_renderpass_history;
 

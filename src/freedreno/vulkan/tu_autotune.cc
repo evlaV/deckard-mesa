@@ -650,9 +650,9 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
                ,
                history->key, ticks_to_us(avg_sysmem_draw),
                avg_sysmem_draw > target_threshold,
-               p_atomic_read(&history->latency_risk),
+               p_atomic_read(&history->latency_risk)
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-               ticks_to_us(history->preemption_latency)
+               ,ticks_to_us(history->preemption_latency)
 #endif
             );
 
@@ -708,9 +708,9 @@ history_add_result(struct tu_device *dev, struct tu_renderpass_history *history,
                      ,
                      history->key, ticks_to_us(avg_gmem_tile),
                      avg_gmem_tile > target_threshold,
-                     p_atomic_read(&history->latency_risk), tile_size_divisor,
+                     p_atomic_read(&history->latency_risk), tile_size_divisor
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-                     ticks_to_us(history->preemption_latency)
+                     ,ticks_to_us(history->preemption_latency)
 #endif
                   );
 
