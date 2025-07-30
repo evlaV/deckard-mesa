@@ -74,7 +74,6 @@ enum tu_debug_flags : uint64_t
    TU_DEBUG_COMM                     = BITFIELD64_BIT(33),
    TU_DEBUG_NOFDM                    = BITFIELD64_BIT(34),
    TU_DEBUG_DECK_EMU                 = BITFIELD64_BIT(35),
-   TU_DEBUG_PREEMPT                  = BITFIELD64_BIT(36),
 };
 
 struct tu_env {
