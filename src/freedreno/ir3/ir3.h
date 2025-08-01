@@ -1225,12 +1225,6 @@ is_shared(struct ir3_instruction *instr)
 }
 
 static inline bool
-has_dummy_dst(struct ir3_instruction *instr)
-{
-   return !!(instr->dsts[0]->flags & IR3_REG_DUMMY);
-}
-
-static inline bool
 is_store(struct ir3_instruction *instr)
 {
    /* these instructions, the "destination" register is
@@ -1269,7 +1263,7 @@ is_load(struct ir3_instruction *instr)
       /* probably some others too.. */
       return true;
    case OPC_LDC:
-      return !has_dummy_dst(instr);
+      return instr->dsts_count > 0;
    default:
       return false;
    }
@@ -1317,7 +1311,7 @@ uses_helpers(struct ir3_instruction *instr)
 
    /* sam requires helper invocations except for dummy prefetch instructions */
    case OPC_SAM:
-      return !has_dummy_dst(instr);
+      return instr->dsts_count != 0;
 
    /* Subgroup operations don't require helper invocations to be present, but
     * will use helper invocations if they are present.

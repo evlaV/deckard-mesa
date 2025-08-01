@@ -2639,17 +2639,6 @@ apply_mov_half_shared_quirk(struct ir3_context *ctx,
 }
 
 static void
-make_dst_dummy(struct ir3_instruction *instr)
-{
-   assert(instr->dsts_count == 1);
-
-   struct ir3_register *dst = instr->dsts[0];
-   dst->flags &= ~IR3_REG_SSA;
-   dst->flags |= IR3_REG_DUMMY;
-   dst->num = INVALID_REG;
-}
-
-static void
 emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
 {
    const nir_intrinsic_info *info = &nir_intrinsic_infos[intr->intrinsic];
@@ -3386,7 +3375,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       struct ir3_instruction *sam =
          emit_sam(ctx, OPC_SAM, info, TYPE_F32, 0b1111, NULL, NULL);
 
-      make_dst_dummy(sam);
+      sam->dsts_count = 0;
       array_insert(ctx->block, ctx->block->keeps, sam);
       break;
    }
@@ -3402,7 +3391,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       if (resinfo->flags & IR3_INSTR_B)
          ctx->so->bindless_tex = true;
 
-      make_dst_dummy(resinfo);
+      resinfo->dsts_count = 0;
       array_insert(ctx->block, ctx->block->keeps, resinfo);
       break;
    }
@@ -3417,7 +3406,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       if (ldc->flags & IR3_INSTR_B)
          ctx->so->bindless_ubo = true;
 
-      make_dst_dummy(ldc);
+      ldc->dsts_count = 0;
       array_insert(ctx->block, ctx->block->keeps, ldc);
       break;
    }
