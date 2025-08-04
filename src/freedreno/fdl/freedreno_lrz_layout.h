@@ -33,13 +33,12 @@ ENDC;
 template <chip CHIP>
 static void
 fdl6_lrz_layout_init(struct fdl_lrz_layout *lrz_layout,
-                     struct fdl_layout *layout, uint32_t extra_width,
-                     uint32_t extra_height,
+                     struct fdl_layout *layout,
                      const struct fd_dev_info *dev_info, uint32_t lrz_offset,
                      uint32_t array_layers)
 {
-   unsigned width = layout->width0 + extra_width;
-   unsigned height = layout->height0 + extra_height;
+   unsigned width = layout->width0;
+   unsigned height = layout->height0;
 
    /* LRZ buffer is super-sampled */
    switch (layout->nr_samples) {
