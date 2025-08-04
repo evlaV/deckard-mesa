@@ -193,6 +193,7 @@ wsi_device_init(struct wsi_device *wsi,
    WSI_GET_CB(FreeMemory);
    WSI_GET_CB(FreeCommandBuffers);
    WSI_GET_CB(GetBufferMemoryRequirements);
+   WSI_GET_CB(GetFenceFdKHR);
    WSI_GET_CB(GetFenceStatus);
    WSI_GET_CB(GetImageDrmFormatModifierPropertiesEXT);
    WSI_GET_CB(GetImageMemoryRequirements);
@@ -1435,8 +1436,18 @@ wsi_common_queue_present(const struct wsi_device *wsi,
                                        &swapchain->fences[image_index]);
          if (results[i] != VK_SUCCESS)
             continue;
-      } else {
-         MESA_TRACE_SCOPE("throttle");
+      } else if (!swapchain->image_info.explicit_sync_image_fence_in) {
+         /* Throttle on the fence for the previous presentation of this image,
+          * since you can't reset while the fence is outstanding on the queue.
+          * This is unlikely to trigger in practice, since it's unlikely that
+          * you managed to AcquireNextImage() the image back until the previous
+          * present had completed.
+          *
+          * We don't need to bother with this step if this very fence was
+          * blocked on in the presentation process and we're guaranteed to not
+          * acquire the image again until it's done.
+          */
+         MESA_TRACE_SCOPE("WSI ResetFences throttle");
          results[i] = wsi->WaitForFences(vk_device_to_handle(dev),
                                          1, &swapchain->fences[image_index],
                                          true, ~0ull);
@@ -1721,7 +1732,7 @@ wsi_common_queue_present(const struct wsi_device *wsi,
        * attach it to the dma-buf before we present so that the present
        * implicitly syncs on it.
        */
-      if (swapchain->dma_buf_semaphore != VK_NULL_HANDLE) {
+      if (swapchain->dma_buf_semaphore != VK_NULL_HANDLE && !swapchain->image_info.explicit_sync_image_fence_in) {
 #ifdef HAVE_LIBDRM
          assert(!swapchain->image_info.explicit_sync);
          results[i] = wsi_signal_dma_buf_from_semaphore(swapchain, image);
