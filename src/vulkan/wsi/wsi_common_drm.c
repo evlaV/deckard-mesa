@@ -582,6 +582,7 @@ wsi_configure_native_image(const struct wsi_swapchain *chain,
       return result;
 
    info->explicit_sync = params->explicit_sync;
+   info->explicit_sync_image_fence_in = params->explicit_sync_image_fence_in;
 
    if (params->num_modifier_lists == 0) {
       /* If we don't have modifiers, fall back to the legacy "scanout" flag */
@@ -747,7 +748,7 @@ wsi_create_native_image_mem(const struct wsi_swapchain *chain,
       /* Ask for the driver to add implicit sync to the image if we're not
        * handling implict sync ourselves.
        */
-      .implicit_sync = !info->explicit_sync && !chain->dma_buf_semaphore,
+      .implicit_sync = !info->explicit_sync && !info->explicit_sync_image_fence_in && !chain->dma_buf_semaphore,
    };
    const VkExportMemoryAllocateInfo memory_export_info = {
       .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
@@ -866,6 +867,7 @@ wsi_configure_prime_image(UNUSED const struct wsi_swapchain *chain,
       return result;
 
    info->explicit_sync = params->explicit_sync;
+   info->explicit_sync_image_fence_in = params->explicit_sync_image_fence_in;
 
    wsi_configure_buffer_image(chain, pCreateInfo,
                               WSI_PRIME_LINEAR_STRIDE_ALIGN, 4096,
