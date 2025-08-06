@@ -27,6 +27,9 @@
 #include "common/freedreno_lrz.h"
 #include "common/freedreno_vrs.h"
 
+#include "util/ralloc.h"
+#include "util/u_dynarray.h"
+
 enum tu_cmd_buffer_status {
    TU_CMD_BUFFER_STATUS_IDLE = 0,
    TU_CMD_BUFFER_STATUS_ACTIVE = 1,
@@ -2861,9 +2864,12 @@ tu_trace_start_render_pass(struct tu_cmd_buffer *cmd)
                            cmd->state.rp.cb_disable_reason ? cmd->state.rp.cb_disable_reason : "");
 }
 
+/* NOTE: bin_array must be an allocation made using ralloc */
 template <chip CHIP>
 static void
-tu_trace_end_render_pass(struct tu_cmd_buffer *cmd, bool gmem)
+tu_trace_end_render_pass(struct tu_cmd_buffer *cmd,
+                         bool gmem,
+                         struct util_dynarray *bin_array)
 {
    if (!u_trace_enabled(&cmd->device->trace_context))
       return;
@@ -2896,7 +2902,8 @@ tu_trace_end_render_pass(struct tu_cmd_buffer *cmd, bool gmem)
       cmd->state.lrz.valid,
       cmd->state.rp.lrz_disable_reason ? cmd->state.rp.lrz_disable_reason
                                        : "",
-      lrz_disabled_at_draw, lrz_write_disabled_at_draw, addr);
+      lrz_disabled_at_draw, lrz_write_disabled_at_draw, addr,
+      bin_array);
 }
 
 static void
@@ -4017,6 +4024,23 @@ tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
    return VK_SUCCESS;
 }
 
+static void tu_perfetto_append_tile(struct util_dynarray *array,
+                                    const struct tu_tile_config *tile_config,
+                                    VkExtent2D tile_size)
+{
+   if (!array)
+      return;
+
+   const VkRect2D tile = (VkRect2D) {
+      .offset = { .x = tile_config->pos.x * tile_size.width,
+                  .y = tile_config->pos.y * tile_size.height, },
+      .extent = { .width = tile_config->sysmem_extent.width * tile_size.width,
+                  .height = tile_config->sysmem_extent.height * tile_size.height, },
+   };
+
+   util_dynarray_append(array, tile);
+}
+
 template <chip CHIP>
 static void
 tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
@@ -4026,6 +4050,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
    const struct tu_tiling_config *tiling = cmd->state.tiling;
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, tiling);
    const struct tu_image_view *fdm = NULL;
+   struct util_dynarray *bin_array = NULL;
 
    VkResult result = tu_allocate_transient_attachments(cmd, false);
    if (result != VK_SUCCESS) {
@@ -4063,6 +4088,15 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
    tu6_tile_render_begin<CHIP>(cmd, &cmd->cs, rp_ctx, fdm_offsets);
 
+#ifdef HAVE_PERFETTO
+   if (u_trace_enabled(&cmd->device->trace_context)) {
+      /* The Perfetto code will ralloc_steal() this and will handle freeing. */
+      bin_array =
+         (struct util_dynarray *)ralloc_size(NULL, sizeof(*bin_array));
+      util_dynarray_init(bin_array, (void *)bin_array);
+   }
+#endif
+
    /* Note: we reverse the order of walking the pipes and tiles on every
     * other row, to improve texture cache locality compared to raster order.
     */
@@ -4097,8 +4131,13 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                   if (merged_tile_mask & (1u << tile_idx))
                      continue;
 
-                  tu6_render_tile<CHIP>(cmd, &cmd->cs, &tiles[tile_idx],
-                                        fdm_offsets, rp_ctx, vsc);
+                  const struct tu_tile_config *const tile = &tiles[tile_idx];
+
+                  if (bin_array)
+                     tu_perfetto_append_tile(bin_array, tile, tiling->tile0);
+
+                  tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets,
+                                        rp_ctx, vsc);
                }
             }
 
@@ -4127,6 +4166,9 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                else
                   tu_identity_frag_area(cmd, &tile);
 
+               if (bin_array)
+                  tu_perfetto_append_tile(bin_array, &tile, tiling->tile0);
+
                tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets,
                                      rp_ctx, vsc);
             }
@@ -4137,7 +4179,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
    tu6_tile_render_end<CHIP>(cmd, &cmd->cs, rp_ctx);
 
-   tu_trace_end_render_pass<CHIP>(cmd, true);
+   tu_trace_end_render_pass<CHIP>(cmd, true, bin_array);
 
    /* We have trashed the dynamically-emitted viewport, scissor, and FS params
     * via the patchpoints, so we need to re-emit them if they are reused for a
@@ -4180,7 +4222,7 @@ tu_cmd_render_sysmem(struct tu_cmd_buffer *cmd,
                         cmd->trace_renderpass_start,
                         u_trace_end_iterator(&cmd->rp_trace));
 
-   tu_trace_end_render_pass<CHIP>(cmd, false);
+   tu_trace_end_render_pass<CHIP>(cmd, false, NULL);
 }
 
 template <chip CHIP>
