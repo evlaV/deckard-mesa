@@ -1,0 +1,5 @@
+inquirer==3.4.*
+pillow==11.3.*
+perfetto==0.13.*
+distinctipy==1.3.4
+ttkwidgets==0.13.*
