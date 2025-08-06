@@ -12,6 +12,7 @@
 #include "tu_image.h"
 
 #include "util/hash_table.h"
+#include "util/u_dynarray.h"
 #include "util/perf/u_perfetto.h"
 #include "util/perf/u_perfetto_renderpass.h"
 
@@ -590,7 +591,6 @@ tu_perfetto_end_submit(struct tu_queue *queue,
 
 CREATE_EVENT_CALLBACK(cmd_buffer, CMD_BUFFER_STAGE_ID)
 CREATE_EVENT_CALLBACK(secondary_cmd_buffer, SECONDARY_CMD_BUFFER_STAGE_ID)
-CREATE_EVENT_CALLBACK(render_pass, RENDER_PASS_STAGE_ID)
 CREATE_EVENT_CALLBACK(binning_ib, BINNING_STAGE_ID)
 CREATE_EVENT_CALLBACK(concurrent_binning_ib, CONCURRENT_BINNING_STAGE_ID)
 CREATE_EVENT_CALLBACK(concurrent_binning_barrier, CONCURRENT_BINNING_BARRIER_STAGE_ID)
@@ -608,6 +608,55 @@ CREATE_EVENT_CALLBACK(gmem_load, GMEM_LOAD_STAGE_ID)
 CREATE_EVENT_CALLBACK(gmem_store, GMEM_STORE_STAGE_ID)
 CREATE_EVENT_CALLBACK(sysmem_resolve, SYSMEM_RESOLVE_STAGE_ID)
 CREATE_EVENT_CALLBACK(custom_resolve, CUSTOM_RESOLVE_STAGE_ID)
+
+void tu_perfetto_start_render_pass(
+   struct tu_device *dev, uint64_t ts_ns, uint16_t tp_idx,
+   const void *flush_data, const struct trace_start_render_pass *payload,
+   const void *indirect_data)
+{
+   stage_start(dev, ts_ns, RENDER_PASS_STAGE_ID, NULL, payload,
+               sizeof(*payload), indirect_data,
+               (trace_payload_as_extra_func)
+                  &trace_payload_as_extra_start_render_pass);
+}
+
+static void UNUSED
+trace_payload_as_extra_end_render_pass_with_bin_coordinates(
+   perfetto::protos::pbzero::GpuRenderStageEvent *event,
+   const struct trace_end_render_pass *payload,
+   const void *indirect_data)
+{
+   trace_payload_as_extra_end_render_pass(event, payload, indirect_data);
+
+   uint32_t i = 0;
+   char buff[10 * 4 + ARRAY_SIZE("((, ), (, ))")];
+   util_dynarray_foreach(payload->binCoordinates, VkRect2D, tile_rect) {
+      auto data = event->add_extra_data();
+
+      sprintf(buff, "binCoordinates[%" PRIu32 "]", i);
+      data->set_name(buff);
+
+      sprintf(buff, "((%" PRIi32 ", %" PRIi32"),(%" PRIu32 ", %" PRIu32 "))",
+              tile_rect->offset.x, tile_rect->offset.y,
+              tile_rect->offset.x + tile_rect->extent.width - 1,
+              tile_rect->offset.y + tile_rect ->extent.height - 1);
+      data->set_value(buff);
+
+      i++;
+   }
+}
+
+void tu_perfetto_end_render_pass(
+   struct tu_device *dev, uint64_t ts_ns, uint16_t tp_idx,
+   const void *flush_data, const struct trace_end_render_pass *payload,
+   const void *indirect_data)
+{
+   stage_end(dev, ts_ns, RENDER_PASS_STAGE_ID, flush_data, payload,
+             indirect_data,
+             (trace_payload_as_extra_func)
+               &trace_payload_as_extra_end_render_pass_with_bin_coordinates);
+}
+
 
 void
 tu_perfetto_start_cmd_buffer_annotation(
