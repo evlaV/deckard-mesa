@@ -85,17 +85,26 @@ struct u_tracepoint {
 #endif
 };
 
+struct u_trace_append_result {
+   void *payload;
+   /* It may be hard to copy some things into payload, in such cases
+    * it's easier to ralloc memory and attach it to ralloc_ctx, ensuring
+    * that it will be appropriatly freed.
+    */
+   void *ralloc_ctx;
+};
+
 /**
- * Append a tracepoint followed by some amount of memory specified by
- * variable_sz, returning pointer that can be filled with trace payload.
+ * Append a tracepoint with variable_sz additional memory allocated.
  */
-void *u_trace_appendv(struct u_trace *ut,
-                      void *cs,
-                      const struct u_tracepoint *tp,
-                      unsigned variable_sz,
-                      unsigned n_indirects,
-                      const struct u_trace_address *addresses,
-                      const uint8_t *indirect_sizes_B);
+struct u_trace_append_result
+u_trace_appendv(struct u_trace *ut,
+                void *cs,
+                const struct u_tracepoint *tp,
+                unsigned variable_sz,
+                unsigned n_indirects,
+                const struct u_trace_address *addresses,
+                const uint8_t *indirect_sizes_B);
 
 /**
  * Append a trace event, returning pointer to buffer of tp->payload_sz
@@ -105,7 +114,7 @@ void *u_trace_appendv(struct u_trace *ut,
 static inline void *
 u_trace_append(struct u_trace *ut, void *cs, const struct u_tracepoint *tp)
 {
-   return u_trace_appendv(ut, cs, tp, 0, 0, NULL, NULL);
+   return u_trace_appendv(ut, cs, tp, 0, 0, NULL, NULL).payload;
 }
 
 #ifdef __cplusplus

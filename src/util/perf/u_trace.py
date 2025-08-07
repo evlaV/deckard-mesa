@@ -201,7 +201,8 @@ class TracepointArg(object):
     """Class that represents either an argument being passed or a field in a struct
     """
     def __init__(self, type, var, c_format=None, name=None, to_prim_type=None,
-                 length_arg=None, copy_func=None, is_indirect=False, perfetto_field=None):
+                 length_arg=None, copy_func=None, is_indirect=False, perfetto_field=None,
+                 steal_alloc=False):
         """Parameters:
 
         - type: argument's C type.
@@ -214,6 +215,7 @@ class TracepointArg(object):
         - length_arg: whether this argument is a variable length array
         - perfetto_field: Whether the argument should be set to a perfetto field
           with the given name, as opposed to attached with add_extra_data().
+        - steal_alloc: Reparent the allocation of this argument to the payload's ralloc_ctx.
         """
         assert isinstance(type, str)
         assert isinstance(var, str)
@@ -228,6 +230,7 @@ class TracepointArg(object):
         self.length_arg = length_arg
         self.copy_func = copy_func
         self.perfetto_field = perfetto_field
+        self.steal_alloc = steal_alloc
 
         self.is_struct = False
         self.is_indirect = is_indirect
@@ -673,9 +676,9 @@ void __trace_${trace_name}(
   % endfor
    };
  % endif
-   UNUSED struct trace_${trace_name} *__entry =
-      enabled_traces & U_TRACE_TYPE_REQUIRE_QUEUING ?
-      (struct trace_${trace_name} *)u_trace_appendv(ut, ${"cs," if trace.need_cs_param else "NULL,"} &__tp_${trace_name},
+   UNUSED struct trace_${trace_name} *__entry;
+   if (enabled_traces & U_TRACE_TYPE_REQUIRE_QUEUING) {
+      struct u_trace_append_result result = u_trace_appendv(ut, ${"cs," if trace.need_cs_param else "NULL,"} &__tp_${trace_name},
                                                     0
   % for arg in trace.tp_struct:
    % if arg.length_arg is not None and not arg.length_arg.isdigit():
@@ -688,8 +691,16 @@ void __trace_${trace_name}(
   % else:
                                                     0, NULL, NULL
   % endif
-                                                    ) :
-      &entry;
+                                                    );
+        __entry = (struct trace_${trace_name} *) result.payload;
+        % for arg in trace.tp_struct:
+        % if arg.steal_alloc:
+         ralloc_steal(result.ralloc_ctx, ${arg.var});
+        % endif
+        % endfor
+    } else {
+        __entry = &entry;
+    }
  % for arg in trace.tp_struct:
   % if arg.copy_func is None:
    __entry->${arg.name} = ${arg.var};
@@ -706,6 +717,14 @@ void __trace_${trace_name}(
    if (enabled_traces & U_TRACE_TYPE_MARKERS)
       __emit_label_${trace_name}(ut->utctx, cs, __entry);
  % endif
+
+   if (!(enabled_traces & U_TRACE_TYPE_REQUIRE_QUEUING)) {
+     % for arg in trace.tp_struct:
+     % if arg.steal_alloc:
+      ralloc_free(${arg.var});
+     % endif
+     % endfor
+   }
 }
 
 % endfor
