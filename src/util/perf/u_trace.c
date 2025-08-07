@@ -30,6 +30,7 @@
 #include "util/u_call_once.h"
 #include "util/u_debug.h"
 #include "util/u_vector.h"
+#include "util/ralloc.h"
 
 #define __NEEDS_TRACE_PRIV
 #include "u_trace_priv.h"
@@ -322,7 +323,7 @@ static struct u_trace_payload_buf *
 u_trace_payload_buf_create(void)
 {
    struct u_trace_payload_buf *payload =
-      malloc(sizeof(*payload) + PAYLOAD_BUFFER_SIZE);
+      ralloc_size(NULL, sizeof(*payload) + PAYLOAD_BUFFER_SIZE);
 
    p_atomic_set(&payload->refcount, 1);
 
@@ -344,7 +345,7 @@ static void
 u_trace_payload_buf_unref(struct u_trace_payload_buf *payload)
 {
    if (p_atomic_dec_zero(&payload->refcount))
-      free(payload);
+      ralloc_free(payload);
 }
 
 static void
@@ -983,7 +984,7 @@ u_trace_disable_event_range(struct u_trace_iterator begin_it,
  * to be filled in with trace payload.  Called by generated tracepoint
  * functions.
  */
-void *
+struct u_trace_append_result
 u_trace_appendv(struct u_trace *ut,
                 void *cs,
                 const struct u_tracepoint *tp,
@@ -1028,7 +1029,10 @@ u_trace_appendv(struct u_trace *ut,
    };
    ut->num_traces++;
 
-   return payload;
+   return (struct u_trace_append_result) {
+      .payload = payload,
+      .ralloc_ctx = chunk->payload,
+   };
 }
 
 void
