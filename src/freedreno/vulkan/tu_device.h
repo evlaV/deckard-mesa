@@ -28,6 +28,7 @@
 #include "common/freedreno_rd_output.h"
 #include "util/vma.h"
 #include "util/u_vector.h"
+#include "util/rwlock.h"
 
 /* queue types */
 #define TU_QUEUE_GENERAL 0
@@ -256,7 +257,12 @@ struct tu6_global
 
    volatile uint32_t vtx_stats_query_not_running;
 
-   /* To know when renderpass stats for autotune are valid */
+   /* A fence with a monotonically increasing value that is
+    * incremented by the GPU on each submission that includes
+    * a tu_autotune::submission_entry CS. This is used to track
+    * which submissions have been processed by the GPU before
+    * processing the autotune packet on the CPU.
+    */
    volatile uint32_t autotune_fence;
 
    /* For recycling command buffers for dynamic suspend/resume comamnds */
@@ -341,12 +347,6 @@ struct tu_device
     */
    struct tu_suballocator pipeline_suballoc;
    mtx_t pipeline_mutex;
-
-   /* Device-global BO suballocator for reducing BO management for small
-    * gmem/sysmem autotune result buffers.  Synchronized by autotune_mutex.
-    */
-   struct tu_suballocator autotune_suballoc;
-   mtx_t autotune_mutex;
 
    /* KGSL requires a small chunk of GPU mem to retrieve raw GPU time on
     * each submission.
@@ -528,7 +528,7 @@ struct tu_framebuffer
    uint32_t height;
    uint32_t layers;
 
-   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT];
+   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;
    struct tu_attachment_info attachments[0];

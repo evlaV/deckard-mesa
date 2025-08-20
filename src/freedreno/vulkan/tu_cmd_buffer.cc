@@ -14,6 +14,7 @@
 #include "vk_render_pass.h"
 #include "vk_util.h"
 
+#include "tu_autotune.h"
 #include "tu_buffer.h"
 #include "tu_clear_blit.h"
 #include "tu_cs.h"
@@ -1105,7 +1106,7 @@ use_hw_binning(struct tu_cmd_buffer *cmd)
 
 static bool
 use_sysmem_rendering(struct tu_cmd_buffer *cmd,
-                     struct tu_renderpass_result **autotune_result)
+                     tu_autotune::rp_ctx_t *at_ctx)
 {
    if (TU_DEBUG(SYSMEM)) {
       cmd->state.rp.gmem_disable_reason = "TU_DEBUG(SYSMEM)";
@@ -1166,15 +1167,9 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
    if (TU_DEBUG(GMEM))
       return false;
 
-   bool use_sysmem = tu_autotune_use_bypass(&cmd->device->autotune,
-                                            cmd, autotune_result);
-   if (*autotune_result) {
-      list_addtail(&(*autotune_result)->node, &cmd->renderpass_autotune_results);
-   }
-
-   if (use_sysmem) {
+   bool use_sysmem = cmd->device->autotune.get_optimal_mode(cmd, at_ctx) == tu_autotune::render_mode::SYSMEM;
+   if (use_sysmem)
       cmd->state.rp.gmem_disable_reason = "Autotune selected sysmem";
-   }
 
    return use_sysmem;
 }
@@ -2585,7 +2580,7 @@ tu_emit_renderpass_begin(struct tu_cmd_buffer *cmd)
 template <chip CHIP>
 static void
 tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
-                        struct tu_renderpass_result *autotune_result)
+                        tu_autotune::rp_ctx_t at_ctx)
 {
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
 
@@ -2641,7 +2636,13 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_regs(cs, A7XX_RB_BIN_FOVEAT());
    }
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result);
+   /* Reset bin scaling. */
+   if (cmd->device->physical_device->info->a7xx.has_hw_bin_scaling) {
+      tu_cs_emit_regs(cs, A7XX_GRAS_BIN_FOVEAT());
+      tu_cs_emit_regs(cs, A7XX_RB_BIN_FOVEAT());
+   }
+
+   cmd->device->autotune.begin_renderpass(cmd, cs, at_ctx, true, 0);
 
    tu_cs_sanity_check(cs);
 }
@@ -2649,7 +2650,7 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 template <chip CHIP>
 static void
 tu6_sysmem_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
-                      struct tu_renderpass_result *autotune_result)
+                      tu_autotune::rp_ctx_t at_ctx)
 {
    /* Do any resolves of the last subpass. These are handled in the
     * tile_store_cs in the gmem path.
@@ -2663,7 +2664,7 @@ tu6_sysmem_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    tu_lrz_sysmem_end<CHIP>(cmd, cs);
 
-   tu_autotune_end_renderpass<CHIP>(cmd, cs, autotune_result);
+   cmd->device->autotune.end_renderpass(cmd, cs, at_ctx);
 
    tu_cs_sanity_check(cs);
 }
@@ -2671,7 +2672,7 @@ tu6_sysmem_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 template <chip CHIP>
 static void
 tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
-                      struct tu_renderpass_result *autotune_result,
+                      tu_autotune::rp_ctx_t at_ctx,
                       const VkOffset2D *fdm_offsets)
 {
    struct tu_physical_device *phys_dev = cmd->device->physical_device;
@@ -2766,7 +2767,8 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_qw(cs, global_iova(cmd, vsc_state));
    }
 
-   tu_autotune_begin_renderpass<CHIP>(cmd, cs, autotune_result);
+   uint32_t tile_count = vsc->tile_count.width * vsc->tile_count.height;
+   cmd->device->autotune.begin_renderpass(cmd, cs, at_ctx, false, tile_count);
 
    tu_cs_sanity_check(cs);
 }
@@ -2775,12 +2777,17 @@ template <chip CHIP>
 static void
 tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                 const struct tu_tile_config *tile,
-                const VkOffset2D *fdm_offsets)
+                const VkOffset2D *fdm_offsets,
+                tu_autotune::rp_ctx_t at_ctx,
+                const struct tu_vsc_config *vsc)
 {
+   uint32_t tile_idx = (tile->pos.y * vsc->tile_count.width) + tile->pos.x;
    tu6_emit_tile_select<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
    tu_lrz_before_tile<CHIP>(cmd, &cmd->cs);
 
    trace_start_draw_ib_gmem(&cmd->trace, &cmd->cs, cmd);
+
+   cmd->device->autotune.begin_tile(cmd, cs, at_ctx, tile_idx);
 
    /* Primitives that passed all tests are still counted in in each
     * tile even with HW binning beforehand. Do not permit it.
@@ -2823,6 +2830,8 @@ tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    tu_cs_emit_pkt7(cs, CP_SET_MARKER, 1);
    tu_cs_emit(cs, A6XX_CP_SET_MARKER_0_MODE(RM6_BIN_RENDER_END));
+   
+   cmd->device->autotune.end_tile(cmd, cs, at_ctx, tile_idx);
 
    tu_cs_sanity_check(cs);
 
@@ -2832,7 +2841,7 @@ tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 template <chip CHIP>
 static void
 tu6_tile_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
-                    struct tu_renderpass_result *autotune_result)
+                    tu_autotune::rp_ctx_t at_ctx)
 {
    tu_cs_emit_call(cs, &cmd->draw_epilogue_cs);
 
@@ -2840,7 +2849,7 @@ tu6_tile_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    tu_emit_event_write<CHIP>(cmd, cs, FD_CCU_CLEAN_BLIT_CACHE);
 
-   tu_autotune_end_renderpass<CHIP>(cmd, cs, autotune_result);
+   cmd->device->autotune.end_renderpass(cmd, cs, at_ctx);
 
    tu_cs_sanity_check(cs);
 }
@@ -3180,7 +3189,9 @@ void
 tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
                    uint32_t tx1, uint32_t ty1, uint32_t tx2, uint32_t ty2,
                    const struct tu_image_view *fdm,
-                   const VkOffset2D *fdm_offsets)
+                   const VkOffset2D *fdm_offsets,
+                   tu_autotune::rp_ctx_t at_ctx,
+                   const struct tu_vsc_config *vsc)
 {
    uint32_t width = tx2 - tx1;
    uint32_t height = ty2 - ty1;
@@ -3253,7 +3264,8 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
          if (tile->visible_views == 0)
             continue;
 
-         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
+         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets,
+                               at_ctx, vsc);
       }
    }
 }
@@ -3261,7 +3273,7 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
 template <chip CHIP>
 static void
 tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
-                    struct tu_renderpass_result *autotune_result,
+                    tu_autotune::rp_ctx_t at_ctx,
                     const VkOffset2D *fdm_offsets)
 {
    const struct tu_tiling_config *tiling = cmd->state.tiling;
@@ -3298,7 +3310,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
    tu_trace_start_render_pass(cmd);
 
-   tu6_tile_render_begin<CHIP>(cmd, &cmd->cs, autotune_result, fdm_offsets);
+   tu6_tile_render_begin<CHIP>(cmd, &cmd->cs, at_ctx, fdm_offsets);
 
    /* Note: we reverse the order of walking the pipes and tiles on every
     * other row, to improve texture cache locality compared to raster order.
@@ -3319,7 +3331,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
          if (merge_tiles) {
             tu_render_pipe_fdm<CHIP>(cmd, pipe, tx1, ty1, tx2, ty2, fdm,
-                                     fdm_offsets);
+                                     fdm_offsets, at_ctx, vsc);
             continue;
          }
 
@@ -3346,14 +3358,15 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                else
                   tu_identity_frag_area(cmd, &tile);
 
-               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets);
+               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets,
+                                     at_ctx, vsc);
             }
             slot_row += tile_row_stride;
          }
       }
    }
 
-   tu6_tile_render_end<CHIP>(cmd, &cmd->cs, autotune_result);
+   tu6_tile_render_end<CHIP>(cmd, &cmd->cs, at_ctx);
 
    tu_trace_end_render_pass<CHIP>(cmd, true);
 
@@ -3373,11 +3386,11 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 template <chip CHIP>
 static void
 tu_cmd_render_sysmem(struct tu_cmd_buffer *cmd,
-                     struct tu_renderpass_result *autotune_result)
+                     tu_autotune::rp_ctx_t at_ctx)
 {
    tu_trace_start_render_pass(cmd);
 
-   tu6_sysmem_render_begin<CHIP>(cmd, &cmd->cs, autotune_result);
+   tu6_sysmem_render_begin<CHIP>(cmd, &cmd->cs, at_ctx);
 
    trace_start_draw_ib_sysmem(&cmd->trace, &cmd->cs, cmd);
 
@@ -3385,7 +3398,7 @@ tu_cmd_render_sysmem(struct tu_cmd_buffer *cmd,
 
    trace_end_draw_ib_sysmem(&cmd->trace, &cmd->cs);
 
-   tu6_sysmem_render_end<CHIP>(cmd, &cmd->cs, autotune_result);
+   tu6_sysmem_render_end<CHIP>(cmd, &cmd->cs, at_ctx);
 
    tu_clone_trace_range(cmd, &cmd->cs, &cmd->trace,
                         cmd->trace_renderpass_start,
@@ -3402,20 +3415,20 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer,
    if (cmd_buffer->state.rp.has_tess)
       tu6_lazy_emit_tessfactor_addr<CHIP>(cmd_buffer);
 
-   struct tu_renderpass_result *autotune_result = NULL;
-   if (use_sysmem_rendering(cmd_buffer, &autotune_result))
+   tu_autotune::rp_ctx_t at_ctx = NULL;
+   if (use_sysmem_rendering(cmd_buffer, &at_ctx))
    {
 #if defined(HAVE_GPUVIS)
       GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render SYSMEM");
 #endif
-      tu_cmd_render_sysmem<CHIP>(cmd_buffer, autotune_result);
+      tu_cmd_render_sysmem<CHIP>(cmd_buffer, at_ctx);
    }
    else
    {
 #if defined(HAVE_GPUVIS)
       GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render GMEM");
 #endif
-      tu_cmd_render_tiles<CHIP>(cmd_buffer, autotune_result, fdm_offsets);
+      tu_cmd_render_tiles<CHIP>(cmd_buffer, at_ctx, fdm_offsets);
    }
 
    /* Outside of renderpasses we assume all draw states are disabled. We do
@@ -3442,6 +3455,7 @@ static void tu_reset_render_pass(struct tu_cmd_buffer *cmd_buffer)
    cmd_buffer->state.attachments = NULL;
    cmd_buffer->state.clear_values = NULL;
    cmd_buffer->state.gmem_layout = TU_GMEM_LAYOUT_COUNT; /* invalid value to prevent looking up gmem offsets */
+   cmd_buffer->state.gmem_layout_divisor = 0;
    memset(&cmd_buffer->state.rp, 0, sizeof(cmd_buffer->state.rp));
 
    /* LRZ is not valid next time we use it */
@@ -3489,7 +3503,7 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    u_trace_init(&cmd_buffer->rp_trace, &device->trace_context);
    cmd_buffer->trace_renderpass_start =
       u_trace_begin_iterator(&cmd_buffer->rp_trace);
-   list_inithead(&cmd_buffer->renderpass_autotune_results);
+   new (&cmd_buffer->autotune_ctx) tu_autotune::cmd_buf_ctx();
 
    if (TU_DEBUG_ENV(CHECK_CMD_BUFFER_STATUS)) {
       cmd_buffer->status_bo = tu_cmd_buffer_setup_status_tracking(device);
@@ -3538,7 +3552,7 @@ tu_cmd_buffer_destroy(struct vk_command_buffer *vk_cmd_buffer)
    u_trace_fini(&cmd_buffer->trace);
    u_trace_fini(&cmd_buffer->rp_trace);
 
-   tu_autotune_free_results(cmd_buffer->device, &cmd_buffer->renderpass_autotune_results);
+   cmd_buffer->autotune_ctx.~cmd_buf_ctx();
 
    for (unsigned i = 0; i < MAX_BIND_POINTS; i++) {
       if (cmd_buffer->descriptors[i].push_set.layout)
@@ -3584,7 +3598,7 @@ tu_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
    tu_cs_reset(&cmd_buffer->pre_chain.draw_cs);
    tu_cs_reset(&cmd_buffer->pre_chain.draw_epilogue_cs);
 
-   tu_autotune_free_results(cmd_buffer->device, &cmd_buffer->renderpass_autotune_results);
+   cmd_buffer->autotune_ctx.reset();
 
    for (unsigned i = 0; i < MAX_BIND_POINTS; i++) {
       memset(&cmd_buffer->descriptors[i].sets, 0, sizeof(cmd_buffer->descriptors[i].sets));
@@ -5386,7 +5400,10 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
           sizeof(cmd->state.render_areas));
    cmd->state.per_layer_render_area = suspended->state.per_layer_render_area;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
-   cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
+   cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
+   cmd->state.tiling = tu_framebuffer_get_tiling_config(
+      cmd->state.framebuffer, cmd->state.gmem_layout,
+      cmd->state.gmem_layout_divisor);
    cmd->state.lrz = suspended->state.suspended_pass.lrz;
 }
 

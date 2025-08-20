@@ -516,7 +516,8 @@ struct tu_cmd_state
    /* Decides which GMEM layout to use from the tu_pass, based on whether the CCU
     * might get used by tu_store_gmem_attachment().
     */
-   enum tu_gmem_layout gmem_layout;
+   tu_gmem_layout gmem_layout;
+   uint32_t gmem_layout_divisor;
 
    /* Override the current subpass'es srgb_cntl. */
    bool override_srgb_cntl;
@@ -544,6 +545,7 @@ struct tu_cmd_state
       VkRect2D render_areas[MAX_VIEWS];
       bool per_layer_render_area;
       enum tu_gmem_layout gmem_layout;
+      uint32_t gmem_layout_divisor;
 
       const struct tu_image_view **attachments;
       VkClearValue *clear_values;
@@ -617,8 +619,7 @@ struct tu_cmd_buffer
    struct u_trace_iterator trace_renderpass_start;
    struct u_trace trace, rp_trace;
 
-   struct list_head renderpass_autotune_results;
-   struct tu_autotune_results_buffer* autotune_buffer;
+   tu_autotune::cmd_buf_ctx autotune_ctx;
 
    void *patchpoints_ctx;
    struct util_dynarray fdm_bin_patchpoints;

@@ -93,6 +93,7 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
    struct tu_device *device = queue->device;
    bool u_trace_enabled = u_trace_should_process(&queue->device->trace_context);
    struct util_dynarray dump_cmds;
+   struct tu_cs *autotune_cs = NULL;
 
    util_dynarray_init(&dump_cmds, NULL);
 
@@ -154,9 +155,9 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
       }
    }
 
-   if (tu_autotune_submit_requires_fence(cmd_buffers, cmdbuf_count)) {
-      struct tu_cs *autotune_cs = tu_autotune_on_submit(
-         device, &device->autotune, cmd_buffers, cmdbuf_count);
+   autotune_cs =
+      device->autotune.on_submit(cmd_buffers, cmdbuf_count);
+   if (autotune_cs) {
       submit_add_entries(device, submit, &dump_cmds, autotune_cs->entries,
                          autotune_cs->entry_count);
    }
@@ -372,6 +373,9 @@ tu_queue_init(struct tu_device *device,
                                "submitqueue create failed");
 
    queue->fence = -1;
+
+   if (global_priority == VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR)
+      device->autotune.disable_preempt_optimize();
 
    return VK_SUCCESS;
 }
