@@ -1010,8 +1010,8 @@ wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
 
    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR);
 
-   const struct display_surface_create_cac_info_valve *cac_info =
-      vk_find_struct_const( pCreateInfo->pNext, DISPLAY_SURFACE_CREATE_CAC_INFO_VALVE);
+   const VkDisplaySurfaceCACCreateInfoVALVE *cac_info =
+      vk_find_struct_const( pCreateInfo, DISPLAY_SURFACE_CAC_CREATE_INFO_VALVE);
 
    surface2 = vk_zalloc2(&instance->alloc, pAllocator, sizeof(*surface2), 8,
                         VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
@@ -1032,10 +1032,10 @@ wsi_CreateDisplayPlaneSurfaceKHR(VkInstance _instance,
 
    if (cac_info) {
       surface2->cac_dirty = 1;
-      for(int i=0; i < VALVESURFACEPLANESMAX; i++) 
+      for(unsigned i = 0; i < ARRAY_SIZE(cac_info->srcRgb); i++) 
       {
-         surface2->src_rgb[i] = cac_info->src_rgb[i];
-         surface2->dst_rgb[i] = cac_info->dst_rgb[i];
+         surface2->src_rgb[i] = cac_info->srcRgb[i];
+         surface2->dst_rgb[i] = cac_info->dstRgb[i];
       }
    }
 
@@ -2399,9 +2399,9 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
       }
 
       for (int i = 0; i < 2; i++) { // for each eye
-         VkRect2D dst_r = surface->dst_rgb[RED_L + i];
-         VkRect2D dst_g = surface->dst_rgb[GREEN_L + i];
-         VkRect2D dst_b = surface->dst_rgb[BLUE_L + i];
+         VkRect2D dst_r = surface->dst_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_RED_L_VALVE + i];
+         VkRect2D dst_g = surface->dst_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_GREEN_L_VALVE + i];
+         VkRect2D dst_b = surface->dst_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_BLUE_L_VALVE + i];
          if (i & 1) {
             // per screen coordinates for dst
             dst_r.offset.x -= 2160;
@@ -2409,9 +2409,9 @@ drm_atomic_commit(wsi_display_connector *connector, struct wsi_display_image *im
             dst_b.offset.x -= 2160;
          }
 
-         VkRect2D src_r = surface->src_rgb[RED_L + i];
-         VkRect2D src_g = surface->src_rgb[GREEN_L + i];
-         VkRect2D src_b = surface->src_rgb[BLUE_L + i];
+         VkRect2D src_r = surface->src_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_RED_L_VALVE + i];
+         VkRect2D src_g = surface->src_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_GREEN_L_VALVE + i];
+         VkRect2D src_b = surface->src_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_BLUE_L_VALVE + i];
          if ((int)src_r.extent.width < 0) {
             src_r.extent.width = -src_r.extent.width;
             src_g.extent.width = -src_g.extent.width;
@@ -2606,28 +2606,14 @@ _wsi_display_queue_next(struct wsi_swapchain *drv_chain)
 static VkResult
 wsi_display_cac_plane_adjust(struct wsi_swapchain *drv_chain,
                                  uint32_t image_index,
-                                 uint32_t plane_index,
-                                 uint32_t src_x,
-                                 uint32_t src_y,
-                                 uint32_t src_width,
-                                 uint32_t src_height,
-                                 uint32_t dst_x,
-                                 uint32_t dst_y,
-                                 uint32_t dst_width,
-                                 uint32_t dst_height)
+                                 const VkDisplayCACPlaneAdjustPresentInfoVALVE *cacplaneadjust)
 {
    struct wsi_display_swapchain *chain =
       (struct wsi_display_swapchain *) drv_chain;
    VkIcdSurfaceDisplay2 *surface2 = (VkIcdSurfaceDisplay2 *) chain->surface;
-   //printf("wid=%d\n",surface2->dst_rgb[RED_L].extent.width);
-   surface2->src_rgb[plane_index].offset.x = src_x;
-   surface2->src_rgb[plane_index].offset.y = src_y;
-   surface2->src_rgb[plane_index].extent.height = src_height;
-   surface2->src_rgb[plane_index].extent.width = src_width;
-   surface2->dst_rgb[plane_index].offset.x = dst_x;
-   surface2->dst_rgb[plane_index].offset.y = dst_y;
-   surface2->dst_rgb[plane_index].extent.height = dst_height;
-   surface2->dst_rgb[plane_index].extent.width = dst_width;
+   //printf("wid=%d\n",surface2->dst_rgb[VK_DISPLAY_SURFACE_CAC_PLANE_RED_L_VALVE].extent.width);
+   surface2->src_rgb[cacplaneadjust->planeIndex] = cacplaneadjust->srcRgb;
+   surface2->dst_rgb[cacplaneadjust->planeIndex] = cacplaneadjust->dstRgb;
    surface2->cac_dirty = 1;
    return VK_SUCCESS;
 }
