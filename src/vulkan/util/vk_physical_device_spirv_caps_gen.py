@@ -39,7 +39,9 @@ vk_physical_device_get_spirv_capabilities(const struct vk_physical_device *pdev)
     * Vulkan spec.  To handle this, we just | all the enables together.
     */
 % for cap in caps:
+% if cap != 'GraphARM':
     caps.${cap} |= ${' | '.join(caps[cap])};
+% endif
 % endfor
 
    return caps;
@@ -63,6 +65,8 @@ NON_EXISTANT_CAPS = [
 
     # Doesn't exist.
     'Shader64BitIndexingEXT',
+    # Doesn't exist.
+    'FMAKHR',
 ]
 
 def process_enable(enab):

@@ -293,6 +293,18 @@ def compute_max_enum_name(s):
         return "VK_SWAPCHAIN_IMAGE_USAGE_FLAG_BITS_MAX_ENUM"
     if s == "VkTensorTilingARM":
         return "VK_TENSOR_TILING_MAX_ENUM_ARM"
+    if s == "VkDataGraphPipelinePropertyARM":
+        return "VK_DATA_GRAPH_PIPELINE_PROPERTY_MAX_ENUM_ARM"
+    if s == "VkDataGraphPipelineSessionBindPointARM":
+        return "VK_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_TYPE_MAX_ENUM_ARM"
+    if s == "VkDataGraphPipelineSessionBindPointTypeARM":
+        return "VK_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_TYPE_MAX_ENUM_ARM"
+    if s == "VkPhysicalDeviceDataGraphOperationTypeARM":
+        return "VK_PHYSICAL_DEVICE_DATA_GRAPH_OPERATION_TYPE_MAX_ENUM_ARM"
+    if s == "VkPhysicalDeviceDataGraphProcessingEngineTypeARM":
+        return "VK_PHYSICAL_DEVICE_DATA_GRAPH_PROCESSING_ENGINE_TYPE_MAX_ENUM_ARM"
+    if s == "VkDisplaySurfacePlanesVALVE":
+        return "VK_DISPLAY_SURFACE_CAC_PLANE_MAX_VALVE"
     max_enum_name = CamelCase_to_SHOUT_CASE(s)
     last_prefix = max_enum_name.rsplit('_', 1)[-1]
     # Those special prefixes need to be always at the end
