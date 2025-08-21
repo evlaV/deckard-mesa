@@ -146,6 +146,11 @@ class Tracepoint(object):
                 field.struct_init = f"(256 << 16) | (offsetof({struct_name}, {x.name}_data) - offsetof({struct_name}, {x.name}) - sizeof(__u32))"
                 field.str_init = f"copy_string_buffer(write_struct.{x.name}_data, payload_struct->{x.name}, 255)"
                 field.str_data = f"char {x.name}_data[256]"
+            elif (x.type == "tu_sha1_str"):
+                sha1_length = (20 * 2 + 1) # Based on SHA1_DIGEST_STRING_LENGTH in <util/sha1/sha1.h>
+                field.struct_member = f"char {x.name}[{sha1_length}]"
+                field.field_type = f"char[{sha1_length}]"
+                field.str_init = f"memcpy(write_struct.{x.name}, payload_struct->{x.name}, {sha1_length})"
             else:
                 field.field_type = type_map.get(x.type, "unknown_type")
                 field.struct_member = f"__{field.field_type} {x.name}"
