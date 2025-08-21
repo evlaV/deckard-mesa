@@ -133,6 +133,9 @@ static const struct vk_instance_extension_table tu_instance_extensions_supported
    .EXT_surface_maintenance1            = true,
    .EXT_swapchain_colorspace            = true,
 #endif
+#ifdef VK_USE_PLATFORM_DISPLAY_KHR
+   .VALVE_chromatic_aberration_correction = true,
+#endif
 } };
 
 static bool
