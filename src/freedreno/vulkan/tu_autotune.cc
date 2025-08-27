@@ -204,7 +204,7 @@ struct PACKED tu_autotune::config_t {
    }
 };
 
-union PACKED tu_autotune::packed_config_t {
+union tu_autotune::packed_config_t {
    config_t config;
    uint32_t bits = 0;
    static_assert(sizeof(bits) >= sizeof(config));
@@ -905,8 +905,9 @@ struct tu_autotune::rp_history {
  private:
    tu_at_durations sysmem_rp_durations;
    tu_at_durations gmem_rp_durations;
-   static constexpr uint32_t MIN_DURATION_COUNT = 5;
-   static constexpr double DURATION_RECENCY_BIAS = 0.99;
+   /* Amount of duration samples for profiling before we start averaging. */
+   static constexpr uint32_t MIN_PROFILE_DURATION_COUNT = 5;
+   static constexpr double PROFILE_DURATION_RECENCY_BIAS = 0.99;
 
  public:
    size_t hash; /* The hash of the renderpass, just for debug output. */
@@ -1025,7 +1026,7 @@ struct tu_autotune::rp_history {
                sysmem_prob = avg_gmem < avg_sysmem ? 0 : 100;
             }
          } else {
-            if (sysmem_count < MIN_DURATION_COUNT || gmem_count < MIN_DURATION_COUNT) {
+            if (sysmem_count < MIN_PROFILE_DURATION_COUNT || gmem_count < MIN_PROFILE_DURATION_COUNT) {
                /* Not enough data to make a decision, bias towards least used. */
                sysmem_prob = sysmem_count < gmem_count ? 75 : 25;
             } else {
@@ -1111,7 +1112,7 @@ struct tu_autotune::rp_history {
 
             uint64_t avg_sysmem_draw;
             uint32_t sysmem_draw_count;
-            history.sysmem_rp_durations.get_avg(avg_sysmem_draw, sysmem_draw_count, true, DURATION_RECENCY_BIAS);
+            history.sysmem_rp_durations.get_avg(avg_sysmem_draw, sysmem_draw_count, true, PROFILE_DURATION_RECENCY_BIAS);
 
             if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                mesa_logi("autotune-preempt %016" PRIx64 ": avg_sysmem_draw: %lu us (%u), latency_risk: %u"
@@ -1131,7 +1132,7 @@ struct tu_autotune::rp_history {
 #endif
             }
 
-            if (sysmem_draw_count >= MIN_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
+            if (sysmem_draw_count >= MIN_PROFILE_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
                latency_risk.store(true, std::memory_order_relaxed);
                if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                   mesa_logi("autotune-preempt %016" PRIx64 ": high sysmem draw duration %lu us, marking as latency sensitive",
@@ -1275,13 +1276,13 @@ struct tu_autotune::rp_history {
       if (entry_config.test(metric_flag::TS)) {
          if (entry.sysmem) {
             sysmem_rp_durations.add(entry.get_rp_duration(), entry.draw_count);
-            sysmem_rp_durations.get_avg(avg_sysmem, sysmem_count, false, DURATION_RECENCY_BIAS);
+            sysmem_rp_durations.get_avg(avg_sysmem, sysmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
 
             if (at_config.test(mod_flag::PREEMPT_OPTIMIZE))
                preempt_optimize.update_sysmem(*this);
          } else {
             gmem_rp_durations.add(entry.get_rp_duration(), 1);
-            gmem_rp_durations.get_avg(avg_gmem, gmem_count, false, DURATION_RECENCY_BIAS);
+            gmem_rp_durations.get_avg(avg_gmem, gmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
 
             if (entry_config.test(metric_flag::TS_TILE) && at_config.test(mod_flag::PREEMPT_OPTIMIZE))
                preempt_optimize.update_gmem(*this, entry.get_max_tile_duration());

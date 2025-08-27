@@ -1076,7 +1076,8 @@ static bool
 use_hw_binning(struct tu_cmd_buffer *cmd)
 {
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
-   const struct tu_tiling_config *tiling = &fb->tiling[cmd->state.gmem_layout];
+   const struct tu_tiling_config *tiling =
+      tu_framebuffer_get_tiling_config(fb, cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, tiling);
 
    /* XFB commands are emitted for BINNING || SYSMEM, which makes it
