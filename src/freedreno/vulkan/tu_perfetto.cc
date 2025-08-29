@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <math.h>
 #include <perfetto.h>
 
 #include "tu_perfetto.h"
@@ -626,14 +627,17 @@ trace_payload_as_extra_end_render_pass_with_bin_coordinates(
    const struct trace_end_render_pass *payload,
    const void *indirect_data)
 {
+   const struct tu_perfetto_bin_layout_info *info =
+      (struct tu_perfetto_bin_layout_info *)payload->binInfo;
+   char buff[10 * 4 + ARRAY_SIZE("((, ), (, ))")];
+
    trace_payload_as_extra_end_render_pass(event, payload, indirect_data);
 
-   uint32_t i = 0;
-   char buff[10 * 4 + ARRAY_SIZE("((, ), (, ))")];
-   util_dynarray_foreach(payload->binCoordinates, VkRect2D, tile_rect) {
+   uint32_t bin_idx = 0;
+   util_dynarray_foreach(&info->bin_array, VkRect2D, tile_rect) {
       auto data = event->add_extra_data();
 
-      sprintf(buff, "binCoordinates[%" PRIu32 "]", i);
+      sprintf(buff, "binCoordinates[%" PRIu32 "]", bin_idx);
       data->set_name(buff);
 
       sprintf(buff, "((%" PRIi32 ", %" PRIi32"),(%" PRIu32 ", %" PRIu32 "))",
@@ -642,7 +646,54 @@ trace_payload_as_extra_end_render_pass_with_bin_coordinates(
               tile_rect->offset.y + tile_rect ->extent.height - 1);
       data->set_value(buff);
 
-      i++;
+      bin_idx++;
+   }
+
+   for (uint32_t i = 0; i < info->vp_count; i++) {
+      const VkViewport viewport = info->vp_array[i];
+      auto data = event->add_extra_data();
+
+      sprintf(buff, "viewports[%" PRIu32 "]", i);
+      data->set_name(buff);
+
+      // TODO: Convert to uint32_t ?
+      sprintf(buff, "((%f, %f), (%f, %f))",
+              viewport.x, viewport.y, 
+              viewport.x + viewport.width - 1,
+              viewport.y + fabs(viewport.height) - 1);
+      data->set_value(buff);
+   }
+
+   for (uint32_t i = 0; i < info->sc_count; i++) {
+      VkRect2D scissor = info->sc_array[i];
+      auto data = event->add_extra_data();
+
+      sprintf(buff, "scissors[%" PRIu32 "]", i);
+      data->set_name(buff);
+
+      sprintf(buff, "((%" PRIi32 ", %" PRIi32"),(%" PRIu32 ", %" PRIu32 "))",
+              scissor.offset.x, scissor.offset.y,
+              scissor.offset.x + scissor.extent.width - 1,
+              scissor.offset.y + scissor.extent.height - 1);
+      data->set_value(buff);
+   }
+
+   for (uint32_t view = 0; view < info->view_count; view++) {
+      uint32_t idx = 0;
+      util_dynarray_foreach(&info->fdm_scales_per_view[view],
+                            VkExtent2D,
+                            fdm_scale) {
+         auto data = event->add_extra_data();
+
+         sprintf(buff, "perViewFDMScale[%" PRIu32 "][%" PRIu32 "]", view, idx);
+         data->set_name(buff);
+
+         sprintf(buff, "(%" PRIu32 ", %" PRIu32 ")",
+                 fdm_scale->width, fdm_scale->height);
+         data->set_value(buff);
+
+         idx++;
+      }
    }
 }
 
