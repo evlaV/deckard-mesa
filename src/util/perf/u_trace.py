@@ -151,6 +151,9 @@ class Tracepoint(object):
                 field.struct_member = f"char {x.name}[{sha1_length}]"
                 field.field_type = f"char[{sha1_length}]"
                 field.str_init = f"memcpy(write_struct.{x.name}, payload_struct->{x.name}, {sha1_length})"
+            elif x.name == 'binInfo':
+                # HACK
+                continue
             else:
                 field.field_type = type_map.get(x.type, "unknown_type")
                 field.struct_member = f"__{field.field_type} {x.name}"
