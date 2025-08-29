@@ -605,13 +605,13 @@ struct tu_autotune::rp_entry {
       auto read_counter = [&](const struct tu_perf_ctr_sample &sample, const struct fd_perfcntr_countable *ctbl,
                               uint64_t &outValue, const char *name) {
          if (sample.selector_begin != sample.selector_end || sample.selector_begin != ctbl->selector) {
-            mesa_loge("autotune %016" PRIx64 ": %s: selector mismatch %u != %u (%u - %u)", rp_hash, ctbl->name,
+            mesa_loge("autotune %016" PRIx64 ": %s: selector mismatch %" PRIu32 " != %" PRIu32 " (%" PRIu32 " - %" PRIu32 ")", rp_hash, ctbl->name,
                       sample.selector_begin, sample.selector_end, sample.selector_begin, ctbl->selector);
          }
 
          outValue = sample.end - sample.begin;
          if (sample.end < sample.begin) {
-            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %lu < %lu", rp_hash, name, sample.end, sample.begin);
+            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %" PRIu64 " < %" PRIu64, rp_hash, name, sample.end, sample.begin);
             outValue = 0;
          }
       };
@@ -624,7 +624,7 @@ struct tu_autotune::rp_entry {
       read_counter(gpu.always_count, at.always_count, always_count, "always_count");
 
       if (preemption_reaction_delay || num_preemptions) {
-         mesa_logi("autotune %016" PRIx64 ": preemption_reaction_delay: %lu, always_count: %lu, num_preemptions: %lu",
+         mesa_logi("autotune %016" PRIx64 ": preemption_reaction_delay: %" PRIu64 ", always_count: %" PRIu64 ", num_preemptions: %" PRIu64,
                    rp_hash, preemption_reaction_delay, always_count, num_preemptions);
       }
 
@@ -990,11 +990,11 @@ struct tu_autotune::rp_history {
             const float drawcall_bandwidth_per_sample =
                (float) rp_state->drawcall_bandwidth_per_sample_sum / rp_state->drawcall_count;
 
-            mesa_logi("autotune-bw %016" PRIx64 ":%u selecting %s", history.hash, rp_state->drawcall_count,
+            mesa_logi("autotune-bw %016" PRIx64 ":%" PRIu32 " selecting %s", history.hash, rp_state->drawcall_count,
                       render_mode_str(mode));
             mesa_logi("   mean_samples=%f, draw_bandwidth_per_sample=%.2f, total_draw_call_bandwidth=%" PRIu64,
                       mean_samples, drawcall_bandwidth_per_sample, total_draw_call_bandwidth);
-            mesa_logi("   render_area=%ux%u, sysmem_bandwidth_per_pixel=%u, gmem_bandwidth_per_pixel=%u", extent.width,
+            mesa_logi("   render_area=%" PRIu32 "x%" PRIu32 ", sysmem_bandwidth_per_pixel=%" PRIu32 ", gmem_bandwidth_per_pixel=%" PRIu32, extent.width,
                       extent.height, pass->sysmem_bandwidth_per_pixel, pass->gmem_bandwidth_per_pixel);
             mesa_logi("   sysmem_bandwidth=%" PRIu64 ", gmem_bandwidth=%" PRIu64, sysmem_bandwidth, gmem_bandwidth);
          }
@@ -1043,7 +1043,7 @@ struct tu_autotune::rp_history {
          sysmem_probability.store(sysmem_prob, std::memory_order_relaxed);
 
          if (TU_AUTOTUNE_DEBUG_LOG_PROFILED) {
-            mesa_logi("autotune-prof%s update: avg_gmem: %lu avg_sysmem: %lu = sysmem_probability: %u",
+            mesa_logi("autotune-prof%s update: avg_gmem: %" PRIu64 " avg_sysmem: %" PRIu64 " = sysmem_probability: %" PRIu32,
                       immediate ? " imm" : "", avg_gmem, avg_sysmem, sysmem_prob);
          }
       }
@@ -1057,7 +1057,7 @@ struct tu_autotune::rp_history {
          render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;
 
          if (TU_AUTOTUNE_DEBUG_LOG_PROFILED) {
-            mesa_logi("autotune-prof %016" PRIx64 ": %u%% sysmem chance, using %s", history.hash, l_sysmem_probability,
+            mesa_logi("autotune-prof %016" PRIx64 ": %" PRIu32 "%% sysmem chance, using %s", history.hash, l_sysmem_probability,
                       render_mode_str(mode));
          }
 
@@ -1115,9 +1115,9 @@ struct tu_autotune::rp_history {
             history.sysmem_rp_durations.get_avg(avg_sysmem_draw, sysmem_draw_count, true, PROFILE_DURATION_RECENCY_BIAS);
 
             if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
-               mesa_logi("autotune-preempt %016" PRIx64 ": avg_sysmem_draw: %lu us (%u), latency_risk: %u"
+               mesa_logi("autotune-preempt %016" PRIx64 ": avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-                         ", preemption_latency: %lu"
+                         ", preemption_latency: %" PRIu64
 #endif
                          ,
                          history.hash, ticks_to_us(avg_sysmem_draw), avg_sysmem_draw > TARGET_THRESHOLD, l_latency_risk
@@ -1135,7 +1135,7 @@ struct tu_autotune::rp_history {
             if (sysmem_draw_count >= MIN_PROFILE_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
                latency_risk.store(true, std::memory_order_relaxed);
                if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
-                  mesa_logi("autotune-preempt %016" PRIx64 ": high sysmem draw duration %lu us, marking as latency sensitive",
+                  mesa_logi("autotune-preempt %016" PRIx64 ": high sysmem draw duration %" PRIu64 " us, marking as latency sensitive",
                             history.hash, ticks_to_us(avg_sysmem_draw));
                }
             }
@@ -1172,7 +1172,7 @@ struct tu_autotune::rp_history {
                   latency_switch_ts = now + latency_insensitive_duration_ns;
 
                   if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
-                     mesa_logi("autotune-preempt %016" PRIx64 ": high gmem tile duration %lu, marking as latency sensitive",
+                     mesa_logi("autotune-preempt %016" PRIx64 ": high gmem tile duration %" PRIu64 ", marking as latency sensitive",
                                history.hash, avg_gmem_tile);
                   }
                }
@@ -1180,9 +1180,9 @@ struct tu_autotune::rp_history {
                uint32_t l_tile_size_divisor = tile_size_divisor.load(std::memory_order_relaxed);
                if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                   mesa_logi(
-                     "autotune-preempt %016" PRIx64 ": avg_gmem_tile: %lu us (%u), latency_risk: %u, tile_size_divisor: %u"
+                     "autotune-preempt %016" PRIx64 ": avg_gmem_tile: %" PRIu64 " us (%u), latency_risk: %u, tile_size_divisor: %" PRIu32
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-                     ", preemption_latency: %lu"
+                     ", preemption_latency: %" PRIu64
 #endif
                      ,
                      history.hash, ticks_to_us(avg_gmem_tile), avg_gmem_tile > TARGET_THRESHOLD, l_latency_risk,
@@ -1232,7 +1232,7 @@ struct tu_autotune::rp_history {
 
                   uint32_t new_tile_size_divisor = l_tile_size_divisor + delta;
                   if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
-                     mesa_logi("autotune-preempt %016" PRIx64 ": updating tile size divisor: %u -> %u", history.hash,
+                     mesa_logi("autotune-preempt %016" PRIx64 ": updating tile size divisor: %" PRIu32 " -> %" PRIu32, history.hash,
                                l_tile_size_divisor, new_tile_size_divisor);
                   }
 
@@ -1343,7 +1343,7 @@ tu_autotune::process_entries()
    }
 
    if (TU_AUTOTUNE_DEBUG_LOG_BASE && active_batches.size() > 10) {
-      mesa_logw("autotune: high amount of active batches: %zu, fence: %u < %u", active_batches.size(), current_fence,
+      mesa_logw("autotune: high amount of active batches: %zu, fence: %" PRIu32 " < %" PRIu32, active_batches.size(), current_fence,
                 active_batches.front()->fence);
    }
 }
@@ -1545,7 +1545,7 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
 
    if (can_early_return && early_return_mode) {
       if (TU_AUTOTUNE_DEBUG_LOG_BASE) {
-         mesa_logi("autotune %016" PRIx64 ": %u draw calls, using %s (early)",
+         mesa_logi("autotune %016" PRIx64 ": %" PRIu32 " draw calls, using %s (early)",
                    rp_key(pass, framebuffer, cmd_buffer).hash, rp_state->drawcall_count,
                    render_mode_str(*early_return_mode));
       }
@@ -1567,7 +1567,7 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
 
    if (early_return_mode) {
       if (TU_AUTOTUNE_DEBUG_LOG_BASE) {
-         mesa_logi("autotune %016" PRIx64 ": %u draw calls, using %s (late)", key.hash, rp_state->drawcall_count,
+         mesa_logi("autotune %016" PRIx64 ": %" PRIu32 " draw calls, using %s (late)", key.hash, rp_state->drawcall_count,
                    render_mode_str(*early_return_mode));
       }
       return *early_return_mode;
