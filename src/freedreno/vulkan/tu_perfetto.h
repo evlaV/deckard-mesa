@@ -14,6 +14,8 @@
 #include <vulkan/vulkan.h>
 #include "c11/threads.h"
 
+#include "util/u_dynarray.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -63,6 +65,18 @@ struct tu_perfetto_state {
 
    uint64_t gpu_max_timestamp;
    uint64_t gpu_timestamp_offset;
+};
+
+struct tu_perfetto_bin_layout_info {
+   struct util_dynarray bin_array;
+
+   uint32_t vp_count;
+   uint32_t sc_count;
+   VkViewport *vp_array;
+   VkRect2D *sc_array;
+
+   uint32_t view_count;
+   struct util_dynarray fdm_scales_per_view[];
 };
 
 void tu_perfetto_init(void);
