@@ -2524,7 +2524,7 @@ template <chip CHIP>
 static void
 tu_trace_end_render_pass(struct tu_cmd_buffer *cmd,
                          bool gmem,
-                         struct util_dynarray *bin_array)
+                         struct tu_perfetto_bin_layout_info *bin_info)
 {
    if (!u_trace_enabled(&cmd->device->trace_context))
       return;
@@ -2558,7 +2558,7 @@ tu_trace_end_render_pass(struct tu_cmd_buffer *cmd,
       cmd->state.rp.lrz_disable_reason ? cmd->state.rp.lrz_disable_reason
                                        : "",
       lrz_disabled_at_draw, lrz_write_disabled_at_draw, addr,
-      bin_array);
+      bin_info);
 }
 
 static void
@@ -3256,11 +3256,11 @@ tu_fdm_setup_merged_tiles(struct tu_cmd_buffer *cmd, uint32_t pipe,
    return merged_tiles;
 }
 
-static void tu_perfetto_append_tile(struct util_dynarray *array,
+static void tu_perfetto_append_tile(struct tu_perfetto_bin_layout_info *bin_info,
                                     const struct tu_tile_config *tile_config,
                                     VkExtent2D tile_size)
 {
-   if (!array)
+   if (!bin_info)
       return;
 
    const VkRect2D tile = (VkRect2D) {
@@ -3270,7 +3270,18 @@ static void tu_perfetto_append_tile(struct util_dynarray *array,
                   .height = tile_config->sysmem_extent.height * tile_size.height, },
    };
 
-   util_dynarray_append(array, __typeof__(tile), tile);
+   util_dynarray_append(&bin_info->bin_array, __typeof__(tile), tile);
+
+   for (uint32_t view = 0; view < bin_info->view_count; view++) {
+      VkExtent2D fdm_scale = tile_config->frag_areas[view]; 
+
+      if (!(tile_config->visible_views & BITFIELD_BIT(view)))
+         fdm_scale = (VkExtent2D) {0, 0};
+
+      util_dynarray_append(&bin_info->fdm_scales_per_view[view],
+                           __typeof__(fdm_scale),
+                           fdm_scale);
+   }
 }
 
 template <chip CHIP>
@@ -3281,8 +3292,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 {
    const struct tu_tiling_config *tiling = cmd->state.tiling;
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, tiling);
+   struct tu_perfetto_bin_layout_info *bin_info = NULL;
    const struct tu_image_view *fdm = NULL;
-   struct util_dynarray *bin_array = NULL;
 
    if (cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED) {
       fdm = cmd->state.attachments[cmd->state.pass->fragment_density_map.attachment];
@@ -3316,12 +3327,40 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
    tu6_tile_render_begin<CHIP>(cmd, &cmd->cs, at_ctx, fdm_offsets);
 
+   unsigned views;
+   if (has_fdm)
+      views = tu_fdm_num_layers(cmd);
+   else
+      views = cmd->state.pass->num_views ? cmd->state.pass->num_views : 1;
+
 #ifdef HAVE_PERFETTO
    if (u_trace_enabled(&cmd->device->trace_context)) {
-      /* The Perfetto code will ralloc_steal() this and will handle freeing. */
-      bin_array =
-         (struct util_dynarray *)ralloc_size(NULL, sizeof(*bin_array));
-      util_dynarray_init(bin_array, (void *)bin_array);
+      /* The Perfetto code will ralloc_steal() these and will handle freeing. */
+      bin_info = (struct tu_perfetto_bin_layout_info *)
+         ralloc_size(NULL,
+                     sizeof(*bin_info) +
+                        sizeof(bin_info->fdm_scales_per_view[0]) * views);
+      void *mem_ctx = bin_info;
+
+      util_dynarray_init(&bin_info->bin_array, mem_ctx);
+
+      for (uint32_t i = 0; i < views; i++)
+         util_dynarray_init(&bin_info->fdm_scales_per_view[i], mem_ctx);
+      bin_info->view_count = views;
+
+      const struct vk_viewport_state *vp = &cmd->vk.dynamic_graphics_state.vp;
+
+      bin_info->vp_array = (VkViewport *)
+         ralloc_array_size(mem_ctx, sizeof(*bin_info->vp_array),
+                           vp->viewport_count);
+      typed_memcpy(bin_info->vp_array, vp->viewports, vp->viewport_count);
+      bin_info->vp_count = vp->viewport_count;
+
+      bin_info->sc_array = (VkRect2D *)
+         ralloc_array_size(mem_ctx, sizeof(*bin_info->sc_array),
+                           vp->scissor_count);
+      typed_memcpy(bin_info->sc_array, vp->scissors, vp->scissor_count);
+      bin_info->sc_count = vp->scissor_count;
    }
 #endif
 
@@ -3361,8 +3400,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
                   const struct tu_tile_config *const tile = &tiles[tile_idx];
 
-                  if (bin_array)
-                     tu_perfetto_append_tile(bin_array, tile, tiling->tile0);
+                  if (bin_info)
+                     tu_perfetto_append_tile(bin_info, tile, tiling->tile0);
 
                   tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets,
                                         at_ctx, vsc);
@@ -3394,8 +3433,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                else
                   tu_identity_frag_area(cmd, &tile);
 
-               if (bin_array)
-                  tu_perfetto_append_tile(bin_array, &tile, tiling->tile0);
+               if (bin_info)
+                  tu_perfetto_append_tile(bin_info, &tile, tiling->tile0);
 
                tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets,
                                      at_ctx, vsc);
@@ -3407,7 +3446,16 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
    tu6_tile_render_end<CHIP>(cmd, &cmd->cs, at_ctx);
 
-   tu_trace_end_render_pass<CHIP>(cmd, true, bin_array);
+#ifdef HAVE_PERFETTO
+   if (u_trace_enabled(&cmd->device->trace_context)) {
+      util_dynarray_trim(&bin_info->bin_array);
+      
+      for (uint32_t view = 0; view < bin_info->view_count; view++)
+         util_dynarray_trim(&bin_info->bin_array);
+   }
+#endif
+
+   tu_trace_end_render_pass<CHIP>(cmd, true, bin_info);
 
    /* We have trashed the dynamically-emitted viewport, scissor, and FS params
     * via the patchpoints, so we need to re-emit them if they are reused for a
@@ -3443,6 +3491,7 @@ tu_cmd_render_sysmem(struct tu_cmd_buffer *cmd,
                         cmd->trace_renderpass_start,
                         u_trace_end_iterator(&cmd->rp_trace));
 
+   // TODO: pass viewports and scissors?
    tu_trace_end_render_pass<CHIP>(cmd, false, NULL);
 }
 
