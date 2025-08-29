@@ -124,7 +124,7 @@ begin_end_tp('render_pass',
               Arg(type='const char *',                          var='lrzWriteDisableReason',                                c_format='%s'),
               Arg(type='int32_t',                               var='lrzWriteDisabledAtDraw',                               c_format='%d'),
               Arg(type='uint32_t',                              var='lrzStatus', c_format='%s', to_prim_type='(fd_lrz_gpu_dir_to_str((enum fd_lrz_gpu_dir)({} & 0xff)))', is_indirect=True),
-              Arg(type='struct util_dynarray *',                var='binCoordinates', c_format='%s', to_prim_type='"binCoordinates"', steal_alloc=True),])
+              Arg(type='void *',                               var='binInfo', c_format='%s', to_prim_type='"binInfo"', steal_alloc=True),])
 
 begin_end_tp('draw',
              [Arg(type='uint32_t', var='count', c_format='%u'),
