@@ -1136,7 +1136,7 @@ struct tu_autotune::rp_history {
                latency_risk.store(true, std::memory_order_relaxed);
                if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                   mesa_logi("autotune-preempt %016" PRIx64 ": high sysmem draw duration %lu us, marking as latency sensitive",
-                            ticks_to_us(avg_sysmem_draw), history.hash);
+                            history.hash, ticks_to_us(avg_sysmem_draw));
                }
             }
          }
@@ -1173,7 +1173,7 @@ struct tu_autotune::rp_history {
 
                   if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                      mesa_logi("autotune-preempt %016" PRIx64 ": high gmem tile duration %lu, marking as latency sensitive",
-                               avg_gmem_tile, history.hash);
+                               history.hash, avg_gmem_tile);
                   }
                }
             } else {
