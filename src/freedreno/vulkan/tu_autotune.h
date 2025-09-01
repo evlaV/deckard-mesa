@@ -157,6 +157,8 @@ struct tu_autotune {
              const struct tu_framebuffer *framebuffer,
              const struct tu_cmd_buffer *cmd);
 
+      rp_key(const rp_key &key, uint32_t duplicates);
+
       /* Equality operator, used in unordered_map. */
       constexpr bool operator==(const rp_key &other) const noexcept
       {
@@ -212,6 +214,8 @@ struct tu_autotune {
 
       /* Creates a new RP entry attached to this CB. */
       rp_entry &attach_rp_entry(struct tu_device *device, rp_history &entry, config_t config, uint32_t draw_count);
+
+      rp_entry *find_rp_entry(const rp_key &key);
 
       friend struct tu_autotune;
 

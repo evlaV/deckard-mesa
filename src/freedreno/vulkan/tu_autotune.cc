@@ -426,6 +426,8 @@ struct tu_autotune::rp_entry {
    uint32_t tile_count;
    uint32_t draw_count;
 
+   uint32_t duplicates { 0 };
+
    rp_entry(struct tu_device *device, rp_history &history, config_t config, uint32_t draw_count)
        : device(device), map(nullptr), history(&history), config(config), draw_count(draw_count)
    {
@@ -759,11 +761,26 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
                             const struct tu_framebuffer *framebuffer,
                             const struct tu_cmd_buffer *cmd)
 {
-   /* Q: Why not make the key from framebuffer + renderpass pointers?
-    * A: At least DXVK creates new framebuffers each frame while keeping renderpasses the same. Hashing the contents
-    *    of the framebuffer and renderpass is more stable, and it maintains stability across runs, so we can reliably
-    *    identify the same renderpass instance.
+   /* It may be hard to match the same renderpass between frames, or rather it's hard to strike a
+    * balance between being too lax with identifying different renderpasses as the same one, and
+    * not recognizing the same renderpass between frames when only a small thing changed.
+    * This is mainly an issue with translation layers (particularly DXVK), because a layer may
+    * break a "renderpass" into smaller ones due to some heuristic that isn't consistent between
+    * frames.
+    * Note that not using image iova leads to too many false matches.
     */
+
+   struct packed_att_properties {
+      union {
+         struct {
+            bool load          : 1;
+            bool store         : 1;
+            bool load_stencil  : 1;
+            bool store_stencil : 1;
+         };
+         uint32_t value;
+      };
+   };
 
    auto get_hash = [&](uint32_t *data, size_t size) {
       auto ptr = data;
@@ -772,11 +789,16 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
       *ptr++ = framebuffer->layers;
 
       for (unsigned i = 0; i < pass->attachment_count; i++) {
-         *ptr++ = cmd->state.attachments[i]->view.width;
-         *ptr++ = cmd->state.attachments[i]->view.height;
-         *ptr++ = cmd->state.attachments[i]->image->vk.format;
-         *ptr++ = cmd->state.attachments[i]->image->vk.array_layers;
-         *ptr++ = cmd->state.attachments[i]->image->vk.mip_levels;
+         *ptr++ = packed_att_properties {
+            {
+               .load = pass->attachments[i].load,
+               .store = pass->attachments[i].store,
+               .load_stencil = pass->attachments[i].load_stencil,
+               .store_stencil = pass->attachments[i].store_stencil,
+            }
+         }.value;
+         *((uint64_t *) ptr) = cmd->state.attachments[i]->image->iova + cmd->state.attachments[i]->view.offset;
+         ptr += 2;
       }
 
       return XXH64(data, size * sizeof(uint32_t), 0);
@@ -785,8 +807,8 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
    /* We do a manual Boost-style "small vector" optimization here where the stack is used for the vast majority of
     * cases, while only extreme cases need to allocate on the heap.
     */
-   size_t data_count = 3 + (pass->attachment_count * 5);
-   constexpr size_t STACK_MAX_DATA_COUNT = 3 + (5 * 5); /* in u32 units. */
+   size_t data_count = 3 + (pass->attachment_count * 3);
+   constexpr size_t STACK_MAX_DATA_COUNT = 3 + (5 * 3); /* in u32 units. */
 
    if (data_count <= STACK_MAX_DATA_COUNT) {
       /* If the data is small enough, we can use the stack. */
@@ -797,6 +819,11 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
       std::vector<uint32_t> vec(data_count);
       hash = get_hash(vec.data(), vec.size());
    }
+}
+
+tu_autotune::rp_key::rp_key(const rp_key &key, uint32_t duplicates)
+{
+   hash = XXH64(&key.hash, sizeof(key.hash), duplicates);
 }
 
 /* Draw duration tracker and sampler, built atop circular buffers.
@@ -911,6 +938,7 @@ struct tu_autotune::rp_history {
 
  public:
    size_t hash; /* The hash of the renderpass, just for debug output. */
+   uint32_t duplicates;
 
    rp_history(size_t hash): hash(hash)
    {
@@ -1502,6 +1530,16 @@ tu_autotune::cmd_buf_ctx::attach_rp_entry(struct tu_device *device,
    return batch->entries.emplace_back(device, history, config, drawcall_count);
 }
 
+tu_autotune::rp_entry *
+tu_autotune::cmd_buf_ctx::find_rp_entry(const rp_key &key)
+{
+   for (auto &entry : batch->entries) {
+      if (entry.history->hash == key.hash)
+         return &entry;
+   }
+   return nullptr;
+}
+
 tu_autotune::render_mode
 tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx)
 {
@@ -1575,6 +1613,20 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    }
 
    rp_key key(pass, framebuffer, cmd_buffer);
+
+   if (config.test(mod_flag::SMALL_SYSMEM)) {
+      /* When nearly identical renderpasses appear multiple times within the same command buffer,
+       * we need to generate a unique hash for each instance to distinguish them.
+       * While this approach doesn't address identical renderpasses across different command buffers,
+       * it is good enough in most cases.
+       */
+      rp_entry *entry = cb_ctx.find_rp_entry(key);
+      if (entry) {
+         entry->duplicates++;
+         key = rp_key(key, entry->duplicates);
+      }
+   }
+
    auto &history = find_or_create_rp_history(key);
    *rp_ctx = &cb_ctx.attach_rp_entry(device, history, config, rp_state->drawcall_count);
 
