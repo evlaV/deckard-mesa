@@ -856,6 +856,11 @@ class tu_at_durations {
       }
    }
 
+   uint32_t get_size() const noexcept
+   {
+      return size;
+   }
+
    void clear() noexcept
    {
       /* No need to free any allocations, we can just reset the head/size. */
@@ -1319,13 +1324,15 @@ struct tu_autotune::rp_history {
 
       if (entry_config.test(metric_flag::TS)) {
          if (entry.sysmem) {
-            sysmem_rp_durations.add(entry.get_rp_duration(), entry.draw_count);
+            if (!at_config.is_enabled(algorithm::PROFILED_IMM) || sysmem_rp_durations.get_size() == 0)
+               sysmem_rp_durations.add(entry.get_rp_duration(), entry.draw_count);
             sysmem_rp_durations.get_avg(avg_sysmem, sysmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
 
             if (at_config.test(mod_flag::PREEMPT_OPTIMIZE))
                preempt_optimize.update_sysmem(*this);
          } else {
-            gmem_rp_durations.add(entry.get_rp_duration(), 1);
+            if (!at_config.is_enabled(algorithm::PROFILED_IMM) || gmem_rp_durations.get_size() == 0)
+               gmem_rp_durations.add(entry.get_rp_duration(), 1);
             gmem_rp_durations.get_avg(avg_gmem, gmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
 
             if (entry_config.test(metric_flag::TS_TILE) && at_config.test(mod_flag::PREEMPT_OPTIMIZE))
