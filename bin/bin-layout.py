@@ -592,6 +592,15 @@ class App:
         ui.clear_canvas()
         ui.set_slice_selector_items(self.__items)
 
+    def __vr_mode_possible(view_count, viewports, scissors):
+        if view_count < 2:
+            return False
+
+        if len(viewports) < 2 or len(scissors) < 2:
+            return False
+
+        return True
+
     def on_slice_id_select(self, ui, slice_id):
         ui.set_slice_id_label(slice_id)
 
@@ -622,10 +631,33 @@ class App:
 
         ui.set_view_options(tile_info.view_count)
 
+        ui.set_vr_mode_availability(App.__vr_mode_possible(tile_info.view_count, vp['viewports'], vp['scissors']))
+
         self.draw_view(ui, 0)
 
-    def draw_view(self, ui, view_idx):
+    def on_vr_mode_activation(self, ui):
+        ui.clear_image_options_no_draw()
+        ui.select_image_option_no_draw(DrawLayer.FRAMEBUFFER)
+        ui.select_image_option_no_draw(DrawLayer.SCISSOR_0)
+
+        self.draw_view(ui, 0, no_refresh=True)
+
+        ui.clear_vr_image_options_no_draw()
+        ui.select_vr_image_option_no_draw(DrawLayer.FRAMEBUFFER)
+        ui.select_vr_image_option_no_draw(DrawLayer.SCISSOR_1)
+
+        self.draw_vr_view(ui, 1)
+
+    def draw_view(self, ui, view_idx, no_refresh=False):
         ui.set_canvas_image(self.__draw.render(view_idx))
+
+        if no_refresh:
+            return
+
+        ui.refresh_canvas_image()
+
+    def draw_vr_view(self, ui, view_idx):
+        ui.set_canvas_vr_image(self.__draw.render(view_idx))
         ui.refresh_canvas_image()
 
     def clear_draw_layer(self):
@@ -685,7 +717,13 @@ class UI:
             self.__image.close()
             self.__image = None
 
+        if self.__vr_image:
+            self.__vr_image.close()
+            self.__vr_image = None
+
     def refresh_canvas_image(self):
+        EYE_PADDING = 4
+
         if not self.__image:
             return
 
@@ -700,6 +738,9 @@ class UI:
 
         c_width = self.__canvas.winfo_width()
         c_height = self.__canvas.winfo_height()
+
+        if self.__vr_mode:
+            c_width = (c_width - EYE_PADDING) / 2
 
         img_width, img_height = self.__image.size
         scale_factor = min(c_width / img_width, c_height / img_height)
@@ -716,7 +757,26 @@ class UI:
 
         self.__canvas.delete("all")
         self.__canvas.create_image(center, image=photo, anchor=tk.CENTER)
-        self.__canvas.image = photo ## TODO: is this needed?
+        self.__canvas.image = photo
+
+        if self.__vr_mode:
+            resized_vr_image = resize_image(self.__vr_image, scale_factor)
+            if not resized_vr_image:
+                return
+
+            photo = ImageTk.PhotoImage(resized_vr_image)
+
+            # TODO: Close the resized_vr_image somewhere?
+
+            center = (center[0] + c_width + EYE_PADDING, center[1])
+            self.__canvas.create_image(center, image=photo, anchor=tk.CENTER)
+            self.__canvas.image = [self.__canvas.image, photo]
+
+            real_c_width = self.__canvas.winfo_width()
+            real_c_height = self.__canvas.winfo_height()
+            self.__canvas.create_line(real_c_width / 2 - (EYE_PADDING / 2), 0, real_c_width / 2 - (EYE_PADDING / 2), real_c_height, fill='white', width=EYE_PADDING)
+            #self.__canvas.create_line(0, 0, 20000, 20000, fill='white', width=10)
+
 
     def set_canvas_image(self, new_image):
         if self.__image:
@@ -724,17 +784,44 @@ class UI:
 
         self.__image = new_image
 
+    def set_canvas_vr_image(self, new_image):
+        if self.__vr_image:
+            self.__vr_image.close()
+
+        self.__vr_image = new_image
+
+    def set_vr_mode_availability(self, available):
+        self.__vr_mode_button['state'] = tk.NORMAL if available else tk.DISABLED
+
     def set_view_options(self, view_count):
         self.__view_selector['values'] = [ str(i) for i in range(view_count) ]
         self.__view_selector.current(0)
+
+        self.__vr_view_selector['values'] = [ str(i) for i in range(view_count) ]
+        self.__vr_view_selector.current(1)
 
     def delete_image_options(self):
         current_items = self.__image_options.get_children()
         for item in current_items:
             self.__image_options.delete(item)
 
+        current_items = self.__vr_image_options.get_children()
+        for item in current_items:
+            self.__vr_image_options.delete(item)
+
     def append_image_option(self, key, text, parent=""):
         self.__image_options.insert(parent, tk.END, key, text=text)
+        self.__vr_image_options.insert(parent, tk.END, key, text=text)
+
+    def clear_image_options_no_draw(self):
+        for layer in self.__image_options.get_children():
+            self.__image_options.change_state(layer, 'unchecked')
+        self.app.clear_draw_layer()
+
+    def clear_vr_image_options_no_draw(self):
+        for layer in self.__vr_image_options.get_children():
+            self.__vr_image_options.change_state(layer, 'unchecked')
+        self.app.clear_draw_layer()
 
     def select_image_option_no_draw(self, draw_layer):
         self.__image_options.change_state(draw_layer, 'checked')
@@ -742,8 +829,15 @@ class UI:
         # things ourselves.
         self.app.set_draw_layer(draw_layer)
 
+    def select_vr_image_option_no_draw(self, draw_layer):
+        self.__vr_image_options.change_state(draw_layer, 'checked')
+        # The above doesn't trigger the on select function so we have to handle
+        # things ourselves.
+        self.app.set_draw_layer(draw_layer)
+
     def expand_image_options(self):
         self.__image_options.expand_all()
+        self.__vr_image_options.expand_all()
 
     # the 'stats' list must be in the same order as the Stats enum
     def set_stats(self, stats):
@@ -779,6 +873,13 @@ class UI:
 
         self.__image.save(file_path)
 
+    def __on_vr_export_button_click(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[('PNG', '*.png')])
+        if not file_path:
+            return
+
+        self.__vr_image.save(file_path)
+
     def __on_file_bar_write(self, event):
         file_path = event.widget.get()
         if not os.path.isfile(file_path):
@@ -801,25 +902,66 @@ class UI:
 
         self.app.on_slice_id_select(self, slice_id)
 
+    def __on_vr_mode_toggle(self):
+        if self.__vr_mode_var.get():
+            assert not self.__vr_mode
+            self.__vr_mode = True
+            self.__vr_frame.pack(expand=True, fill=tk.BOTH)
+            # Update view selectors to avoid outdated view indices. This can
+            # happen if VR mode is selected after having selected a non 0 view
+            # in the normal mode. For the VR view index, it can happen if the VR
+            # mode is toggled multiple times and the view index was changed.
+            self.__view_selector.current(0)
+            self.__vr_view_selector.current(1)
+            self.app.on_vr_mode_activation(self)
+        else:
+            assert self.__vr_mode
+            self.__vr_mode = False
+            self.__vr_frame.pack_forget()
+
+        self.refresh_canvas_image()
+
     def __on_view_select(self, event):
         view_idx = event.widget.current()
         self.app.draw_view(self, view_idx)
 
+    def __on_vr_view_select(self, event):
+        view_idx = event.widget.current()
+        self.app.draw_vr_view(self, view_idx)
+
     def __on_image_option_select(self, event):
+        view_idx = self.__view_selector.current()
+
         # TODO: On opening a drop down this gets called again so maybe early
         # return if the draw options haven't changed
         selection_list = event.widget.get_checked()
         if not selection_list:
             self.app.clear_draw_layer()
-            self.app.draw_view(self)
+            self.app.draw_view(self, view_idx)
             return
 
         self.app.clear_draw_layer()
         for item in selection_list:
             self.app.set_draw_layer(DrawLayer(int(item)))
 
-        view_idx = self.__view_selector.current()
         self.app.draw_view(self, view_idx)
+
+    def __on_vr_image_option_select(self, event):
+        view_idx = self.__vr_view_selector.current()
+
+        # TODO: On opening a drop down this gets called again so maybe early
+        # return if the draw options haven't changed
+        selection_list = event.widget.get_checked()
+        if not selection_list:
+            self.app.clear_draw_layer()
+            self.app.draw_vr_view(self, view_idx)
+            return
+
+        self.app.clear_draw_layer()
+        for item in selection_list:
+            self.app.set_draw_layer(DrawLayer(int(item)))
+
+        self.app.draw_vr_view(self, view_idx)
 
     ###########################################################################
     # UI setup
@@ -897,6 +1039,10 @@ class UI:
     def __right_panel(self, parent_frame):
         right_panel = tk.Frame(parent_frame)
 
+        self.__vr_mode_var = tk.IntVar()
+        self.__vr_mode_button = tk.Checkbutton(right_panel, text="VR Mode", anchor=tk.W, state=tk.DISABLED, command=self.__on_vr_mode_toggle, variable=self.__vr_mode_var)
+        self.__vr_mode_button.pack(fill=tk.BOTH)
+
         export_button = tk.Button(right_panel, text="Export Image", command=self.__on_export_button_click)
         export_button.pack(fill=tk.BOTH, padx=5, pady=5)
 
@@ -916,10 +1062,35 @@ class UI:
         self.__image_options.heading('#0', text="Options")
         self.__image_options.pack(expand=True, fill=tk.BOTH)
 
+        self.__vr_frame = tk.Frame(right_panel)
+
+        vr_view_selector_frame = tk.Frame(self.__vr_frame)
+
+        export_button = tk.Button(vr_view_selector_frame, text="Export Image", command=self.__on_vr_export_button_click)
+        export_button.pack(fill=tk.BOTH, padx=5, pady=5)
+
+        view_label = tk.Label(vr_view_selector_frame, text='View :')
+        view_label.pack(side=tk.LEFT, padx=5)
+
+        self.__vr_view_selector = Combobox(vr_view_selector_frame, exportselection=0)
+        self.__vr_view_selector.bind('<<ComboboxSelected>>', self.__on_vr_view_select)
+        self.__vr_view_selector.pack(side=tk.LEFT, fill=tk.BOTH, padx=5, pady=5)
+
+        vr_view_selector_frame.pack(fill=tk.BOTH, padx=5, pady=5)
+
+        self.__vr_image_options = CheckboxTreeview(self.__vr_frame)
+        self.__vr_image_options.bind('<<TreeviewSelect>>', self.__on_vr_image_option_select)
+        self.__vr_image_options.heading('#0', text="Options")
+        self.__vr_image_options.pack(expand=True, fill=tk.BOTH)
+
+        #self.__vr_frame.pack(expand=True, fill=tk.BOTH)
+        self.__vr_frame.pack_forget()
+
         return right_panel
 
     def __init__(self, file_path=None):
         self.__image = None
+        self.__vr_image = None
 
         self.app = App(file_path)
 
@@ -951,6 +1122,7 @@ class UI:
 
         right_panel = self.__right_panel(right_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self.__vr_mode = False
 
         paned_window.add(right_frame)
 
@@ -968,6 +1140,10 @@ class UI:
         if self.__image:
             self.__image.close()
             self.__image = None
+
+        if self.__vr_image:
+            self.__vr_image.close()
+            self.__vr_image = None
 
         self.__root.destroy()
 
