@@ -3365,6 +3365,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    glsl_type_singleton_init_or_ref();
    zink_debug = debug_get_option_zink_debug();
+   zink_debug |= ZINK_DEBUG_OPTIMAL_KEYS;
    if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_AUTO)
       zink_descriptor_mode = debug_get_option_zink_descriptor_mode();
 
