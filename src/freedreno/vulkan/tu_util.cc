@@ -518,19 +518,10 @@ tu_tiling_config_update_binning(struct tu_vsc_config *vsc, const struct tu_devic
    }
 }
 
-const struct tu_tiling_config *
-tu_framebuffer_get_tiling_config(const struct tu_framebuffer *fb,
-                                 int gmem_layout,
-                                 uint32_t divisor)
-{
-   assert(divisor >= 1 && divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX);
-   return &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
-}
-
 void
-tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
-                             const struct tu_device *device,
-                             const struct tu_render_pass *pass)
+tu_framebuffer_init_tiling_config(struct tu_framebuffer *fb,
+                                  const struct tu_device *device,
+                                  const struct tu_render_pass *pass)
 {
    for (int gmem_layout = 0; gmem_layout < TU_GMEM_LAYOUT_COUNT; gmem_layout++) {
       struct tu_tiling_config *tiling = &fb->tiling[gmem_layout];
@@ -555,33 +546,43 @@ tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
       }
    }
 
-   if (!pass->has_fdm) {
-      /* Divide the tiling configurations for each divisor. This isn't done
-       * for FDM because it's expected that the FDM alone will be sufficient
-       * to appropriately size the tiles for the framebuffer.
-       */
-      for (int divisor = 2; divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX; divisor++) {
-         for (int gmem_layout = 0; gmem_layout < TU_GMEM_LAYOUT_COUNT; gmem_layout++) {
-            const struct tu_tiling_config *tiling = &fb->tiling[gmem_layout];
-            struct tu_tiling_config *new_tiling =
-               &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
-            tu_tiling_config_divide_tile(device, pass, fb, tiling, new_tiling, divisor);
+   fb->initd_divisor = 1;
+}
 
-            if (!new_tiling->possible)
-               continue;
+const struct tu_tiling_config *
+tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
+                                 const struct tu_device *device,
+                                 const struct tu_render_pass *pass,
+                                 int gmem_layout,
+                                 uint32_t divisor)
+{
+   assert(divisor >= 1 && divisor <= TU_GMEM_LAYOUT_DIVISOR_MAX);
+   assert(divisor == 1 || !pass->has_fdm); /* For FDM, it's expected that FDM alone will be sufficient to
+                                              appropriately size the tiles for the framebuffer.*/
+   struct tu_tiling_config *tiling = &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
 
-            struct tu_vsc_config *vsc = &new_tiling->vsc;
-            tu_tiling_config_update_pipe_layout(vsc, device, false);
-            tu_tiling_config_update_pipes(vsc, device);
-            tu_tiling_config_update_binning(vsc, device);
+   if (divisor > fb->initd_divisor) {
+      const struct tu_tiling_config *base_tiling =
+         tu_framebuffer_get_tiling_config(fb, device, pass, gmem_layout, divisor - 1);
+      tu_tiling_config_divide_tile(device, pass, fb, base_tiling, tiling, divisor);
 
-            struct tu_vsc_config *fdm_offset_vsc = &new_tiling->fdm_offset_vsc;
-            fdm_offset_vsc->tile_count = (VkExtent2D) {
-               ~1, ~1
-            };
-         }
+      if (tiling->possible) {
+         struct tu_vsc_config *vsc = &tiling->vsc;
+         tu_tiling_config_update_pipe_layout(vsc, device, false);
+         tu_tiling_config_update_pipes(vsc, device);
+         tu_tiling_config_update_binning(vsc, device);
+
+         struct tu_vsc_config *fdm_offset_vsc = &tiling->fdm_offset_vsc;
+         fdm_offset_vsc->tile_count = (VkExtent2D) { ~1, ~1 };
+      } else {
+         /* If tiling isn't possible, we just use the previous level's tiling configuration. */
+         *tiling = *base_tiling;
       }
+
+      fb->initd_divisor = divisor;
    }
+
+   return tiling;
 }
 
 void
