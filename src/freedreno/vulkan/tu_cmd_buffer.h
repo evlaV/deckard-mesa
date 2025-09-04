@@ -525,7 +525,7 @@ struct tu_cmd_state
 
    const struct tu_render_pass *pass;
    const struct tu_subpass *subpass;
-   const struct tu_framebuffer *framebuffer;
+   struct tu_framebuffer *framebuffer;
    const struct tu_tiling_config *tiling;
    VkRect2D render_areas[MAX_VIEWS];
    bool per_layer_render_area;
@@ -541,7 +541,7 @@ struct tu_cmd_state
    struct {
       const struct tu_render_pass *pass;
       const struct tu_subpass *subpass;
-      const struct tu_framebuffer *framebuffer;
+      struct tu_framebuffer *framebuffer;
       VkRect2D render_areas[MAX_VIEWS];
       bool per_layer_render_area;
       enum tu_gmem_layout gmem_layout;

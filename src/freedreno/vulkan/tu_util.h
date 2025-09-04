@@ -134,15 +134,17 @@ __tu_finishme(const char *file, int line, const char *format, ...)
       tu_finishme("stub %s", __func__);                                      \
    } while (0)
 
+void
+tu_framebuffer_init_tiling_config(struct tu_framebuffer *fb,
+                                  const struct tu_device *device,
+                                  const struct tu_render_pass *pass);
+
 const struct tu_tiling_config *
-tu_framebuffer_get_tiling_config(const struct tu_framebuffer *fb,
+tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
+                                 const struct tu_device *device,
+                                 const struct tu_render_pass *pass,
                                  int gmem_layout,
                                  uint32_t divisor);
-
-void
-tu_framebuffer_tiling_config(struct tu_framebuffer *fb,
-                             const struct tu_device *device,
-                             const struct tu_render_pass *pass);
 
 #define TU_STAGE_MASK ((1 << MESA_SHADER_STAGES) - 1)
 

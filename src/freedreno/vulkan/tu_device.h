@@ -544,6 +544,7 @@ struct tu_framebuffer
    uint32_t height;
    uint32_t layers;
 
+   uint32_t initd_divisor; /* The tile divisors up to this have been initialized, for lazy init. */
    struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;

@@ -3643,7 +3643,7 @@ tu_CreateFramebuffer(VkDevice _device,
       }
    }
 
-   tu_framebuffer_tiling_config(framebuffer, device, pass);
+   tu_framebuffer_init_tiling_config(framebuffer, device, pass);
 
    *pFramebuffer = tu_framebuffer_to_handle(framebuffer);
    return VK_SUCCESS;
@@ -3664,7 +3664,7 @@ tu_setup_dynamic_framebuffer(struct tu_cmd_buffer *cmd_buffer,
    framebuffer->layers =
       pRenderingInfo->viewMask != 0 ? 1 : pRenderingInfo->layerCount;
 
-   tu_framebuffer_tiling_config(framebuffer, cmd_buffer->device, pass);
+   tu_framebuffer_init_tiling_config(framebuffer, cmd_buffer->device, pass);
 }
 
 VKAPI_ATTR void VKAPI_CALL

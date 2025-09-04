@@ -1072,9 +1072,9 @@ tu_vsc_config(struct tu_cmd_buffer *cmd, const struct tu_tiling_config *tiling)
 static bool
 use_hw_binning(struct tu_cmd_buffer *cmd)
 {
-   const struct tu_framebuffer *fb = cmd->state.framebuffer;
+   struct tu_framebuffer *fb = cmd->state.framebuffer;
    const struct tu_tiling_config *tiling =
-      tu_framebuffer_get_tiling_config(fb, cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
+      tu_framebuffer_get_tiling_config(fb, cmd->device, cmd->state.pass, cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, tiling);
 
    /* XFB commands are emitted for BINNING || SYSMEM, which makes it
@@ -5436,9 +5436,8 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
    cmd->state.per_layer_render_area = suspended->state.per_layer_render_area;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
    cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
-   cmd->state.tiling = tu_framebuffer_get_tiling_config(
-      cmd->state.framebuffer, cmd->state.gmem_layout,
-      cmd->state.gmem_layout_divisor);
+   cmd->state.tiling = tu_framebuffer_get_tiling_config(cmd->state.framebuffer, cmd->device, cmd->state.pass,
+                                                        cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
    cmd->state.lrz = suspended->state.suspended_pass.lrz;
 }
 
