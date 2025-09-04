@@ -1610,10 +1610,13 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
 uint32_t
 tu_autotune::get_tile_size_divisor(struct tu_cmd_buffer *cmd_buffer)
 {
-   const struct tu_render_pass *pass = cmd_buffer->state.pass;
-   const struct tu_framebuffer *framebuffer = cmd_buffer->state.framebuffer;
+   const struct tu_cmd_state *cb_state = &cmd_buffer->state;
+   const struct tu_render_pass *pass = cb_state->pass;
+   const struct tu_framebuffer *framebuffer = cb_state->framebuffer;
+   const struct tu_render_pass_state *rp_state = &cb_state->rp;
 
-   if (!enabled || !active_config.load().test(mod_flag::PREEMPT_OPTIMIZE) || pass->has_fdm)
+   if (!enabled || !active_config.load().test(mod_flag::PREEMPT_OPTIMIZE) || rp_state->sysmem_single_prim_mode ||
+       pass->has_fdm || cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
       return 1;
 
    rp_key key(pass, framebuffer, cmd_buffer);
