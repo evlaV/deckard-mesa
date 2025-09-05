@@ -7,6 +7,7 @@
  */
 
 #include "util/u_debug.h"
+#include "util/u_dynarray.h"
 #include "util/u_math.h"
 
 #include "ir3_compiler.h"
@@ -1113,6 +1114,123 @@ atomic_supported(const nir_instr * instr, const void * data)
    return nir_instr_as_intrinsic(instr)->def.bit_size != 64;
 }
 
+static int
+variable_size_sort(const void *a, const void *b)
+{
+   const nir_variable *var_a = *(const nir_variable **)a;
+   const nir_variable *var_b = *(const nir_variable **)b;
+
+   uint32_t size_a, align_a;
+   glsl_get_natural_size_align_bytes(var_a->type, &size_a, &align_a);
+
+   uint32_t size_b, align_b;
+   glsl_get_natural_size_align_bytes(var_b->type, &size_b, &align_b);
+
+   return size_b - size_a;
+}
+
+/* Filters out variables from the set that need spilling in order to avoid
+ * exceeding the limit of register pressure in a single instruction.
+ *
+ * A single instruction could require up to 4 array vars to be fully loaded in
+ * GPR space: 1 destination and 3 src operands (since we reload full arrays when
+ * unspilling)
+ */
+static void
+ir3_filter_vars_to_scratch_single_instr_limit(struct set *set, uint32_t limit,
+                                              bool limit_for_half)
+{
+   struct util_dynarray candidate_nonspilled;
+   util_dynarray_init(&candidate_nonspilled, NULL);
+
+   /* Create an array of vars to potentially not spill sorted by increasing
+    * size.
+    */
+   set_foreach(set, entry) {
+      const nir_variable *var = entry->key;
+
+      /* If it's definitely a 32/64-bit array that will be stored in full regs,
+       * then don't consider it while we're limiting for half-reg accesses.
+       */
+      if (glsl_type_is_array(var->type)) {
+         const struct glsl_type *elem_type = glsl_get_array_element(var->type);
+         if (limit_for_half && glsl_type_is_vector_or_scalar(elem_type) &&
+             glsl_get_bit_size(elem_type) != 16) {
+            continue;
+         }
+      }
+      util_dynarray_append(&candidate_nonspilled, var);
+   }
+
+   qsort(
+      util_dynarray_begin(&candidate_nonspilled),
+      util_dynarray_num_elements(&candidate_nonspilled, const nir_variable *),
+      sizeof(nir_variable *),
+      (int (*)(const void *, const void *))variable_size_sort);
+
+   /* Loop removing variables from the set of variables to not spill, until the
+    * worst case set of variables remaining fit under the limit.
+    */
+   for (;;) {
+      int last =
+         util_dynarray_num_elements(&candidate_nonspilled, nir_variable *) - 1;
+
+      uint32_t total_size = 0;
+      for (int i = last; i >= MAX2(last - 3, 0); i--) {
+         nir_variable *var =
+            *util_dynarray_element(&candidate_nonspilled, nir_variable *, i);
+         uint32_t size, align;
+         glsl_get_natural_size_align_bytes(var->type, &size, &align);
+         total_size += size;
+      }
+
+      if (total_size <= limit)
+         break;
+
+      nir_variable *var =
+         util_dynarray_pop(&candidate_nonspilled, nir_variable *);
+      _mesa_set_remove_key(set, var);
+   }
+
+   util_dynarray_fini(&candidate_nonspilled);
+}
+
+static void
+ir3_vars_to_scratch_cb(struct set *set, void *data)
+{
+   struct ir3_shader_variant *v = data;
+
+   /* Full register accesses may be limited by the total register file size, not
+    * just the ISA's addressing limits.may be limited by the total register file
+    * size, as well.  We decrement each limit by a vec4 register, since an
+    * instruction will likely have non-array sources that also need to be
+    * present, so we can't have the whole register file taken up by an array.
+    */
+   bool must_double = v->shader_options.real_wavesize == IR3_DOUBLE_ONLY;
+   uint32_t half_regfile_limit = 48 * 8 - 16;
+   uint32_t full_regfile_limit =
+      MIN2(48 * 16, v->compiler->reg_size_vec4 * 16 / (must_double ? 2 : 1)) -
+      16;
+
+   struct set *nonspilled = _mesa_pointer_set_create(NULL);
+   set_foreach(set, entry) {
+      _mesa_set_add(nonspilled, entry->key);
+   }
+   /* Filter for the half vars first, which may let the full limit (which
+    * considers all vars) succeed on vars it wouldn't otherwise.
+    */
+   ir3_filter_vars_to_scratch_single_instr_limit(nonspilled, half_regfile_limit,
+                                                 true);
+   ir3_filter_vars_to_scratch_single_instr_limit(nonspilled, full_regfile_limit,
+                                                 false);
+
+   set_foreach(set, entry) {
+      const nir_variable *var = entry->key;
+      if (_mesa_set_search(nonspilled, var))
+         _mesa_set_remove_key(set, var);
+   }
+}
+
 /**
  * Filters the real_wavesize that was set based on API requirements, to an
  * appopriate value given hardware limits and the NIR shader we get.
@@ -1248,9 +1366,9 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so,
     * expensive.
     */
    if (so->compiler->has_pvtmem) {
-      progress |= OPT(s, nir_lower_vars_to_scratch,
-                      16 * 16 /* bytes */,
-                      ir3_get_variable_size_align_bytes, glsl_get_natural_size_align_bytes);
+      progress |=
+         OPT(s, nir_lower_vars_to_scratch_global,
+             glsl_get_natural_size_align_bytes, ir3_vars_to_scratch_cb, so);
    }
 
    /* Lower scratch writemasks */
