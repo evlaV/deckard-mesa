@@ -2093,6 +2093,10 @@ wsi_display_start_wait_thread(struct wsi_display *wsi)
                                wsi_display_wait_thread, wsi);
       if (ret)
          return ret;
+      
+      ret = pthread_setname_np(wsi->wait_thread, "MESA_wsi_displa");
+      if (ret)
+         return ret;
    }
    return 0;
 }
