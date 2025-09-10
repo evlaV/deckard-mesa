@@ -594,7 +594,7 @@ struct tu_autotune::rp_entry {
    /** Debug Performance Counters **/
 
 #if TU_AUTOTUNE_DEBUG_PERFCTR
-   uint64_t get_preemption_reaction_delay(tu_autotune &at, size_t rp_hash)
+   uint64_t get_preemption_reaction_delay(tu_autotune &at, uint64_t rp_hash)
    {
       auto &gpu = get_gpu_data();
 
@@ -910,9 +910,9 @@ struct tu_autotune::rp_history {
    static constexpr double PROFILE_DURATION_RECENCY_BIAS = 0.99;
 
  public:
-   size_t hash; /* The hash of the renderpass, just for debug output. */
+   uint64_t hash; /* The hash of the renderpass, just for debug output. */
 
-   rp_history(size_t hash): hash(hash)
+   rp_history(uint64_t hash): hash(hash)
    {
    }
 
