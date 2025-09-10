@@ -173,6 +173,7 @@ struct tu_autotune {
    struct rp_hash {
       constexpr size_t operator()(const rp_key &key) const noexcept
       {
+         /* Note: This will throw away the upper 32-bits on 32-bit architectures. */
          return static_cast<size_t>(key.hash);
       }
    };
