@@ -799,102 +799,103 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
    }
 }
 
-/* Draw duration tracker and sampler, built atop circular buffers.
- * Note: This is not thread‑safe, all accesses must be synchronised externally.
+/* Exponential moving average (EMA) calculator for smoothing successive values of any metric. An alpha (smoothing
+ * factor) of 0.1 means 10% weight to new values (slow adaptation), while 0.9 means 90% weight (fast adaptation).
  */
-class tu_at_durations {
- private:
-   struct entry {
-      uint64_t duration; /* In arbitrary GPU ticks. */
-      uint32_t draw_count;
-   };
+template<typename T = double, bool Atomic = false>
+class exponential_average {
+private:
+  using storage_type = std::conditional_t<Atomic, std::atomic<double>, double>;
+  storage_type average = std::numeric_limits<double>::quiet_NaN();
+  double alpha;
 
-   std::array<entry, MAX_DURATION_COUNT> array;
-   size_t head = 0; /* Index of the oldest entry. */
-   size_t size = 0; /* Amount of active entries. */
+public:
+  explicit exponential_average(double alpha = 0.1) noexcept
+     : alpha(alpha) {}
+
+  bool empty() const noexcept
+  {
+     double current = Atomic ? average.load(std::memory_order_relaxed) : average;
+     return std::isnan(current);
+  }
+
+  void add(T value) noexcept
+  {
+     double v = static_cast<double>(value);
+     
+     if constexpr (Atomic) {
+        double current = average.load(std::memory_order_relaxed);
+        double new_avg;
+        do {
+           new_avg = std::isnan(current) ? v : (1.0 - alpha) * current + alpha * v;
+        } while (!average.compare_exchange_weak(current, new_avg, 
+                                                std::memory_order_relaxed,
+                                                std::memory_order_relaxed));
+     } else {
+        average = std::isnan(average) ? v : (1.0 - alpha) * average + alpha * v;
+     }
+  }
+
+  void clear() noexcept
+  {
+     if constexpr (Atomic)
+        average.store(std::numeric_limits<double>::quiet_NaN(), std::memory_order_relaxed);
+     else
+        average = std::numeric_limits<double>::quiet_NaN();
+  }
+
+  T get() const noexcept
+  {
+     double current;
+     if constexpr (Atomic)
+        current = average.load(std::memory_order_relaxed);
+     else
+        current = average;
+     return std::isnan(current) ? T{} : static_cast<T>(current);
+  }
+};
+
+/* An improvement over pure EMA to filter out spikes by using two EMAs with different alphas. */
+template <typename T = double> class adaptive_average {
+ private:
+   static constexpr double DefaultSlowAlpha = 0.1, DefaultFastAlpha = 0.5, DefaultDeviationThreshold = 0.3;
+   exponential_average<T> slow;
+   exponential_average<T> fast;
+   double deviationThreshold;
 
  public:
-   void add(uint64_t duration, uint32_t draw_count) noexcept
+   size_t count = 0;
+
+   explicit adaptive_average(double slow_alpha = DefaultSlowAlpha,
+                             double fast_alpha = DefaultFastAlpha,
+                             double deviation_threshold = DefaultDeviationThreshold) noexcept
+       : slow(slow_alpha), fast(fast_alpha), deviationThreshold(deviation_threshold)
    {
-      // TODO: Clean up indexing calcs.
-      size_t idx = (head + size) % array.size();
-      if (size < array.size()) {
-         /* If we have space, just add the new entry. */
-         array[idx] = { duration, draw_count };
-         ++size;
-      } else {
-         /* If we are full, overwrite the oldest entry. */
-         array[head] = { duration, draw_count };
-         head = (head + 1) % array.size();
-      }
+   }
+
+   void add(double value) noexcept
+   {
+      slow.add(value);
+      fast.add(value);
+      count++;
+   }
+
+   double get() const noexcept
+   {
+      double s = slow.get();
+      double f = fast.get();
+      /* Use fast if it's close to slow (normal variation).
+       * Use slow if fast deviates too much (likely a spike).
+       */
+      double deviation = std::abs(f - s) / s;
+      return (deviation < deviationThreshold) ? f : s + (f - s) * deviationThreshold;
    }
 
    void clear() noexcept
    {
-      /* No need to free any allocations, we can just reset the head/size. */
-      head = 0;
-      size = 0;
-   }
-
-   /* Calculates the average duration of the entries in the list. It can optionally divide the duration by the draw
-    * count.
-    *
-    * It can also apply a recency bias to the average, where more recent entries are given more weight in the average
-    * calculation. This is based on the recency_bias_base parameter, which is the base of the exponential function used
-    * to calculate the weight.
-    *
-    * A value of 1.0 means no recency bias, while any value < 1.0 will apply a bias towards more recent entries, while
-    * any value > 1.0 will apply a bias towards older entries. Any value <= 0.0 will lead to UB.
-    *
-    * Note: This function clears old entries while calculating the average, so the list will be modified after this
-    *       function is called.
-    */
-   void get_avg(uint64_t &out_avg,
-                uint32_t &out_count,
-                bool divide_by_draw_count = false,
-                double recency_bias_base = 1.0) const noexcept
-   {
-      out_count = static_cast<uint32_t>(size);
-      if (size == 0) {
-         out_avg = 0;
-         return;
-      }
-
-      auto get_duration = [&](size_t idx) -> double {
-         double d = static_cast<double>(array[idx].duration);
-         if (divide_by_draw_count && array[idx].draw_count)
-            d /= array[idx].draw_count;
-         return d;
-      };
-
-      if (recency_bias_base == 1.0) {
-         /* Unbiased arithmetic mean. */
-         double total = 0.0;
-         for (size_t idx = 0; idx < size; ++idx) {
-            size_t array_idx = (head + idx) % array.size();
-            total += get_duration(array_idx);
-         }
-         out_avg = static_cast<uint64_t>(total / size);
-      } else {
-         /* Recency‑biased mean. */
-         double weighted_sum = 0.0, total_weights = 0.0, running_weight = 1.0;
-
-         /* Iterate newest to oldest for recency weighting. */
-         for (size_t idx = 0; idx < size; ++idx) {
-            size_t array_idx = (head + size - 1 - idx) % array.size();
-
-            double duration = get_duration(array_idx);
-            weighted_sum += duration * running_weight;
-            total_weights += running_weight;
-            running_weight *= recency_bias_base;
-
-            if (running_weight < 0.01) {
-               /* Quit early when the weight becomes negligible. */
-               break;
-            }
-         }
-         out_avg = static_cast<uint64_t>(weighted_sum / total_weights);
-      }
+      slow.clear();
+      fast.clear();
+      count = 0;
    }
 };
 
@@ -903,11 +904,14 @@ class tu_at_durations {
  */
 struct tu_autotune::rp_history {
  private:
-   tu_at_durations sysmem_rp_durations;
-   tu_at_durations gmem_rp_durations;
    /* Amount of duration samples for profiling before we start averaging. */
    static constexpr uint32_t MIN_PROFILE_DURATION_COUNT = 5;
    static constexpr double PROFILE_DURATION_RECENCY_BIAS = 0.99;
+
+   adaptive_average<uint64_t> sysmem_rp_average;
+   adaptive_average<uint64_t> sysmem_draw_average;
+
+   adaptive_average<uint64_t> gmem_rp_average;
 
  public:
    uint64_t hash; /* The hash of the renderpass, just for debug output. */
@@ -919,25 +923,12 @@ struct tu_autotune::rp_history {
    /** Bandwidth Estimation Algorithm **/
    struct bandwidth_algo {
     private:
-      /* The exponentially-weighted mean of samples passed. */
-      std::atomic<double> mean_samples_passed = -1.0;
+      exponential_average<double, true> mean_samples_passed;
 
     public:
       void update(uint32_t samples)
       {
-         /* 0 < bias < 1 (Higher = Stronger recency bias). */
-         constexpr double recency_bias = 0.6;
-
-         double mean_samples = mean_samples_passed.load(std::memory_order_relaxed);
-         if (mean_samples < 0.0) {
-            /* If this is the first sample, just set the mean to the sample. */
-            mean_samples = (double) (samples);
-         } else {
-            /* Exponentially-weighted moving average of samples passed. */
-            mean_samples = (mean_samples * (1.0 - recency_bias)) + (((double) samples) * recency_bias);
-         }
-
-         mean_samples_passed.store(mean_samples, std::memory_order_relaxed);
+         mean_samples_passed.add(static_cast<double>(samples));
       }
 
       render_mode get_optimal_mode(rp_history &history,
@@ -962,7 +953,7 @@ struct tu_autotune::rp_history {
          uint64_t gmem_bandwidth = (uint64_t) pass->gmem_bandwidth_per_pixel * pass_pixel_count;
 
          uint64_t total_draw_call_bandwidth = 0;
-         double mean_samples = mean_samples_passed.load(std::memory_order_relaxed);
+         double mean_samples = mean_samples_passed.get();
          if (rp_state->drawcall_count && mean_samples > 0.0) {
             /* The total draw call bandwidth is estimated as the average samples (collected via tracking samples passed
              * within the CS) multiplied by the drawcall bandwidth per sample, divided by the amount of draw calls.
@@ -1068,7 +1059,7 @@ struct tu_autotune::rp_history {
    /** Preemption Latency Optimization Mode **/
    struct preempt_optimize_mode {
     private:
-      tu_at_durations gmem_tile_durations;
+      adaptive_average<uint64_t> gmem_tile_average;
 
       /* If the renderpass has long draws which are at risk of causing high preemptible latency. */
       std::atomic<bool> latency_risk = false;
@@ -1110,9 +1101,8 @@ struct tu_autotune::rp_history {
              * should bias the decision towards GMEM.
              */
 
-            uint64_t avg_sysmem_draw;
-            uint32_t sysmem_draw_count;
-            history.sysmem_rp_durations.get_avg(avg_sysmem_draw, sysmem_draw_count, true, PROFILE_DURATION_RECENCY_BIAS);
+            uint64_t avg_sysmem_draw = history.sysmem_rp_average.get();
+            uint64_t sysmem_draw_count = history.sysmem_rp_average.count;
 
             if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
                mesa_logi("autotune-preempt %016" PRIx64 ": avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
@@ -1149,7 +1139,7 @@ struct tu_autotune::rp_history {
          constexpr uint64_t downward_update_duration_ns = 10'000'000'000;     /* 10s */
          constexpr uint64_t latency_insensitive_duration_ns = 30'000'000'000; /* 30s */
 
-         gmem_tile_durations.add(tile_duration, 1);
+         gmem_tile_average.add(tile_duration);
 
          uint64_t now = os_time_get_nano();
          if (latency_update_ts > now)
@@ -1159,12 +1149,9 @@ struct tu_autotune::rp_history {
           * reduce the latency risk further or if it's already low enough that it's not worth the performance hit.
           */
 
-         uint64_t avg_gmem_tile; /* Average duration of the longest tile in the RP. */
-         uint32_t entry_count;
-         gmem_tile_durations.get_avg(avg_gmem_tile, entry_count, false);
-
          uint64_t update_duration_ns = default_update_duration_ns;
-         if (entry_count > 1) {
+         if (gmem_tile_average.count > MIN_PROFILE_DURATION_COUNT) {
+            uint64_t avg_gmem_tile = gmem_tile_average.get();
             bool l_latency_risk = latency_risk.load(std::memory_order_relaxed);
             if (!l_latency_risk) {
                if (avg_gmem_tile > TARGET_THRESHOLD) {
@@ -1228,7 +1215,7 @@ struct tu_autotune::rp_history {
 
                if (delta != 0) {
                   /* Clear all the results to avoid biasing the decision based on the old tile size. */
-                  gmem_tile_durations.clear();
+                  gmem_tile_average.clear();
 
                   uint32_t new_tile_size_divisor = l_tile_size_divisor + delta;
                   if (TU_AUTOTUNE_DEBUG_LOG_PREEMPT) {
@@ -1275,14 +1262,15 @@ struct tu_autotune::rp_history {
 
       if (entry_config.test(metric_flag::TS)) {
          if (entry.sysmem) {
-            sysmem_rp_durations.add(entry.get_rp_duration(), entry.draw_count);
-            sysmem_rp_durations.get_avg(avg_sysmem, sysmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
+            uint64_t rp_duration = entry.get_rp_duration();
+
+            sysmem_rp_average.add(rp_duration);
+            sysmem_draw_average.add(rp_duration / entry.draw_count);
 
             if (at_config.test(mod_flag::PREEMPT_OPTIMIZE))
                preempt_optimize.update_sysmem(*this);
          } else {
-            gmem_rp_durations.add(entry.get_rp_duration(), 1);
-            gmem_rp_durations.get_avg(avg_gmem, gmem_count, false, PROFILE_DURATION_RECENCY_BIAS);
+            gmem_rp_average.add(entry.get_rp_duration());
 
             if (entry_config.test(metric_flag::TS_TILE) && at_config.test(mod_flag::PREEMPT_OPTIMIZE))
                preempt_optimize.update_gmem(*this, entry.get_max_tile_duration());
