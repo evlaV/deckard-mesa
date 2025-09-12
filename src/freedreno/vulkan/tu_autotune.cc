@@ -1040,6 +1040,10 @@ struct tu_autotune::rp_history {
              * the probabilites aren't expected to change from run to run. This environment also gives us a best case
              * scenario for autotune performance, since we know the optimal decisions.
              */
+
+            if (sysmem_prob == 0 || sysmem_prob == 100)
+               return; /* Already resolved, no further updates are necessary. */
+
             if (sysmem_count < 1) {
                sysmem_prob = 100;
             } else if (gmem_count < 1) {
