@@ -1073,7 +1073,8 @@ struct tu_autotune::rp_history {
       /* The next timestamp where it's allowed to mark the RP as no longer latency sensitive. */
       uint64_t latency_switch_ts = 0;
 
-      static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 500; /* 500us */
+      /* Threshold of longest non-preemptible duration before activating latency optimization: 1.5ms */
+      static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 1500;
 
 #if TU_AUTOTUNE_DEBUG_PERFCTR
       /* The highest preemption reaction delay recorded for the RP since the last update. */
