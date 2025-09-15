@@ -274,10 +274,10 @@ tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
    BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
    cache->flush_bits = 0;
 
-   if (TU_DEBUG(FLUSHALL))
+   // if (TU_DEBUG(FLUSHALL))
       flushes |= TU_CMD_FLAG_ALL_CLEAN | TU_CMD_FLAG_ALL_INVALIDATE;
 
-   if (TU_DEBUG(SYNCDRAW))
+   // if (TU_DEBUG(SYNCDRAW))
       flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
                  TU_CMD_FLAG_WAIT_FOR_IDLE |
                  TU_CMD_FLAG_WAIT_FOR_ME;
@@ -6135,6 +6135,8 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
    }
 
    tu_choose_gmem_layout(cmd);
+
+   tu_emit_cache_flush<CHIP>(cmd);
 
    cmd->state.renderpass_cache.pending_flush_bits =
       cmd->state.cache.pending_flush_bits;
