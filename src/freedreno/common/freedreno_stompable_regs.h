@@ -73,6 +73,8 @@ fd_reg_stomp_allowed(chip CHIP, uint16_t reg)
       case REG_A7XX_SP_PS_VGS_CNTL:
       case REG_A7XX_SP_CS_VGS_CNTL:
          return false;
+      case REG_A6XX_TPL1_DBG_ECO_CNTL1:
+         return false;
       }
       break;
    }

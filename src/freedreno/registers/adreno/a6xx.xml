@@ -2176,13 +2176,13 @@ by a particular renderpass/blit.
 	<reg32 offset="0x9307" name="VPC_PS_RAST_CNTL" variants="A6XX-" usage="rp_blit"> <!-- A702 + A7xx -->
 		<bitfield name="MODE" low="0" high="1" type="a6xx_polygon_mode"/>
 	</reg32>
-	<reg32 offset="0x9308" name="VPC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="rp_blit">
+	<reg32 offset="0x9308" name="VPC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="cmd">
 		<bitfield name="SIZE_GMEM" low="0" high="31"/>
 	</reg32>
-	<reg32 offset="0x9309" name="VPC_ATTR_BUF_GMEM_BASE" variants="A7XX-" usage="rp_blit">
+	<reg32 offset="0x9309" name="VPC_ATTR_BUF_GMEM_BASE" variants="A7XX-" usage="cmd">
 		<bitfield name="BASE_GMEM" low="0" high="31"/>
 	</reg32>
-	<reg32 offset="0x9b09" name="PC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="rp_blit">
+	<reg32 offset="0x9b09" name="PC_ATTR_BUF_GMEM_SIZE" variants="A7XX-" usage="cmd">
 		<bitfield name="SIZE_GMEM" low="0" high="31"/>
 	</reg32>
 
