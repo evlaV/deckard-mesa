@@ -1105,6 +1105,13 @@ use_hw_binning(struct tu_cmd_buffer *cmd)
    return vsc->binning;
 }
 
+static uint32_t
+tu_fdm_num_layers(const struct tu_cmd_buffer *cmd)
+{
+   return cmd->state.pass->num_views ? cmd->state.pass->num_views : 
+      (cmd->state.fdm_per_layer ? cmd->state.framebuffer->layers : 1);
+}
+
 static bool
 use_sysmem_rendering(struct tu_cmd_buffer *cmd,
                      tu_autotune::rp_ctx_t *at_ctx)
@@ -1122,7 +1129,7 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
 
    /* Use sysmem for empty render areas */
    if (cmd->state.per_layer_render_area) {
-      for (unsigned i = 0; i < MAX2(cmd->state.pass->num_views, 1); i++) {
+      for (unsigned i = 0; i < tu_fdm_num_layers(cmd); i++) {
          if (cmd->state.render_areas[i].extent.width == 0 ||
              cmd->state.render_areas[i].extent.height == 0) {
             cmd->state.rp.gmem_disable_reason = "Render area is empty";
@@ -1245,13 +1252,6 @@ tu_bin_offset(VkOffset2D fdm_offset, const struct tu_tiling_config *tiling)
       euclid_rem(-fdm_offset.x, tiling->tile0.width),
       euclid_rem(-fdm_offset.y, tiling->tile0.height),
    };
-}
-
-static uint32_t
-tu_fdm_num_layers(const struct tu_cmd_buffer *cmd)
-{
-   return cmd->state.pass->num_views ? cmd->state.pass->num_views : 
-      (cmd->state.fdm_per_layer ? cmd->state.framebuffer->layers : 1);
 }
 
 template <chip CHIP>
