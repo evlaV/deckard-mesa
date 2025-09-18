@@ -3059,7 +3059,7 @@ tu_calc_bin_visibility(struct tu_cmd_buffer *cmd,
 {
    const struct tu_render_pass *pass = cmd->state.pass;
    const struct tu_tiling_config *tiling = cmd->state.tiling;
-   uint32_t views = MAX2(pass->num_views, 1);
+   uint32_t views = tu_fdm_num_layers(cmd);
    VkRect2D bin = {
       {
          tile->pos.x * tiling->tile0.width,
