@@ -3037,10 +3037,7 @@ static void
 tu_identity_frag_area(struct tu_cmd_buffer *cmd,
                       struct tu_tile_config *tile)
 {
-   unsigned views =
-      cmd->state.pass->num_views ? cmd->state.pass->num_views : 1;
-
-   for (unsigned i = 0; i < views; i++)
+   for (unsigned i = 0; i < tu_fdm_num_layers(cmd); i++)
       tile->frag_areas[i] = (VkExtent2D) { 1, 1 };
 }
 
