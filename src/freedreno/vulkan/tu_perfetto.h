@@ -43,6 +43,14 @@ struct tu_perfetto_stage_stack {
 struct tu_perfetto_state {
    struct tu_perfetto_stage_stack annotations_stack;
    struct tu_perfetto_stage_stack render_stack;
+
+   uint64_t next_clock_sync_ns; /* cpu time of next clk sync */
+   uint64_t last_sync_gpu_ts;
+
+   uint64_t last_suspend_count;
+
+   uint64_t gpu_max_timestamp;
+   uint64_t gpu_timestamp_offset;
 };
 
 void tu_perfetto_init(void);
