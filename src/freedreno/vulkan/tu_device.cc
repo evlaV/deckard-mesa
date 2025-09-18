@@ -2606,6 +2606,7 @@ tu_device_destroy_mutexes(struct tu_device *device)
    mtx_destroy(&device->fiber_pvtmem_bo.mtx);
    mtx_destroy(&device->wave_pvtmem_bo.mtx);
    mtx_destroy(&device->mutex);
+   mtx_destroy(&device->perfetto.pending_clocks_sync_mtx);
    for (unsigned i = 0; i < ARRAY_SIZE(device->scratch_bos); i++)
       mtx_destroy(&device->scratch_bos[i].construct_mtx);
 
@@ -2711,6 +2712,7 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    mtx_init(&device->fiber_pvtmem_bo.mtx, mtx_plain);
    mtx_init(&device->wave_pvtmem_bo.mtx, mtx_plain);
    mtx_init(&device->mutex, mtx_plain);
+   mtx_init(&device->perfetto.pending_clocks_sync_mtx, mtx_plain);
    for (unsigned i = 0; i < ARRAY_SIZE(device->scratch_bos); i++)
       mtx_init(&device->scratch_bos[i].construct_mtx, mtx_plain);
 

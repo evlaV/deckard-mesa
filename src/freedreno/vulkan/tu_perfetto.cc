@@ -128,13 +128,25 @@ class TuRenderpassDataSource : public MesaRenderpassDataSource<TuRenderpassDataS
        * using the hash of a namespaced string is the recommended approach.
        * See: https://perfetto.dev/docs/concepts/clock-sync
        */
-      gpu_clock_id =
-         _mesa_hash_string("org.freedesktop.mesa.freedreno") | 0x80000000;
+      gpu_clock_id = 64;
    }
 };
 
 PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS(TuRenderpassDataSource);
 PERFETTO_DEFINE_DATA_SOURCE_STATIC_MEMBERS(TuRenderpassDataSource);
+
+static void
+emit_sync_timestamp(struct tu_perfetto_clocks &clocks)
+{
+   uint32_t cpu_clock_id = perfetto::protos::pbzero::BUILTIN_CLOCK_BOOTTIME;
+   uint64_t gpu_ts = clocks.gpu_ts + clocks.gpu_ts_offset;
+   TuRenderpassDataSource::Trace([=](auto tctx) {
+      MesaRenderpassDataSource<TuRenderpassDataSource,
+                               TuRenderpassTraits>::EmitClockSync(tctx, clocks.cpu,
+                                                                  gpu_ts, cpu_clock_id,
+                                                                  gpu_clock_id);
+   });
+}
 
 static void
 setup_incremental_state(TuRenderpassDataSource::TraceContext &ctx)
@@ -284,7 +296,6 @@ stage_end(struct tu_device *dev, uint64_t ts_ns, enum tu_stage_id stage_id,
       return;
    }
 
-
    uint32_t queue_id = DEFAULT_HW_QUEUE_ID;
    switch (stage->stage_id) {
       case CMD_BUFFER_ANNOTATION_STAGE_ID:
@@ -293,6 +304,19 @@ stage_end(struct tu_device *dev, uint64_t ts_ns, enum tu_stage_id stage_id,
          break;
       default:
          break;
+   }
+
+   /* We use sequence-scoped clock for GPU time with perfetto.
+    * Different threads have different scopes, so we have to sync clocks
+    * in the same thread where renderstage events are emitted.
+    */
+   if (state->has_pending_clocks_sync) {
+      mtx_lock(&state->pending_clocks_sync_mtx);
+      struct tu_perfetto_clocks clocks = state->pending_clocks_sync;
+      state->has_pending_clocks_sync = false;
+      mtx_unlock(&state->pending_clocks_sync_mtx);
+
+      emit_sync_timestamp(clocks);
    }
 
    TuRenderpassDataSource::Trace([=](TuRenderpassDataSource::TraceContext tctx) {
@@ -372,18 +396,6 @@ tu_perfetto_init(void)
      dsd.set_name("gpu.memory.msm");
      TuMemoryDataSource::Register(dsd);
    }
-}
-
-static void
-emit_sync_timestamp(uint64_t cpu_ts, uint64_t gpu_ts)
-{
-   uint32_t cpu_clock_id = perfetto::protos::pbzero::BUILTIN_CLOCK_BOOTTIME;
-   TuRenderpassDataSource::Trace([=](auto tctx) {
-      MesaRenderpassDataSource<TuRenderpassDataSource,
-                               TuRenderpassTraits>::EmitClockSync(tctx, cpu_ts,
-                                                                  gpu_ts, cpu_clock_id,
-                                                                  gpu_clock_id);
-   });
 }
 
 uint64_t
@@ -476,17 +488,24 @@ tu_perfetto_end_submit(struct tu_queue *queue,
                        struct tu_perfetto_clocks *gpu_clocks)
 {
    struct tu_device *dev = queue->device;
+   struct tu_perfetto_state *state = &dev->perfetto;
    if (!u_trace_perfetto_active(tu_device_get_u_trace(dev)))
       return {};
 
    struct tu_perfetto_clocks clocks = sync_clocks(dev, gpu_clocks);
-   if (clocks.gpu_ts > 0)
-      emit_sync_timestamp(clocks.cpu, clocks.gpu_ts + clocks.gpu_ts_offset);
+
+   if (clocks.gpu_ts > 0) {
+      mtx_lock(&state->pending_clocks_sync_mtx);
+      state->pending_clocks_sync = clocks;
+      state->has_pending_clocks_sync = true;
+      mtx_unlock(&state->pending_clocks_sync_mtx);
+   }
 
    TuRenderpassDataSource::Trace([=](TuRenderpassDataSource::TraceContext tctx) {
       auto packet = tctx.NewTracePacket();
 
       packet->set_timestamp(start_ts);
+      packet->set_timestamp_clock_id(perfetto::protos::pbzero::BUILTIN_CLOCK_BOOTTIME);
 
       auto event = packet->set_vulkan_api_event();
       auto submit = event->set_vk_queue_submit();
@@ -619,6 +638,7 @@ log_mem(struct tu_device *dev, struct tu_buffer *buffer, struct tu_image *image,
       auto packet = tctx.NewTracePacket();
 
       packet->set_timestamp(perfetto::base::GetBootTimeNs().count());
+      packet->set_timestamp_clock_id(perfetto::protos::pbzero::BUILTIN_CLOCK_BOOTTIME);
 
       auto event = packet->set_vulkan_memory_event();
 
