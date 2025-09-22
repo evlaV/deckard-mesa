@@ -562,16 +562,21 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
          tu_framebuffer_get_tiling_config(fb, device, pass, gmem_layout, divisor - 1);
       tu_tiling_config_divide_tile(device, pass, fb, base_tiling, tiling, divisor);
 
+      struct tu_vsc_config *vsc = &tiling->vsc;
       if (tiling->possible) {
-         struct tu_vsc_config *vsc = &tiling->vsc;
          tu_tiling_config_update_pipe_layout(vsc, device, false);
          tu_tiling_config_update_pipes(vsc, device);
          tu_tiling_config_update_binning(vsc, device);
 
          struct tu_vsc_config *fdm_offset_vsc = &tiling->fdm_offset_vsc;
          fdm_offset_vsc->tile_count = (VkExtent2D) { ~1, ~1 };
-      } else {
-         /* If tiling isn't possible, we just use the previous level's tiling configuration. */
+      }
+
+      if (!tiling->possible ||                               /* If tiling is no longer possible, this is pointless. */
+          (vsc->binning_useful && !vsc->binning_possible) || /* Dividing further without HW binning is a bad idea.  */
+          (vsc->tile_count.width * vsc->tile_count.height > 100) /* 100 tiles are too many, even with HW binning.   */
+      ) {
+         /* Revert to the previous level's tiling configuration. */
          *tiling = *base_tiling;
       }
 
