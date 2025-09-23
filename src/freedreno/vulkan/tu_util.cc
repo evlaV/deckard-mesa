@@ -75,37 +75,35 @@ const uint64_t tu_runtime_debug_flags =
 os_file_notifier_t tu_debug_notifier;
 struct tu_env tu_env;
 
+static uint64_t
+tu_env_get_file_flags(const char *path)
+{
+   FILE *file = fopen(path, "r");
+   if (file) {
+      char buf[512];
+      size_t len = fread(buf, 1, sizeof(buf) - 1, file);
+      fclose(file);
+      buf[len] = '\0';
+
+      return parse_debug_string(buf, tu_debug_options);
+   }
+   return 0;
+}
+
 static void
 tu_env_notify(
    void *data, const char *path, bool created, bool deleted, bool dir_deleted)
 {
    uint64_t file_flags = 0;
    if (!deleted) {
-      FILE *file = fopen(path, "r");
-      if (file) {
-         char buf[512];
-         size_t len = fread(buf, 1, sizeof(buf) - 1, file);
-         fclose(file);
-         buf[len] = '\0';
-
-         file_flags = parse_debug_string(buf, tu_debug_options);
-      }
+      file_flags = tu_env_get_file_flags(path);
    } else {
       mesa_logd("TU_DEBUG_FILE: File deleted");
    }
 
    uint64_t runtime_flags = file_flags & tu_runtime_debug_flags;
-   if (unlikely(runtime_flags != file_flags)) {
-      mesa_logw(
-         "Certain options in TU_DEBUG_FILE don't support runtime changes: 0x%" PRIx64 ", ignoring",
-         file_flags & ~tu_runtime_debug_flags);
-   }
-
-   if ((tu_env.debug.load(std::memory_order_acquire) &
-        tu_runtime_debug_flags) ^
-       runtime_flags) {
-      mesa_logd(
-         "TU_DEBUG_FILE: Runtime debug flags change detected. Flags set:");
+   if ((tu_env.debug.load(std::memory_order_acquire) & tu_runtime_debug_flags) ^ runtime_flags) {
+      mesa_logd("TU_DEBUG_FILE: Runtime debug flags change detected. Flags set:");
       for (unsigned i = 0; i < ARRAY_SIZE(tu_debug_options); i++) {
          if (runtime_flags & tu_debug_options[i].flag)
             mesa_logd("TU_DEBUG_FILE:   %s", tu_debug_options[i].string);
@@ -115,7 +113,7 @@ tu_env_notify(
          mesa_logd("TU_DEBUG_FILE:   None");
    }
 
-   tu_env.debug.store(runtime_flags | tu_env.env_debug, std::memory_order_release);
+   tu_env.debug.store(runtime_flags | tu_env.start_debug, std::memory_order_release);
 
    if (unlikely(dir_deleted))
       mesa_logw(
@@ -133,11 +131,10 @@ tu_env_deinit(void)
 static void
 tu_env_init_once(void)
 {
-   tu_env.debug = parse_debug_string(os_get_option("TU_DEBUG"), tu_debug_options);
-   tu_env.env_debug = tu_env.debug & ~tu_runtime_debug_flags;
+   tu_env.start_debug = tu_env.debug = parse_debug_string(os_get_option("TU_DEBUG"), tu_debug_options);
 
    if (TU_DEBUG(STARTUP))
-      mesa_logi("TU_DEBUG=0x%" PRIx64 " (ENV: 0x%" PRIx64 ")", tu_env.debug.load(), tu_env.env_debug);
+      mesa_logi("TU_DEBUG=0x%" PRIx64, tu_env.debug.load());
 
    /* TU_DEBUG=rd functionality was moved to fd_rd_output. This debug option
     * should translate to the basic-level FD_RD_DUMP_ENABLE option.
@@ -147,11 +144,15 @@ tu_env_init_once(void)
 
    const char *debug_file = os_get_option("TU_DEBUG_FILE");
    if (debug_file) {
-      if (tu_env.debug != tu_env.env_debug) {
+      if ((tu_env.debug & tu_runtime_debug_flags) != 0) {
          mesa_logw("TU_DEBUG_FILE is set (%s), but TU_DEBUG is also set. "
-                   "Any runtime options (0x%" PRIx64 ") in TU_DEBUG will be ignored.",
+                   "Any runtime options (0x%" PRIx64 ") set in TU_DEBUG cannot be changed at runtime.",
                    debug_file, tu_env.debug & tu_runtime_debug_flags);
       }
+
+      uint64_t file_flags = tu_env_get_file_flags(debug_file);
+      tu_env.start_debug |= file_flags;
+      tu_env.debug = tu_env.start_debug;
 
       if (TU_DEBUG(STARTUP))
          mesa_logi("Watching TU_DEBUG_FILE: %s", debug_file);
