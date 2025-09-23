@@ -277,6 +277,7 @@ get_device_extensions(const struct tu_physical_device *device,
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
       .EXT_display_control = true,
 #endif
+      .EXT_dynamic_rendering_unused_attachments = true,
       .EXT_extended_dynamic_state = true,
       .EXT_extended_dynamic_state2 = true,
       .EXT_extended_dynamic_state3 = true,
@@ -815,6 +816,9 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* QCOM_multiview_per_view_render_areas */
    features->multiviewPerViewRenderAreas = true;
+
+   /* VK_EXT_dynamic_rendering_unused_attachments */
+   features->dynamicRenderingUnusedAttachments = true;
 }
 
 static void
