@@ -5041,9 +5041,14 @@ gfx_write_access(VkAccessFlags2 flags, VkPipelineStageFlags2 stages,
 static enum tu_cmd_access_mask
 vk2tu_access(VkAccessFlags2 flags, VkAccessFlags3KHR flags2,
              VkPipelineStageFlags2 stages, bool image_only, bool gmem,
-             bool sparse_aliasing)
+             bool sparse_aliasing, bool dst)
 {
    BITMASK_ENUM(tu_cmd_access_mask) mask = 0;
+
+   if (TU_DEBUG(MASKALL))
+      flags |= VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+   if (TU_DEBUG(MASKWRITEDST) && dst)
+      flags |= VK_ACCESS_2_MEMORY_WRITE_BIT;
 
    if (gfx_read_access(flags, stages,
                        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
@@ -5693,11 +5698,13 @@ tu_subpass_barrier(struct tu_cmd_buffer *cmd_buffer,
    BITMASK_ENUM(tu_cmd_access_mask) src_flags =
       vk2tu_access(barrier->src_access_mask, barrier->src_access_mask2,
                    src_stage_vk, false, false,
-                   cmd_buffer->device->vk.enabled_features.sparseResidencyAliased);
+                   cmd_buffer->device->vk.enabled_features.sparseResidencyAliased,
+                   false);
    BITMASK_ENUM(tu_cmd_access_mask) dst_flags =
       vk2tu_access(barrier->dst_access_mask, barrier->dst_access_mask2,
                    dst_stage_vk, false, false,
-                   cmd_buffer->device->vk.enabled_features.sparseResidencyAliased);
+                   cmd_buffer->device->vk.enabled_features.sparseResidencyAliased,
+                   true);
 
    if (barrier->incoherent_ccu_color)
       src_flags |= TU_ACCESS_CCU_COLOR_INCOHERENT_WRITE;
@@ -8604,10 +8611,12 @@ tu_barrier(struct tu_cmd_buffer *cmd,
 
          src_flags |= vk2tu_access(barrier->srcAccessMask, src_access_mask2,
                                    sanitized_src_stage, false, gmem,
-                                   cmd->device->vk.enabled_features.sparseResidencyAliased);
+                                   cmd->device->vk.enabled_features.sparseResidencyAliased,
+                                   false);
          dst_flags |= vk2tu_access(barrier->dstAccessMask, dst_access_mask2,
                                    sanitized_dst_stage, false, gmem,
-                                   cmd->device->vk.enabled_features.sparseResidencyAliased);
+                                   cmd->device->vk.enabled_features.sparseResidencyAliased,
+                                   true);
          srcStage |= sanitized_src_stage;
          dstStage |= sanitized_dst_stage;
       }
@@ -8633,10 +8642,10 @@ tu_barrier(struct tu_cmd_buffer *cmd,
 
          src_flags |= vk2tu_access(barrier->srcAccessMask, src_access_mask2,
                                    sanitized_src_stage, false, gmem,
-                                   sparse_aliasing);
+                                   sparse_aliasing, false);
          dst_flags |= vk2tu_access(barrier->dstAccessMask, dst_access_mask2,
                                    sanitized_dst_stage, false, gmem,
-                                   sparse_aliasing);
+                                   sparse_aliasing, true);
          srcStage |= sanitized_src_stage;
          dstStage |= sanitized_dst_stage;
       }
@@ -8679,10 +8688,10 @@ tu_barrier(struct tu_cmd_buffer *cmd,
 
          src_flags |= vk2tu_access(barrier->srcAccessMask, src_access_mask2,
                                    sanitized_src_stage, true, gmem,
-                                   sparse_aliasing);
+                                   sparse_aliasing, false);
          dst_flags |= vk2tu_access(barrier->dstAccessMask, dst_access_mask2,
                                    sanitized_dst_stage, true, gmem,
-                                   sparse_aliasing);
+                                   sparse_aliasing, true);
          srcStage |= sanitized_src_stage;
          dstStage |= sanitized_dst_stage;
       }

@@ -54,6 +54,8 @@ static const struct debug_control tu_debug_options[] = {
    { "comm", TU_DEBUG_COMM },
    { "nofdm", TU_DEBUG_NOFDM },
    { "deck_emu", TU_DEBUG_DECK_EMU },
+   { "maskall", TU_DEBUG_MASKALL },
+   { "maskwritedst", TU_DEBUG_MASKWRITEDST },
    { NULL, 0 }
 };
 
