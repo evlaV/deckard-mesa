@@ -4767,6 +4767,7 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    cmd->state.pipeline_sysmem_single_prim_mode = pipeline->prim_order.sysmem_single_prim_mode;
    cmd->state.pipeline_has_tess = pipeline->active_stages & VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
    cmd->state.pipeline_disable_gmem = gfx_pipeline->feedback_loop_may_involve_textures;
+   cmd->state.pipeline_attachments = pipeline->attachments;
 
    tu_pipeline_update_rp_state(&cmd->state);
 

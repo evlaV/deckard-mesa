@@ -208,6 +208,8 @@ struct tu_pipeline
       struct tu_draw_state state_gmem;
    } prim_order;
 
+   enum vk_rp_attachment_flags attachments;
+
    /* draw states for the pipeline */
    struct tu_draw_state load_state;
 

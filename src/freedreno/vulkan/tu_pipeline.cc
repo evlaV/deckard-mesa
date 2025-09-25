@@ -3413,7 +3413,8 @@ template <chip CHIP>
 static unsigned
 tu6_ds_size(struct tu_device *dev,
                  const struct vk_depth_stencil_state *ds,
-                 const struct vk_render_pass_state *rp)
+                 const struct vk_render_pass_state *rp,
+                 enum vk_rp_attachment_flags pipeline_attachments)
 {
    return 13;
 }
@@ -3422,10 +3423,13 @@ template <chip CHIP>
 static void
 tu6_emit_ds(struct tu_cs *cs,
             const struct vk_depth_stencil_state *ds,
-            const struct vk_render_pass_state *rp)
+            const struct vk_render_pass_state *rp,
+            enum vk_rp_attachment_flags pipeline_attachments)
 {
    bool stencil_test_enable =
-      ds->stencil.test_enable && rp->attachments & MESA_VK_RP_ATTACHMENT_STENCIL_BIT;
+      ds->stencil.test_enable &&
+      rp->attachments & MESA_VK_RP_ATTACHMENT_STENCIL_BIT &&
+      pipeline_attachments & MESA_VK_RP_ATTACHMENT_STENCIL_BIT;
 
    /* While the .stencil_read field can be used to avoid having to read stencil
     * when the func/ops cause it to be unused, there was no change in perf on
@@ -3484,7 +3488,8 @@ static unsigned
 tu6_rb_depth_cntl_size(struct tu_device *dev,
                        const struct vk_depth_stencil_state *ds,
                        const struct vk_render_pass_state *rp,
-                       const struct vk_rasterization_state *rs)
+                       const struct vk_rasterization_state *rs,
+                       enum vk_rp_attachment_flags pipeline_attachments)
 {
    return 4;
 }
@@ -3494,9 +3499,11 @@ static void
 tu6_emit_rb_depth_cntl(struct tu_cs *cs,
                        const struct vk_depth_stencil_state *ds,
                        const struct vk_render_pass_state *rp,
-                       const struct vk_rasterization_state *rs)
+                       const struct vk_rasterization_state *rs,
+                       enum vk_rp_attachment_flags pipeline_attachments)
 {
-   if (rp->attachments & MESA_VK_RP_ATTACHMENT_DEPTH_BIT) {
+   if (rp->attachments & MESA_VK_RP_ATTACHMENT_DEPTH_BIT &&
+       pipeline_attachments & MESA_VK_RP_ATTACHMENT_DEPTH_BIT) {
       bool depth_test = ds->depth.test_enable;
       enum adreno_compare_func zfunc = tu6_compare_func(ds->depth.compare_op);
 
@@ -3753,6 +3760,9 @@ tu_pipeline_builder_emit_state(struct tu_pipeline_builder *builder,
    bool attachments_valid =
       builder->graphics_state.rp &&
       vk_render_pass_state_has_attachment_info(builder->graphics_state.rp);
+   if (attachments_valid) {
+      pipeline->attachments = builder->graphics_state.rp->attachments;
+   }
    struct vk_color_blend_state dummy_cb = {};
    const struct vk_color_blend_state *cb = builder->graphics_state.cb;
    if (attachments_valid &&
@@ -3817,14 +3827,18 @@ tu_pipeline_builder_emit_state(struct tu_pipeline_builder *builder,
                    pipeline->program.per_view_viewport,
                    pipeline->disable_fs.disable_fs);
    DRAW_STATE_COND(ds, TU_DYNAMIC_STATE_DS,
-              attachments_valid,
+              attachments_valid &&
+               builder->device->vk.enabled_extensions.EXT_dynamic_rendering_unused_attachments,
               builder->graphics_state.ds,
-              builder->graphics_state.rp);
+              builder->graphics_state.rp,
+              pipeline->attachments);
    DRAW_STATE_COND(rb_depth_cntl, TU_DYNAMIC_STATE_RB_DEPTH_CNTL,
-                   attachments_valid,
+                   attachments_valid &&
+                    builder->device->vk.enabled_extensions.EXT_dynamic_rendering_unused_attachments,
                    builder->graphics_state.ds,
                    builder->graphics_state.rp,
-                   builder->graphics_state.rs);
+                   builder->graphics_state.rs,
+                   pipeline->attachments);
    DRAW_STATE_COND(patch_control_points,
                    TU_DYNAMIC_STATE_PATCH_CONTROL_POINTS,
                    pipeline_contains_all_shader_state(pipeline),
@@ -4072,12 +4086,14 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
    DRAW_STATE_COND(ds, TU_DYNAMIC_STATE_DS,
               cmd->state.dirty & TU_CMD_DIRTY_SUBPASS,
               &cmd->vk.dynamic_graphics_state.ds,
-              &cmd->state.vk_rp);
+              &cmd->state.vk_rp,
+              cmd->state.pipeline_attachments);
    DRAW_STATE_COND(rb_depth_cntl, TU_DYNAMIC_STATE_RB_DEPTH_CNTL,
                    cmd->state.dirty & TU_CMD_DIRTY_SUBPASS,
                    &cmd->vk.dynamic_graphics_state.ds,
                    &cmd->state.vk_rp,
-                   &cmd->vk.dynamic_graphics_state.rs);
+                   &cmd->vk.dynamic_graphics_state.rs,
+                   cmd->state.pipeline_attachments);
    DRAW_STATE_COND(patch_control_points,
                    TU_DYNAMIC_STATE_PATCH_CONTROL_POINTS,
                    cmd->state.dirty & TU_CMD_DIRTY_PROGRAM,

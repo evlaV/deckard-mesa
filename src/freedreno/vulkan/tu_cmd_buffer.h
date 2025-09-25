@@ -568,6 +568,7 @@ struct tu_cmd_state
    bool pipeline_writes_shading_rate;
    bool pipeline_reads_shading_rate;
    bool pipeline_accesses_smask;
+   enum vk_rp_attachment_flags pipeline_attachments;
 
    bool pipeline_blend_lrz, pipeline_bandwidth, pipeline_disable_fs;
    uint32_t pipeline_draw_states;
