@@ -4744,8 +4744,8 @@ tu_clear_gmem_attachment(struct tu_cmd_buffer *cmd,
    tu_emit_clear_gmem_attachment<CHIP>(cmd, cs, resolve_group, a, 0,
                                  cmd->state.framebuffer->layers,
                                  attachment->clear_views,
-                                 attachment->clear_mask,
                                  per_layer_render_area,
+                                 attachment->clear_mask,
                                  &cmd->state.clear_values[a], NULL);
 }
 TU_GENX(tu_clear_gmem_attachment);
