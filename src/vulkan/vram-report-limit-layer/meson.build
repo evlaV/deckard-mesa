@@ -41,7 +41,7 @@ configure_file(
   input : 'VkLayer_MESA_vram_report_limit.json.in',
   output : '@BASENAME@',
   install : true,
-  install_dir : join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
+  install_dir : join_paths(get_option('datadir'), 'vulkan', 'implicit_layer.d'),
   install_tag : 'runtime',
 )
 
