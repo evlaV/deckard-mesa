@@ -1824,6 +1824,8 @@ tu_init_dri_options(struct tu_instance *instance)
          driQueryOptionb(&instance->dri_options, "tu_use_tex_coord_round_nearest_even_mode");
    instance->ignore_frag_depth_direction =
          driQueryOptionb(&instance->dri_options, "tu_ignore_frag_depth_direction");
+   instance->autotune_prefer_sysmem =
+         driQueryOptionb(&instance->dri_options, "tu_autotune_prefer_sysmem");
 }
 
 static uint32_t instance_count = 0;

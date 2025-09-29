@@ -230,6 +230,9 @@ struct tu_instance
 
    /* Apps may be accidentally incorrect  */
    bool ignore_frag_depth_direction;
+
+   /* Configuration option to prefer SYSMEM over GMEM rendering in the autotuner. */
+   bool autotune_prefer_sysmem;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)
