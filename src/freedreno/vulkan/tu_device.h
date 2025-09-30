@@ -227,6 +227,9 @@ struct tu_instance
 
    /* Apps may be accidentally incorrect  */
    bool ignore_frag_depth_direction;
+
+   /* Configuration option to use a specific autotune algorithm by default. */
+   const char *autotune_algo;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)

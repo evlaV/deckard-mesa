@@ -639,6 +639,10 @@
    DRI_CONF_OPT_B(tu_ignore_frag_depth_direction, def, \
                   "Ignore direction specified for gl_FragDepth output")
 
+#define DRI_CONF_TU_AUTOTUNE_ALGORITHM() \
+   DRI_CONF_OPT_S_NODEF(tu_autotune_algorithm, \
+                        "Set the preferred autotune algorithm")
+
 /**
  * \brief Honeykrisp specific configuration options
  */
