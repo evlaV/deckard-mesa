@@ -70,9 +70,10 @@ render_mode_str(tu_autotune::render_mode mode)
 /** Configuration **/
 
 enum class tu_autotune::algorithm : uint8_t {
-   BANDWIDTH = 0,    /* Uses estimated BW for determining rendering mode. */
-   PROFILED = 1,     /* Uses dynamically profiled results for determining rendering mode. */
-   PROFILED_IMM = 2, /* Same as PROFILED but immediately resolves the SYSMEM/GMEM probability. */
+   BANDWIDTH = 0,     /* Uses estimated BW for determining rendering mode. */
+   PROFILED = 1,      /* Uses dynamically profiled results for determining rendering mode. */
+   PROFILED_IMM = 2,  /* Same as PROFILED but immediately resolves the SYSMEM/GMEM probability. */
+   PREFER_SYSMEM = 3, /* Always use SYSMEM unless we have strong evidence that GMEM is better. */
 
    DEFAULT = BANDWIDTH, /* Default algorithm, used if no other is specified. */
 };
@@ -183,6 +184,7 @@ struct PACKED tu_autotune::config_t {
       ALGO_STR(BANDWIDTH);
       ALGO_STR(PROFILED);
       ALGO_STR(PROFILED_IMM);
+      ALGO_STR(PREFER_SYSMEM);
 
       str += ", Mod Flags: 0x" + std::to_string(mod_flags) + " (";
       MODF_STR(BIG_GMEM);
@@ -255,6 +257,8 @@ tu_autotune::get_env_config()
             algo = algorithm::PROFILED;
          } else if (algo_strv == "profiled_imm") {
             algo = algorithm::PROFILED_IMM;
+         } else if (algo_strv == "prefer_sysmem") {
+            algo = algorithm::PREFER_SYSMEM;
          } else {
             mesa_logw("Unknown TU_AUTOTUNE_ALGO '%s', using default", algo_env_str);
          }
@@ -1623,6 +1627,9 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
 
    if (config.is_enabled(algorithm::BANDWIDTH))
       return history.bandwidth.get_optimal_mode(history, cb_state, pass, framebuffer, rp_state);
+
+   if (config.is_enabled(algorithm::PREFER_SYSMEM))
+      return render_mode::SYSMEM;
 
    return default_mode;
 }
