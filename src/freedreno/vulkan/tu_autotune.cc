@@ -910,14 +910,14 @@ template <typename T = double> class adaptive_average {
    {
    }
 
-   void add(double value) noexcept
+   void add(T value) noexcept
    {
       slow.add(value);
       fast.add(value);
       count++;
    }
 
-   double get() const noexcept
+   T get() const noexcept
    {
       double s = slow.get();
       double f = fast.get();
@@ -1039,8 +1039,9 @@ struct tu_autotune::rp_history {
       std::atomic<uint32_t> sysmem_probability = 50;
 
     public:
-      void update(bool immediate, uint64_t avg_gmem, uint64_t avg_sysmem, uint32_t sysmem_count, uint32_t gmem_count)
+      void update(rp_history &history, bool immediate)
       {
+         auto &sysmem_ema = history.sysmem_rp_average, &gmem_ema = history.gmem_rp_average;
          uint32_t sysmem_prob = sysmem_probability.load(std::memory_order_relaxed);
          if (immediate) {
             /* Try to immediately resolve the probability, this is useful for CI running a single trace of frames where
@@ -1051,24 +1052,27 @@ struct tu_autotune::rp_history {
             if (sysmem_prob == 0 || sysmem_prob == 100)
                return; /* Already resolved, no further updates are necessary. */
 
-            if (sysmem_count < 1) {
+            if (sysmem_ema.count < 1) {
                sysmem_prob = 100;
-            } else if (gmem_count < 1) {
+            } else if (gmem_ema.count < 1) {
                sysmem_prob = 0;
             } else {
-               sysmem_prob = avg_gmem < avg_sysmem ? 0 : 100;
+               sysmem_prob = gmem_ema.get() < sysmem_ema.get() ? 0 : 100;
             }
          } else {
-            if (sysmem_count < MIN_PROFILE_DURATION_COUNT || gmem_count < MIN_PROFILE_DURATION_COUNT) {
+            if (sysmem_ema.count < MIN_PROFILE_DURATION_COUNT || gmem_ema.count < MIN_PROFILE_DURATION_COUNT) {
                /* Not enough data to make a decision, bias towards least used. */
-               sysmem_prob = sysmem_count < gmem_count ? 75 : 25;
+               sysmem_prob = sysmem_ema.count < gmem_ema.count ? 75 : 25;
             } else {
                /* Adjust probability based on timing results. */
-               const uint32_t delta = 5;
-               if (avg_gmem < avg_sysmem && sysmem_prob > 5) {
-                  sysmem_prob = MAX2(sysmem_prob - delta, 5);
-               } else if (avg_sysmem < avg_gmem && sysmem_prob < 95) {
-                  sysmem_prob = MIN2(sysmem_prob + delta, 95);
+               constexpr uint32_t STEP_DELTA = 5, MIN_PROBABILITY = 5, MAX_PROBABILITY = 95;
+
+               uint64_t avg_sysmem = sysmem_ema.get();
+               uint64_t avg_gmem = gmem_ema.get();
+               if (avg_gmem < avg_sysmem && sysmem_prob > MIN_PROBABILITY) {
+                  sysmem_prob = MAX2(sysmem_prob - STEP_DELTA, MIN_PROBABILITY);
+               } else if (avg_sysmem < avg_gmem && sysmem_prob < MAX_PROBABILITY) {
+                  sysmem_prob = MIN2(sysmem_prob + STEP_DELTA, MAX_PROBABILITY);
                }
             }
          }
@@ -1076,8 +1080,9 @@ struct tu_autotune::rp_history {
          sysmem_probability.store(sysmem_prob, std::memory_order_relaxed);
 
          if (TU_AUTOTUNE_DEBUG_LOG_PROFILED) {
-            mesa_logi("autotune-prof%s update: avg_gmem: %" PRIu64 " avg_sysmem: %" PRIu64 " = sysmem_probability: %" PRIu32,
-                      immediate ? " imm" : "", avg_gmem, avg_sysmem, sysmem_prob);
+            mesa_logi("autotune-prof%s update: avg_gmem: %" PRIu64 " () avg_sysmem: %" PRIu64
+                      " = sysmem_probability: %" PRIu32,
+                      immediate ? " imm" : "", gmem_ema.get(), sysmem_ema.get(), sysmem_prob);
          }
       }
 
@@ -1288,9 +1293,6 @@ struct tu_autotune::rp_history {
       }
    } preempt_optimize;
 
-   uint32_t sysmem_count = 0, gmem_count = 0;
-   uint64_t avg_sysmem = 0, avg_gmem = 0;
-
    void process(rp_entry &entry, tu_autotune &at)
    {
       /* We use entry config to know what metrics it has, autotune config to know what algorithms are enabled. */
@@ -1320,8 +1322,7 @@ struct tu_autotune::rp_history {
          }
 
          if (at_config.is_enabled(algorithm::PROFILED) || at_config.is_enabled(algorithm::PROFILED_IMM)) {
-            profiled.update(at_config.is_enabled(algorithm::PROFILED_IMM), avg_gmem, avg_sysmem, sysmem_count,
-                            gmem_count);
+            profiled.update(*this, at_config.is_enabled(algorithm::PROFILED_IMM));
          }
       }
    }
