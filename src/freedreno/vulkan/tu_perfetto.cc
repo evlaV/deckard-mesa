@@ -633,6 +633,9 @@ trace_payload_as_extra_end_render_pass_with_bin_coordinates(
 
    trace_payload_as_extra_end_render_pass(event, payload, indirect_data);
 
+   if (info == NULL)
+      return;
+
    uint32_t bin_idx = 0;
    util_dynarray_foreach(&info->bin_array, VkRect2D, tile_rect) {
       auto data = event->add_extra_data();
