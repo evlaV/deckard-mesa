@@ -677,6 +677,10 @@
    DRI_CONF_OPT_B(tu_enable_softfloat32, def, \
                   "Enable softfloat emulation for float32 denormals")
 
+#define DRI_CONF_TU_AUTOTUNE_ALGORITHM() \
+   DRI_CONF_OPT_S_NODEF(tu_autotune_algorithm, \
+                        "Set the preferred autotune algorithm")
+
 /**
  * \brief Honeykrisp specific configuration options
  */
