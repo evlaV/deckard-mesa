@@ -19,6 +19,9 @@
 #include "tu_cs.h"
 #include "tu_suballoc.h"
 
+/* Compile-time toggle for debugging preemption latency with CP preemption performance counters. */
+#define TU_AUTOTUNE_DEBUG_PERFCTR 0
+
 /* Autotune allows for us to tune rendering parameters (such as GMEM vs SYSMEM, tile size divisor, etc.) based on
  * dynamic analysis of the rendering workload via on-GPU profiling. This lets us make much better decisions than static
  * analysis, since we can adapt to the actual workload rather than relying on heuristics.
@@ -185,6 +188,13 @@ struct tu_autotune {
    /* Note: These will internally lock rp_mutex internally, no need to lock it. */
    rp_history *find_rp_history(const rp_key &key);
    rp_history &find_or_create_rp_history(const rp_key &key);
+
+   /** Debug Performance Counters **/
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   const fd_perfcntr_group *cp_group;
+   const fd_perfcntr_countable *preemption_reaction_delay, *num_preemptions, *always_count;
+#endif
 
  public:
    tu_autotune(struct tu_device *device, VkResult &result);

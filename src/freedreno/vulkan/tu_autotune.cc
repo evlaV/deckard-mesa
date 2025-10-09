@@ -55,6 +55,12 @@
 #define at_log_preempt_h(fmt, hash, ...)
 #endif
 
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+#define at_log_perfctr_h(fmt, hash, ...) mesa_logi("autotune-perfctr %016" PRIx64 ": " fmt, hash, ##__VA_ARGS__)
+#else
+#define at_log_perfctr_h(fmt, hash, ...)
+#endif
+
 /* Process any pending entries on autotuner finish, could be used to gather data from traces. */
 #define TU_AUTOTUNE_FLUSH_AT_FINISH 0
 
@@ -387,6 +393,16 @@ tu_autotune::get_cs_for_fence(uint32_t fence)
 
 /** RP Entry Management **/
 
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+struct PACKED tu_perf_ctr_sample {
+   uint64_t begin;
+   uint64_t end;
+   /* The selector value at the beginning/end, used to validate that the countable wasn't changed during a preemption. */
+   uint32_t selector_begin;
+   uint32_t selector_end;
+};
+#endif
+
 /* The part of the per-RP entry which is written by the GPU. */
 struct PACKED tu_autotune::rp_gpu_data {
    /* HW requires the sample start/stop locations to be 128b aligned. */
@@ -394,6 +410,12 @@ struct PACKED tu_autotune::rp_gpu_data {
    alignas(16) uint64_t samples_end;
    uint64_t ts_start;
    uint64_t ts_end;
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   struct tu_perf_ctr_sample preemption_reaction_delay, num_preemptions, always_count;
+   uint64_t cntrs_ready;
+   constexpr static uint64_t CNTRS_READY_MAGIC = 0xABCDEFEFE;
+#endif
 };
 
 /* Per-tile values for GMEM rendering, this structure is appended to the end of rp_gpu_data for each tile. */
@@ -596,6 +618,110 @@ struct tu_autotune::rp_entry {
       tu_cs_emit_qw(cs, timestamp_iova);
    }
 
+   /** Debug Performance Counters **/
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   uint64_t get_preemption_reaction_delay(tu_autotune &at, uint64_t rp_hash)
+   {
+      rp_gpu_data &gpu = get_gpu_data();
+
+      while (p_atomic_read(&gpu.cntrs_ready) != rp_gpu_data::CNTRS_READY_MAGIC) {
+         /* Just spin until the counter values are written out. */
+      }
+
+      auto read_counter = [&](const struct tu_perf_ctr_sample &sample, const struct fd_perfcntr_countable *ctbl,
+                              uint64_t &outValue, const char *name) {
+         if (sample.selector_begin != sample.selector_end || sample.selector_begin != ctbl->selector) {
+            mesa_loge(
+               "autotune %016" PRIx64 ": %s: selector mismatch %" PRIu32 " != %" PRIu32 " (%" PRIu32 " - %" PRIu32 ")",
+               rp_hash, ctbl->name, sample.selector_begin, sample.selector_end, sample.selector_begin, ctbl->selector);
+         }
+
+         outValue = sample.end - sample.begin;
+         if (sample.end < sample.begin) {
+            mesa_loge("autotune %016" PRIx64 ": %s: end < begin %" PRIu64 " < %" PRIu64, rp_hash, name, sample.end,
+                      sample.begin);
+            outValue = 0;
+         }
+      };
+
+      /* We read all counters for logging, even though we only need to return the preemption reaction delay. */
+      uint64_t preemption_reaction_delay;
+      uint64_t num_preemptions;
+      uint64_t always_count;
+      read_counter(gpu.preemption_reaction_delay, at.preemption_reaction_delay, preemption_reaction_delay,
+                   "preemption_reaction_delay");
+      read_counter(gpu.num_preemptions, at.num_preemptions, num_preemptions, "num_preemptions");
+      read_counter(gpu.always_count, at.always_count, always_count, "always_count");
+
+      if (preemption_reaction_delay || num_preemptions) {
+         at_log_perfctr_h("preemption_reaction_delay: %" PRIu64 ", always_count: %" PRIu64
+                          ", num_preemptions: %" PRIu64,
+                          rp_hash, preemption_reaction_delay, always_count, num_preemptions);
+      }
+
+      return preemption_reaction_delay;
+   }
+
+   void emit_debug_perfcntr_start(struct tu_cs *cs, tu_autotune &at, uint64_t bo_iova)
+   {
+      auto countable_begin = [&](const struct fd_perfcntr_countable *ctbl, uint32_t cntr_idx, uint32_t offset) {
+         const struct fd_perfcntr_counter *ctr = &at.cp_group->counters[cntr_idx];
+         uint64_t offset_iova = bo_iova + offset;
+         assert(!ctr->enable); /* CP counters shouldn't use it. */
+
+         tu_cs_emit_pkt4(cs, ctr->select_reg, 1);
+         tu_cs_emit(cs, ctbl->selector);
+
+         tu_cs_emit_wfi(cs);
+
+         tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+         tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(ctr->select_reg) | CP_REG_TO_MEM_0_CNT(1));
+         tu_cs_emit_qw(cs, offset_iova + offsetof(struct tu_perf_ctr_sample, selector_begin));
+
+         tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+         tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(ctr->counter_reg_lo) | CP_REG_TO_MEM_0_64B);
+         tu_cs_emit_qw(cs, offset_iova + offsetof(struct tu_perf_ctr_sample, begin));
+      };
+
+      countable_begin(at.preemption_reaction_delay, 10, offsetof(rp_gpu_data, preemption_reaction_delay));
+      countable_begin(at.num_preemptions, 11, offsetof(rp_gpu_data, num_preemptions));
+      countable_begin(at.always_count, 12, offsetof(rp_gpu_data, always_count));
+
+      tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+      tu_cs_emit_wfi(cs);
+   }
+
+   void emit_debug_perfcntr_end(struct tu_cs *cs, tu_autotune &at, uint64_t bo_iova)
+   {
+      tu_cs_emit_wfi(cs);
+
+      auto countable_end = [&](uint32_t cntr_idx, uint64_t offset) {
+         const struct fd_perfcntr_counter *ctr = &at.cp_group->counters[cntr_idx];
+         uint64_t offset_iova = bo_iova + offset;
+
+         tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+         tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(ctr->select_reg) | CP_REG_TO_MEM_0_CNT(1));
+         tu_cs_emit_qw(cs, offset_iova + offsetof(struct tu_perf_ctr_sample, selector_end));
+
+         tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+         tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(ctr->counter_reg_lo) | CP_REG_TO_MEM_0_64B);
+         tu_cs_emit_qw(cs, offset_iova + offsetof(struct tu_perf_ctr_sample, end));
+      };
+
+      countable_end(10, offsetof(rp_gpu_data, preemption_reaction_delay));
+      countable_end(11, offsetof(rp_gpu_data, num_preemptions));
+      countable_end(12, offsetof(rp_gpu_data, always_count));
+
+      tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+      tu_cs_emit_wfi(cs);
+
+      tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
+      tu_cs_emit_qw(cs, bo_iova + offsetof(rp_gpu_data, cntrs_ready));
+      tu_cs_emit_qw(cs, rp_gpu_data::CNTRS_READY_MAGIC);
+   }
+#endif
+
    /** CS Emission **/
 
    void emit_rp_start(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
@@ -607,6 +733,10 @@ struct tu_autotune::rp_entry {
 
       if (config.test(metric_flag::TS))
          emit_metric_timestamp(cs, bo_iova + offsetof(rp_gpu_data, ts_start));
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      emit_debug_perfcntr_start(cs, *cmd->device->autotune, bo_iova);
+#endif
    }
 
    void emit_rp_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
@@ -619,6 +749,10 @@ struct tu_autotune::rp_entry {
 
       if (config.test(metric_flag::TS))
          emit_metric_timestamp(cs, bo_iova + offsetof(rp_gpu_data, ts_end));
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      emit_debug_perfcntr_end(cs, *cmd->device->autotune, bo_iova);
+#endif
    }
 
    void emit_tile_start(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t tile_index)
@@ -1006,6 +1140,17 @@ struct tu_autotune::rp_history {
       /* Threshold of longest non-preemptible duration before activating latency optimization: 1.5ms */
       static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 1500;
 
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      /* The highest preemption reaction delay recorded for the RP since the last update. */
+      uint64_t max_preemption_latency = 0;
+
+    public:
+      void update_preemption_latency(uint64_t preemption_latency)
+      {
+         max_preemption_latency = MAX2(max_preemption_latency, preemption_latency);
+      }
+#endif
+
     public:
       void update_sysmem(rp_history &history, uint64_t draw_duration)
       {
@@ -1026,9 +1171,21 @@ struct tu_autotune::rp_history {
             uint64_t sysmem_draw_count = sysmem_draw_average.count;
 
             at_log_preempt_h("avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                             ", preemption_latency: %" PRIu64
+#endif
+                             ,
                              history.hash, ticks_to_us(avg_sysmem_draw), avg_sysmem_draw > TARGET_THRESHOLD,
                              l_latency_risk
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                             ,
+                             max_preemption_latency
+#endif
             );
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+            max_preemption_latency = 0;
+#endif
 
             if (sysmem_draw_count >= MIN_PROFILE_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
                latency_risk.store(true, std::memory_order_relaxed);
@@ -1069,9 +1226,22 @@ struct tu_autotune::rp_history {
                }
             } else {
                uint32_t l_tile_size_divisor = tile_size_divisor.load(std::memory_order_relaxed);
-               at_log_preempt_h("avg_gmem_tile: %" PRIu64 " us (%u), latency_risk: %u, tile_size_divisor: %" PRIu32,
+               at_log_preempt_h("avg_gmem_tile: %" PRIu64 " us (%u), latency_risk: %u, tile_size_divisor: %" PRIu32
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                                ", preemption_latency: %" PRIu64
+#endif
+                                ,
                                 history.hash, ticks_to_us(avg_gmem_tile), avg_gmem_tile > TARGET_THRESHOLD,
-                                l_latency_risk, l_tile_size_divisor);
+                                l_latency_risk, l_tile_size_divisor
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+                                ,
+                                max_preemption_latency
+#endif
+                  );
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+               max_preemption_latency = 0;
+#endif
 
                int delta = 0;
                if (avg_gmem_tile > TARGET_THRESHOLD && l_tile_size_divisor < TU_GMEM_LAYOUT_DIVISOR_MAX) {
@@ -1139,6 +1309,11 @@ struct tu_autotune::rp_history {
 
       if (entry_config.test(metric_flag::SAMPLES) && at_config.is_enabled(algorithm::BANDWIDTH))
          bandwidth.update(entry.get_samples_passed());
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+      preempt_optimize.update_preemption_latency(entry.get_preemption_reaction_delay(at, hash));
+#endif
+
       if (entry_config.test(metric_flag::TS)) {
          if (entry.sysmem) {
             uint64_t rp_duration = entry.get_rp_duration();
@@ -1261,6 +1436,49 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
 tu_autotune::tu_autotune(struct tu_device *device, VkResult &result): device(device), active_config(get_env_config())
 {
    tu_bo_suballocator_init(&suballoc, device, 128 * 1024, TU_BO_ALLOC_INTERNAL_RESOURCE, "autotune_suballoc");
+
+#if TU_AUTOTUNE_DEBUG_PERFCTR
+   uint32_t group_count;
+   const struct fd_perfcntr_group *groups = fd_perfcntrs(&device->physical_device->dev_id, &group_count);
+
+   for (uint32_t i = 0; i < group_count; i++) {
+      if (strcmp(groups[i].name, "CP") == 0) {
+         cp_group = &groups[i];
+         break;
+      }
+   }
+
+   if (!cp_group) {
+      mesa_loge("autotune: CP group not found");
+      result = VK_ERROR_INITIALIZATION_FAILED;
+      return;
+   } else if (cp_group->num_countables < 5) {
+      mesa_loge("autotune: CP group has too few countables");
+      result = VK_ERROR_INITIALIZATION_FAILED;
+      return;
+   }
+
+   auto get_perfcntr_countable = [](const struct fd_perfcntr_group *group,
+                                    const char *name) -> const struct fd_perfcntr_countable * {
+      for (uint32_t i = 0; i < group->num_countables; i++) {
+         if (strcmp(group->countables[i].name, name) == 0)
+            return &group->countables[i];
+      }
+
+      mesa_loge("autotune: %s not found in group %s", name, group->name);
+      return nullptr;
+   };
+
+   preemption_reaction_delay = get_perfcntr_countable(cp_group, "PERF_CP_PREEMPTION_REACTION_DELAY");
+   num_preemptions = get_perfcntr_countable(cp_group, "PERF_CP_NUM_PREEMPTIONS");
+   always_count = get_perfcntr_countable(cp_group, "PERF_CP_ALWAYS_COUNT");
+
+   if (!preemption_reaction_delay || !num_preemptions || !always_count) {
+      mesa_loge("autotune: preemption countables not found");
+      result = VK_ERROR_INITIALIZATION_FAILED;
+      return;
+   }
+#endif
 
    result = VK_SUCCESS;
    return;
