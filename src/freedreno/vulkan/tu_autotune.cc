@@ -275,11 +275,14 @@ tu_autotune::get_env_config()
    static std::once_flag once;
    static config_t at_config;
    std::call_once(once, [&] {
-      const char *algo_env_str = os_get_option("TU_AUTOTUNE_ALGO");
+      const char *algo_str = os_get_option("TU_AUTOTUNE_ALGO");
       algorithm algo = algorithm::DEFAULT;
 
-      if (algo_env_str) {
-         std::string_view algo_strv(algo_env_str);
+      if (!algo_str)
+         algo_str = device->instance->autotune_algo; /* From dri conf. */
+
+      if (algo_str) {
+         std::string_view algo_strv(algo_str);
          if (algo_strv == "bandwidth") {
             algo = algorithm::BANDWIDTH;
          } else if (algo_strv == "profiled") {
@@ -289,11 +292,11 @@ tu_autotune::get_env_config()
          } else if (algo_strv == "prefer_sysmem") {
             algo = algorithm::PREFER_SYSMEM;
          } else {
-            mesa_logw("Unknown TU_AUTOTUNE_ALGO '%s', using default", algo_env_str);
+            mesa_logw("Unknown TU_AUTOTUNE_ALGO '%s', using default", algo_str);
          }
 
          if (TU_DEBUG(STARTUP))
-            mesa_logi("TU_AUTOTUNE_ALGO=%u (%s)", (uint8_t) algo, algo_env_str);
+            mesa_logi("TU_AUTOTUNE_ALGO=%u (%s)", (uint8_t) algo, algo_str);
       }
 
       /* Parse the flags from the environment variable. */

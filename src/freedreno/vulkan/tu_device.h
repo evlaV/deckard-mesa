@@ -234,6 +234,9 @@ struct tu_instance
     * However we don't want native Vulkan apps using this.
     */
    bool enable_softfloat32;
+
+   /* Configuration option to use a specific autotune algorithm by default. */
+   const char *autotune_algo;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)

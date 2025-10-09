@@ -699,6 +699,8 @@ environment variables:
     from GMEM rendering due to their rendering patterns, setting this is better
     than using ``TU_DEBUG=sysmem`` when done for performance reasons.
 
+  The algorithm can be set via the driconf option ``tu_autotune_algorithm`` as well.
+
 .. envvar:: TU_AUTOTUNE_FLAGS
 
   Modifies the behavior of the selected algorithm. Supported flags are:
