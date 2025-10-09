@@ -140,6 +140,7 @@ tu_physical_device_get_format_properties(
    bool supported_tex = fd6_texture_format_supported(physical_device->info, format,
                                                      TILE6_LINEAR, false);
    bool is_npot = !util_is_power_of_two_or_zero(desc->block.bits);
+   bool supports_block_match;
 
    if (format == PIPE_FORMAT_NONE ||
        !(supported_vtx || supported_color || supported_tex)) {
@@ -255,6 +256,24 @@ tu_physical_device_get_format_properties(
       optimal &= ~(VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT |
                    VK_FORMAT_FEATURE_2_STORAGE_IMAGE_ATOMIC_BIT);
    }
+
+   /* Block matching limitations */
+   supports_block_match =
+      (optimal & VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT) &&
+      !ycbcr_info && /* Must be single-plane */
+      !vk_format_is_depth_or_stencil(vk_format); /* No depth/stencil formats */
+
+   /* Ensure all channels are only unorm8 or part of a 2101010 format */
+   for (unsigned i = 0; i < desc->nr_channels; i++) {
+      if (desc->channel[i].type != UTIL_FORMAT_TYPE_UNSIGNED ||
+          !desc->channel[i].normalized ||
+          !(desc->channel[i].size == 8 || desc->channel[i].size == 10 ||
+            desc->channel[i].size == 2))
+         supports_block_match = false;
+   }
+
+   if (supports_block_match)
+      optimal |= VK_FORMAT_FEATURE_2_BLOCK_MATCHING_BIT_QCOM;
 
    /* For the most part, we can do anything with a linear image that we could
     * do with a tiled image. However, we can't support sysmem rendering with a

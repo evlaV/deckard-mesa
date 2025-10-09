@@ -1857,7 +1857,7 @@ emit_intrinsic_image_size_tex(struct ir3_context *ctx,
 
 static struct tex_src_info
 get_bindless_samp_src(struct ir3_context *ctx, nir_src *tex,
-                      nir_src *samp)
+                      nir_src *samp, bool no_enc)
 {
    struct ir3_builder *b = &ctx->build;
    struct tex_src_info info = {0};
@@ -1898,6 +1898,9 @@ get_bindless_samp_src(struct ir3_context *ctx, nir_src *tex,
       samp_const = true;
       info.samp_idx = 0;
    }
+
+   if (no_enc)
+      return info;
 
    /* Choose encoding. */
    if (tex_const && samp_const && info.tex_idx < 256 &&
@@ -3384,7 +3387,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
    }
    case nir_intrinsic_prefetch_sam_ir3: {
       struct tex_src_info info =
-         get_bindless_samp_src(ctx, &intr->src[0], &intr->src[1]);
+         get_bindless_samp_src(ctx, &intr->src[0], &intr->src[1], false);
       struct ir3_instruction *sam =
          emit_sam(ctx, OPC_SAM, info, TYPE_F32, 0b1111, NULL, NULL);
 
@@ -3558,7 +3561,8 @@ get_tex_samp_tex_src(struct ir3_context *ctx, nir_tex_instr *tex)
       /* Bindless case */
       info = get_bindless_samp_src(ctx,
                                    texture_idx >= 0 ? &tex->src[texture_idx].src : NULL,
-                                   sampler_idx >= 0 ? &tex->src[sampler_idx].src : NULL);
+                                   sampler_idx >= 0 ? &tex->src[sampler_idx].src : NULL,
+                                   false);
 
       if (tex->texture_non_uniform || tex->sampler_non_uniform)
          info.flags |= IR3_INSTR_NONUNIF;
@@ -3593,6 +3597,158 @@ get_tex_samp_tex_src(struct ir3_context *ctx, nir_tex_instr *tex)
    }
 
    return info;
+}
+
+static void
+emit_tex_block_match_qcom(struct ir3_context *ctx, nir_tex_instr *tex)
+{
+   struct ir3_builder *b = &ctx->build;
+   struct ir3_instruction **dst, *sam, *src0[12], *src1[4];
+   struct ir3_instruction *const *coord, *const *refcoord = NULL, *const *block_size;
+   struct tex_src_info info, ref_info;
+   unsigned i, coords, flags, ncomp;
+   unsigned nsrc0 = 0, nsrc1 = 0;
+   type_t type;
+
+   ncomp = tex->def.num_components;
+
+   coord = block_size = NULL;
+
+   dst = ir3_get_def(ctx, &tex->def, ncomp);
+
+   for (unsigned i = 0; i < tex->num_srcs; i++) {
+      switch (tex->src[i].src_type) {
+      case nir_tex_src_coord:
+         coord = ir3_get_src(ctx, &tex->src[i].src);
+         break;
+      case nir_tex_src_ref_coord:
+         refcoord = ir3_get_src(ctx, &tex->src[i].src);
+         break;
+      case nir_tex_src_block_size:
+         block_size = ir3_get_src(ctx, &tex->src[i].src);
+         break;
+      case nir_tex_src_texture_offset:
+      case nir_tex_src_sampler_offset:
+      case nir_tex_src_texture_handle:
+      case nir_tex_src_ref_texture_handle:
+      case nir_tex_src_sampler_handle:
+      case nir_tex_src_ref_sampler_handle:
+         /* handled in get_tex_samp_src() */
+         break;
+      default:
+         ir3_context_error(ctx, "Unhandled NIR tex src type: %d\n",
+                           tex->src[i].src_type);
+         return;
+      }
+   }
+
+   /*
+    * SRC1 just has the 2D coordinates.
+    */
+
+   tex_info(tex, &flags, &coords);
+   assert(coords == 2);
+   for (i = 0; i < coords; i++)
+      src0[i] = ir3_COV(b, coord[i], TYPE_S32, TYPE_F32);
+   nsrc0 = coords;
+
+   /*
+    * SRC2 has the reference coordinates and the block size, packed with 16-bits per coordinate.
+    */
+   src1[nsrc1++] = ir3_SHLG(b, create_immed(b, 16), 0, refcoord[1], 0, refcoord[0], 0);
+
+   src1[nsrc1++] = ir3_SHLG(b, create_immed(b, 16), 0, block_size[1], 0, block_size[0], 0);
+
+   type = get_tex_dest_type(tex);
+
+   int tgt_tex_idx = nir_tex_instr_src_index(tex, nir_tex_src_texture_handle);
+   int tgt_samp_idx = nir_tex_instr_src_index(tex, nir_tex_src_sampler_handle);
+   int ref_tex_idx = nir_tex_instr_src_index(tex, nir_tex_src_ref_texture_handle);
+   int ref_samp_idx = nir_tex_instr_src_index(tex, nir_tex_src_ref_sampler_handle);
+
+   assert(tgt_tex_idx >= 0 && tgt_samp_idx >= 0 && ref_tex_idx >= 0 && ref_samp_idx >= 0);
+
+   info = get_bindless_samp_src(ctx,
+                                 &tex->src[tgt_tex_idx].src,
+                                 &tex->src[tgt_samp_idx].src,
+                                 true);
+   ref_info = get_bindless_samp_src(ctx,
+                                     &tex->src[ref_tex_idx].src,
+                                     &tex->src[ref_samp_idx].src,
+                                     true);
+
+   info.base = info.tex_base;
+   assert(info.base <= 1); /* Only 0 or 1 can be encoded into the instruction. */
+
+   //info.flags |= IR3_INSTR_S2EN;
+   if (tex->texture_non_uniform || tex->sampler_non_uniform)
+      info.flags |= IR3_INSTR_NONUNIF;
+
+   struct ir3_instruction *texture, *ref_texture;
+
+   texture = ir3_get_src(ctx, &tex->src[tgt_tex_idx].src)[0];
+   ref_texture = ir3_get_src(ctx, &tex->src[ref_tex_idx].src)[0];
+
+   info.samp_tex = ir3_collect(b, texture, create_immed(b, 0), ref_texture);
+
+   struct ir3_instruction *col0 = ir3_create_collect(b, src0, nsrc0);
+   struct ir3_instruction *col1 = ir3_create_collect(b, src1, nsrc1);
+
+   /* Reverse engineering how a1 is encoded, bindings:
+    * tex ref stex sref  t#  a1
+    * 0   1   2    3     0   144 (1 << 7 | 2 << 3)
+    * 0   0   2    3     0   16           (2 << 3)
+    * 0   1   3    3     0   152 (1 << 7 | 3 << 3)
+    * 1   1   2    3     1   144
+    * 1   1   2    3     1   144
+    * 0   1   2    2     0   144
+    *
+    * with 0/1/2/3 bindings, adjusting sets:
+    * tex ref stex sref  t#  base a1
+    * 1   0   0    0     1   1    144
+    * 0   1   0    0     1   0    8336 (1 << 7) | (2 << 3) | (1 << 13)
+    * 0   0   1    0     1   0    145
+    * 0   0   0    1     1   0    145
+    * 0   0   2    1     1   0    146
+    * 0   0   1    2     1   0    145
+    * 2   0   0    0     1   0    144
+    * 0   2   0    0     1   0    16528 (1 << 7) | (2 << 3) | (2 << 13)
+    *
+    * XXX: Haven't tested non-constant texture/sampler references yet.
+    */
+
+   /* For constant bindings, it appears that the reference sampler is
+    * effectively ignored and only the target sampler is encoded.  The exception
+    * is that if the reference sampler has a set number, that will be encoded
+    * into the same place as the target sampler's set number (which could lead
+    * to an invalid sampler reference!)
+    *
+    * Only one bit of target texture set number is encoded, which could also
+    * lead to an invalid reference.
+    */
+   info.flags |= IR3_INSTR_A1EN;
+   info.a1_val = ((ref_info.tex_base << 13) | (ref_info.tex_idx << 7) |
+                  (info.samp_idx << 3) | info.samp_base);
+   info.tex_base &= 1;
+   info.samp_tex = NULL;
+
+   info.flags |= IR3_INSTR_O;
+   sam = emit_sam(ctx, OPC_BLOCKMATCH, info, type, MASK(ncomp), col0, col1);
+
+   switch (tex->match_mode) {
+   case nir_block_match_mode_qcom_sad:
+      sam->cat5.match_mode = IR3_MATCH_MODE_SAD;
+      break;
+   case nir_block_match_mode_qcom_ssd:
+      sam->cat5.match_mode = IR3_MATCH_MODE_SSD;
+      break;
+   default:
+      UNREACHABLE("Invalid block match mode");
+   }
+
+   ir3_split_dest(b, dst, sam, 0, ncomp);
+
+   ir3_put_def(ctx, &tex->def);
 }
 
 static void
@@ -4282,6 +4438,9 @@ emit_instr(struct ir3_context *ctx, nir_instr *instr)
          break;
       case nir_texop_texture_samples:
          emit_tex_info(ctx, tex, 3);
+         break;
+      case nir_texop_block_match_qcom:
+         emit_tex_block_match_qcom(ctx, tex);
          break;
       default:
          emit_tex(ctx, tex);

@@ -94,6 +94,7 @@ tu6_load_state_size(struct tu_pipeline *pipeline,
             count = stage_count;
             break;
          case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+         case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
             /* Because of how we pack combined images and samplers, we
              * currently can't use one packet for the whole array.
              */
@@ -219,7 +220,8 @@ tu6_emit_load_state(struct tu_device *device,
             }
             break;
          }
-         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+         case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM: {
             tu_foreach_stage(stage, stages) {
                /* TODO: We could emit less CP_LOAD_STATE6 if we used
                 * struct-of-arrays instead of array-of-structs.

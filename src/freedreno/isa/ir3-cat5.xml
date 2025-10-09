@@ -137,7 +137,7 @@ SOFTWARE.
 			The s2en (indirect) or bindless case
 		</doc>
 		<display>
-			{SY}{JP}{NAME}{3D}{A}{O}{P}{SV}{S2EN}{UNIFORM}{NONUNIFORM}{BASE}{1D}{CLP}{RCK} {TYPE}({WRMASK}){DST_HALF}{DST}{SRC1}{SRC2}{SRC3}{A1}
+			{SY}{JP}{NAME}{3D}{A}{O}{P}{SV}{MATCHMODE}{S2EN}{UNIFORM}{NONUNIFORM}{BASE}{1D}{CLP}{RCK} {TYPE}({WRMASK}){DST_HALF}{DST}{SRC1}{SRC2}{SRC3}{A1}
 		</display>
 		<field name="BASE_HI" low="19" high="20" type="uint"/>
 		<field name="SRC3" low="21" high="28" type="#cat5-src3">
@@ -156,6 +156,7 @@ SOFTWARE.
 		<derived name="UNIFORM" expr="#cat5-s2enb-is-uniform" type="bool" display=".uniform"/>
 		<derived name="NONUNIFORM" expr="#cat5-s2enb-is-nonuniform" type="bool" display=".nonuniform"/>
 		<derived name="A1" expr="#cat5-s2enb-uses_a1" type="bool" display=", a1.x"/>
+		<derived name="MATCHMODE" expr="#false" type="bool" display=""/>
 	</override>
 
 	<assert low="19" high="20">00</assert>   <!-- BASE_HI -->
@@ -192,6 +193,36 @@ SOFTWARE.
 		<map name="SV">!!(src->flags &amp; IR3_INSTR_V)</map>
 		<map name="1D">!!(src->flags &amp; IR3_INSTR_INV_1D)</map>
 		<map name="SRC2_IMM_OFFSET">!!(src->flags &amp; IR3_INSTR_IMM_OFFSET)</map>
+	</encode>
+</bitset>
+
+<enum name="#cat5-block-match-mode">
+	<value val="0" display=".sad">
+		<doc>
+			Sum of Absolute Difference
+		</doc>
+	</value>
+	<value val="1" display=".ssd">
+		<doc>
+			Sum of Squared Difference
+		</doc>
+	</value>
+</enum>
+
+<bitset name="blockmatch" extends="#instruction-cat5-tex-base">
+	<derived name="NUM_SRC" expr="#two" type="uint"/>
+	<derived name="HAS_SAMP" expr="#true" type="bool"/>
+	<derived name="HAS_TEX" expr="#true" type="bool"/>
+	<derived name="HAS_TYPE" expr="#true" type="bool"/>
+	<derived name="SV" expr="#false" type="bool" display=""/>
+	<derived name="CLP" expr="#false" type="bool" display=""/>
+
+	<pattern low="53" high="58">111010</pattern>
+	<pattern pos="18">0</pattern>
+	<field name="MATCHMODE" pos="50" type="#cat5-block-match-mode"/>
+
+	<encode>
+		<map name="MATCHMODE">src->cat5.match_mode</map>
 	</encode>
 </bitset>
 

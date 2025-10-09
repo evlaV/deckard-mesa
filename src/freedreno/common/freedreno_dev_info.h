@@ -383,6 +383,9 @@ struct fd_dev_info {
        * driver.
        */
       bool has_hw_bin_scaling;
+
+      /* Whether the device supports the BLOCKMATCH opcode */
+      bool has_image_processing;
    } a7xx;
 };
 

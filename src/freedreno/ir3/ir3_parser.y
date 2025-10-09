@@ -630,6 +630,7 @@ static void print_token(FILE *file, int type, YYSTYPE value)
 %token <tok> T_OP_QSHUFFLE_V
 %token <tok> T_OP_QSHUFFLE_DIAG
 %token <tok> T_OP_TCINV
+%token <tok> T_OP_BLOCKMATCH
 
 /* category 6: */
 %token <tok> T_OP_LDG
@@ -752,6 +753,9 @@ static void print_token(FILE *file, int type, YYSTYPE value)
 %token <tok> T_2D
 %token <tok> T_3D
 %token <tok> T_4D
+
+%token <tok> T_SAD
+%token <tok> T_SSD
 
 /* condition qualifiers: */
 %token <tok> T_LT
@@ -1219,6 +1223,10 @@ cat5_opc:          T_OP_ISAML     { new_instr(OPC_ISAML); }
 |                  T_OP_QSHUFFLE_H     { new_instr(OPC_QUAD_SHUFFLE_HORIZ); }
 |                  T_OP_QSHUFFLE_V     { new_instr(OPC_QUAD_SHUFFLE_VERT); }
 |                  T_OP_QSHUFFLE_DIAG  { new_instr(OPC_QUAD_SHUFFLE_DIAG); }
+|                  T_OP_BLOCKMATCH     { new_instr(OPC_BLOCKMATCH); }
+
+cat5_matchmode:    '.' T_SAD   { instr->cat5.match_mode = IR3_MATCH_MODE_SAD; }
+|                  '.' T_SSD   { instr->cat5.match_mode = IR3_MATCH_MODE_SSD; }
 
 cat5_flag:         '.' T_3D       { instr->flags |= IR3_INSTR_3D; }
 |                  '.' 'a'        { instr->flags |= IR3_INSTR_A; }
@@ -1233,6 +1241,7 @@ cat5_flag:         '.' T_3D       { instr->flags |= IR3_INSTR_3D; }
 |                  '.' T_W        { instr->cat5.cluster_size = $2; }
 |                  '.' T_RCK      { instr->flags |= IR3_INSTR_RCK; }
 |                  '.' T_CLP      { instr->flags |= IR3_INSTR_CLP; }
+|                  cat5_matchmode
 cat5_flags:
 |                  cat5_flag cat5_flags
 
