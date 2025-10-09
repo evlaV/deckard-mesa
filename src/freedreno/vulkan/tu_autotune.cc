@@ -27,6 +27,7 @@
 #define TU_AUTOTUNE_DEBUG_LOG_BASE      0
 #define TU_AUTOTUNE_DEBUG_LOG_BANDWIDTH 0
 #define TU_AUTOTUNE_DEBUG_LOG_PROFILED  0
+#define TU_AUTOTUNE_DEBUG_LOG_PREEMPT   0
 
 #if TU_AUTOTUNE_DEBUG_LOG_BASE
 #define at_log_base(fmt, ...)         mesa_logi("autotune: " fmt, ##__VA_ARGS__)
@@ -46,6 +47,12 @@
 #define at_log_profiled_h(fmt, hash, ...) mesa_logi("autotune-prof %016" PRIx64 ": " fmt, hash, ##__VA_ARGS__)
 #else
 #define at_log_profiled_h(fmt, hash, ...)
+#endif
+
+#if TU_AUTOTUNE_DEBUG_LOG_PREEMPT
+#define at_log_preempt_h(fmt, hash, ...) mesa_logi("autotune-preempt %016" PRIx64 ": " fmt, hash, ##__VA_ARGS__)
+#else
+#define at_log_preempt_h(fmt, hash, ...)
 #endif
 
 /* Process any pending entries on autotuner finish, could be used to gather data from traces. */
@@ -97,12 +104,14 @@ enum class tu_autotune::algorithm : uint8_t {
 enum class tu_autotune::mod_flag : uint8_t {
    BIG_GMEM = BIT(1),          /* All RPs with >= 10 draws use GMEM. */
    SMALL_SYSMEM = BIT(2),      /* All RPs with <= 5 draws use SYSMEM. */
+   PREEMPT_OPTIMIZE = BIT(3),  /* Attempts to minimize the preemption latency. */
 };
 
 /* Metric flags, for internal tracking of enabled metrics. */
 enum class tu_autotune::metric_flag : uint8_t {
    SAMPLES = BIT(1), /* Enable tracking samples passed metric. */
    TS = BIT(2),      /* Enable tracking per-RP timestamp metric. */
+   TS_TILE = BIT(3), /* Enable tracking per-tile timestamp metric. */
 };
 
 struct PACKED tu_autotune::config_t {
@@ -118,6 +127,10 @@ struct PACKED tu_autotune::config_t {
          metric_flags |= (uint8_t) metric_flag::SAMPLES;
       } else if (algo == algorithm::PROFILED || algo == algorithm::PROFILED_IMM) {
          metric_flags |= (uint8_t) metric_flag::TS;
+      }
+
+      if (mod_flags & (uint8_t) mod_flag::PREEMPT_OPTIMIZE) {
+         metric_flags |= (uint8_t) metric_flag::TS | (uint8_t) metric_flag::TS_TILE;
       }
    }
 
@@ -197,11 +210,13 @@ struct PACKED tu_autotune::config_t {
       str += ", Mod Flags: 0x" + std::to_string(mod_flags) + " (";
       MODF_STR(BIG_GMEM);
       MODF_STR(SMALL_SYSMEM);
+      MODF_STR(PREEMPT_OPTIMIZE);
       str += ")";
 
       str += ", Metric Flags: 0x" + std::to_string(metric_flags) + " (";
       METRICF_STR(SAMPLES);
       METRICF_STR(TS);
+      METRICF_STR(TS_TILE);
       str += ")";
 
       return str;
@@ -279,6 +294,7 @@ tu_autotune::get_env_config()
          static const struct debug_control tu_at_flags_control[] = {
             { "big_gmem", (uint32_t) mod_flag::BIG_GMEM },
             { "small_sysmem", (uint32_t) mod_flag::SMALL_SYSMEM },
+            { "preempt_optimize", (uint32_t) mod_flag::PREEMPT_OPTIMIZE },
             { NULL, 0 }
          };
 
@@ -381,6 +397,18 @@ struct PACKED tu_autotune::rp_gpu_data {
    uint64_t ts_end;
 };
 
+/* Per-tile values for GMEM rendering, this structure is appended to the end of rp_gpu_data for each tile. */
+struct PACKED tu_autotune::tile_gpu_data {
+   uint64_t ts_start;
+   uint64_t ts_end;
+
+   /* A helper for the offset of this relative to BO start. */
+   static constexpr uint64_t offset(uint32_t tile_index)
+   {
+      return sizeof(rp_gpu_data) + (tile_index * sizeof(tile_gpu_data));
+   }
+};
+
 /* An "entry" of renderpass autotune results, which is used to store the results of a renderpass autotune run for a
  * given command buffer. */
 struct tu_autotune::rp_entry {
@@ -393,11 +421,13 @@ struct tu_autotune::rp_entry {
    static_assert(alignof(rp_gpu_data) == 16);
    static_assert(offsetof(rp_gpu_data, samples_start) == 0);
    static_assert(offsetof(rp_gpu_data, samples_end) == 16);
+   static_assert(sizeof(rp_gpu_data) % alignof(tile_gpu_data) == 0);
 
  public:
    rp_history *history; /* Guaranteed to never be nullptr. */
    config_t config;     /* Configuration at the time of entry creation. */
    bool sysmem;
+   uint32_t tile_count;
    uint32_t draw_count;
 
    /* Amount of repeated RPs so far, used for uniquely identifying instances of the same RPs. */
@@ -422,10 +452,11 @@ struct tu_autotune::rp_entry {
    rp_entry(rp_entry &&) = delete;
    rp_entry &operator=(rp_entry &&) = delete;
 
-   void allocate(bool sysmem)
+   void allocate(bool sysmem, uint32_t tile_count)
    {
       this->sysmem = sysmem;
-      size_t total_size = sizeof(rp_gpu_data);
+      this->tile_count = tile_count;
+      size_t total_size = sizeof(rp_gpu_data) + (tile_count * sizeof(tile_gpu_data));
 
       std::scoped_lock lock(device->autotune->suballoc_mutex);
       VkResult result = tu_suballoc_bo_alloc(&bo, &device->autotune->suballoc, total_size, alignof(rp_gpu_data));
@@ -442,6 +473,14 @@ struct tu_autotune::rp_entry {
    {
       assert(map);
       return *(rp_gpu_data *) map;
+   }
+
+   tile_gpu_data &get_tile_gpu_data(uint32_t tile_index)
+   {
+      assert(map);
+      assert(tile_index < tile_count);
+      uint64_t offset = tile_gpu_data::offset(tile_index);
+      return *(tile_gpu_data *) (map + offset);
    }
 
    /** Samples-Passed Metric **/
@@ -515,6 +554,20 @@ struct tu_autotune::rp_entry {
       return gpu.ts_end - gpu.ts_start;
    }
 
+   /* The amount of cycles spent in the longest tile. This is used to calculate the average draw duration for
+    * determining the largest non-preemptible duration for GMEM rendering.
+    */
+   uint64_t get_max_tile_duration()
+   {
+      assert(config.test(metric_flag::TS_TILE));
+      uint64_t max_duration = 0;
+      for (uint32_t i = 0; i < tile_count; i++) {
+         tile_gpu_data &tile = get_tile_gpu_data(i);
+         max_duration = MAX2(max_duration, tile.ts_end - tile.ts_start);
+      }
+      return max_duration;
+   }
+
    void emit_metric_timestamp(struct tu_cs *cs, uint64_t timestamp_iova)
    {
       tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
@@ -545,6 +598,24 @@ struct tu_autotune::rp_entry {
 
       if (config.test(metric_flag::TS))
          emit_metric_timestamp(cs, bo_iova + offsetof(rp_gpu_data, ts_end));
+   }
+
+   void emit_tile_start(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t tile_index)
+   {
+      assert(map && bo.iova);
+      assert(!sysmem);
+      assert(tile_index < tile_count);
+      if (config.test(metric_flag::TS_TILE))
+         emit_metric_timestamp(cs, bo.iova + tile_gpu_data::offset(tile_index) + offsetof(tile_gpu_data, ts_start));
+   }
+
+   void emit_tile_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t tile_index)
+   {
+      assert(map && bo.iova);
+      assert(!sysmem);
+      assert(tile_index < tile_count);
+      if (config.test(metric_flag::TS_TILE))
+         emit_metric_timestamp(cs, bo.iova + tile_gpu_data::offset(tile_index) + offsetof(tile_gpu_data, ts_end));
    }
 };
 
@@ -687,7 +758,7 @@ template <typename T = double> class exponential_average {
  */
 template <typename T = double> class adaptive_average {
  private:
-   static constexpr double DefaultSlowAlpha = 0.1, DefaultFastAlpha = 0.5, DefaultDeviationThreshold = 0.3;
+   static constexpr double DEFAULT_SLOW_ALPHA = 0.1, DEFAULT_FAST_ALPHA = 0.5, DEFAULT_DEVIATION_THRESHOLD = 0.3;
    exponential_average<T> slow;
    exponential_average<T> fast;
    double deviationThreshold;
@@ -695,9 +766,9 @@ template <typename T = double> class adaptive_average {
  public:
    size_t count = 0;
 
-   explicit adaptive_average(double slow_alpha = DefaultSlowAlpha,
-                             double fast_alpha = DefaultFastAlpha,
-                             double deviation_threshold = DefaultDeviationThreshold) noexcept
+   explicit adaptive_average(double slow_alpha = DEFAULT_SLOW_ALPHA,
+                             double fast_alpha = DEFAULT_FAST_ALPHA,
+                             double deviation_threshold = DEFAULT_DEVIATION_THRESHOLD) noexcept
        : slow(slow_alpha), fast(fast_alpha), deviationThreshold(deviation_threshold)
    {
    }
@@ -901,6 +972,152 @@ struct tu_autotune::rp_history {
       }
    } profiled;
 
+   /** Preemption Latency Optimization Mode **/
+   struct preempt_optimize_mode {
+    private:
+      adaptive_average<uint64_t> sysmem_draw_average;
+      adaptive_average<uint64_t> gmem_tile_average;
+
+      /* If the renderpass has long draws which are at risk of causing high preemptible latency. */
+      std::atomic<bool> latency_risk = false;
+      /* The factor by which the tile size should be divided to reduce preemption latency. */
+      std::atomic<uint32_t> tile_size_divisor = 1;
+
+      /* The next timestamp to update the latency sensitivity parameters at. */
+      uint64_t latency_update_ts = 0;
+      /* The next timestamp where it's allowed to decrement the divisor. */
+      uint64_t divisor_decrement_ts = 0;
+      /* The next timestamp where it's allowed to mark the RP as no longer latency sensitive. */
+      uint64_t latency_switch_ts = 0;
+
+      /* Threshold of longest non-preemptible duration before activating latency optimization: 1.5ms */
+      static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 1500;
+
+    public:
+      void update_sysmem(rp_history &history, uint64_t draw_duration)
+      {
+         bool l_latency_risk = latency_risk.load(std::memory_order_relaxed);
+
+         if (!l_latency_risk) {
+            /* Try to estimate the minimum non-preemptible duration for draw-level preemption, by dividing the total
+             * time by the RP by the amount of draws. This isn't very accurate as it's skewed by the time taken by
+             * commands other than draws (e.g. clears or blits), but it's a good enough estimate to catch the worst
+             * offenders.
+             *
+             * If the average draw duration is above a certain threshold, we mark the RP as latency sensitive which
+             * should bias the decision towards GMEM.
+             */
+
+            sysmem_draw_average.add(draw_duration);
+            uint64_t avg_sysmem_draw = sysmem_draw_average.get();
+            uint64_t sysmem_draw_count = sysmem_draw_average.count;
+
+            at_log_preempt_h("avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
+                             history.hash, ticks_to_us(avg_sysmem_draw), avg_sysmem_draw > TARGET_THRESHOLD,
+                             l_latency_risk
+            );
+
+            if (sysmem_draw_count >= MIN_PROFILE_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
+               latency_risk.store(true, std::memory_order_relaxed);
+               at_log_preempt_h("high sysmem draw duration %" PRIu64 " us, marking as latency sensitive", history.hash,
+                                ticks_to_us(avg_sysmem_draw));
+            }
+         }
+      }
+
+      void update_gmem(rp_history &history, uint64_t tile_duration)
+      {
+         constexpr uint64_t default_update_duration_ns = 100'000'000;         /* 100ms */
+         constexpr uint64_t change_update_duration_ns = 500'000'000;          /* 500ms */
+         constexpr uint64_t downward_update_duration_ns = 10'000'000'000;     /* 10s */
+         constexpr uint64_t latency_insensitive_duration_ns = 30'000'000'000; /* 30s */
+
+         gmem_tile_average.add(tile_duration);
+
+         uint64_t now = os_time_get_nano();
+         if (latency_update_ts > now)
+            return; /* No need to update yet. */
+
+         /* If the RP is latency sensitive and we're using GMEM, we should check if it's worth reducing the tile size to
+          * reduce the latency risk further or if it's already low enough that it's not worth the performance hit.
+          */
+
+         uint64_t update_duration_ns = default_update_duration_ns;
+         if (gmem_tile_average.count > MIN_PROFILE_DURATION_COUNT) {
+            uint64_t avg_gmem_tile = gmem_tile_average.get();
+            bool l_latency_risk = latency_risk.load(std::memory_order_relaxed);
+            if (!l_latency_risk) {
+               if (avg_gmem_tile > TARGET_THRESHOLD) {
+                  latency_risk.store(true, std::memory_order_relaxed);
+                  latency_switch_ts = now + latency_insensitive_duration_ns;
+
+                  at_log_preempt_h("high gmem tile duration %" PRIu64 ", marking as latency sensitive", history.hash,
+                                   avg_gmem_tile);
+               }
+            } else {
+               uint32_t l_tile_size_divisor = tile_size_divisor.load(std::memory_order_relaxed);
+               at_log_preempt_h("avg_gmem_tile: %" PRIu64 " us (%u), latency_risk: %u, tile_size_divisor: %" PRIu32,
+                                history.hash, ticks_to_us(avg_gmem_tile), avg_gmem_tile > TARGET_THRESHOLD,
+                                l_latency_risk, l_tile_size_divisor);
+
+               int delta = 0;
+               if (avg_gmem_tile > TARGET_THRESHOLD && l_tile_size_divisor < TU_GMEM_LAYOUT_DIVISOR_MAX) {
+                  /* If the average tile duration is high, we should reduce the tile size to reduce the latency risk. */
+                  delta = 1;
+
+                  divisor_decrement_ts = now + downward_update_duration_ns;
+               } else if (avg_gmem_tile * 4 < TARGET_THRESHOLD && l_tile_size_divisor > 1 &&
+                          divisor_decrement_ts <= now) {
+                  /* If the average tile duration is low enough that we can get away with a larger tile size, we should
+                   * increase the tile size to reduce the performance hit of the smaller tiles.
+                   *
+                   * Note: The 4x factor is to account for the tile duration being halved when we increase the tile size
+                   * divisor by 1, with an additional 2x factor to generally be conservative about reducing the divisor
+                   * since it can lead to oscillation between tile sizes.
+                   *
+                   * Similarly, divisor_decrement_ts is used to limit how often we can reduce the divisor to avoid
+                   * oscillation.
+                   */
+                  delta = -1;
+                  latency_switch_ts = now + latency_insensitive_duration_ns;
+               } else if (avg_gmem_tile * 10 < TARGET_THRESHOLD && l_tile_size_divisor == 1 &&
+                          latency_switch_ts <= now) {
+                  /* If the average tile duration is low enough that we no longer consider the RP latency sensitive, we
+                   * can switch it back to non-latency sensitive.
+                   */
+                  latency_risk.store(false, std::memory_order_relaxed);
+               }
+
+               if (delta != 0) {
+                  /* Clear all the results to avoid biasing the decision based on the old tile size. */
+                  gmem_tile_average.clear();
+
+                  uint32_t new_tile_size_divisor = l_tile_size_divisor + delta;
+                  at_log_preempt_h("updating tile size divisor: %" PRIu32 " -> %" PRIu32, history.hash,
+                                   l_tile_size_divisor, new_tile_size_divisor);
+
+                  tile_size_divisor.store(new_tile_size_divisor, std::memory_order_relaxed);
+
+                  update_duration_ns = change_update_duration_ns;
+               }
+            }
+
+            latency_update_ts = now + update_duration_ns;
+         }
+      }
+
+      /* If this RP has a risk of causing high preemption latency. */
+      bool is_latency_sensitive() const
+      {
+         return latency_risk.load(std::memory_order_relaxed);
+      }
+
+      uint32_t get_tile_size_divisor() const
+      {
+         return tile_size_divisor.load(std::memory_order_relaxed);
+      }
+   } preempt_optimize;
+
    void process(rp_entry &entry, tu_autotune &at)
    {
       /* We use entry config to know what metrics it has, autotune config to know what algorithms are enabled. */
@@ -914,8 +1131,14 @@ struct tu_autotune::rp_history {
             uint64_t rp_duration = entry.get_rp_duration();
 
             sysmem_rp_average.add(rp_duration);
+
+            if (at_config.test(mod_flag::PREEMPT_OPTIMIZE))
+               preempt_optimize.update_sysmem(*this, rp_duration / entry.draw_count);
          } else {
             gmem_rp_average.add(entry.get_rp_duration());
+
+            if (entry_config.test(metric_flag::TS_TILE) && at_config.test(mod_flag::PREEMPT_OPTIMIZE))
+               preempt_optimize.update_gmem(*this, entry.get_max_tile_duration());
          }
 
          if (at_config.is_enabled(algorithm::PROFILED) || at_config.is_enabled(algorithm::PROFILED_IMM)) {
@@ -1127,10 +1350,26 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    if (!enabled || simultaneous_use)
       return default_mode;
 
-   if (config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10)
-      return render_mode::GMEM;
-   if (config.test(mod_flag::SMALL_SYSMEM) && rp_state->drawcall_count <= 5)
-      return render_mode::SYSMEM;
+   /* We can return early with the decision based on the draw call count, instead of needing to hash the renderpass
+    * instance and look up the history, which is far more expensive.
+    *
+    * However, certain options such as latency sensitive mode take precedence over any of the other autotuner options
+    * and we cannot do so in those cases.
+    */
+   bool can_early_return = !config.test(mod_flag::PREEMPT_OPTIMIZE);
+   auto early_return_mode = [&]() -> std::optional<render_mode> {
+      if (config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10)
+         return render_mode::GMEM;
+      if (config.test(mod_flag::SMALL_SYSMEM) && rp_state->drawcall_count <= 5)
+         return render_mode::SYSMEM;
+      return std::nullopt;
+   }();
+
+   if (can_early_return && early_return_mode) {
+      at_log_base_h("%" PRIu32 " draw calls, using %s (early)", rp_key(pass, framebuffer, cmd_buffer).hash,
+                    rp_state->drawcall_count, render_mode_str(*early_return_mode));
+      return *early_return_mode;
+   }
 
    rp_key key(pass, framebuffer, cmd_buffer);
 
@@ -1147,6 +1386,20 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    auto &history = find_or_create_rp_history(key);
    *rp_ctx = cb_ctx.attach_rp_entry(device, history, config, rp_state->drawcall_count);
 
+   if (config.test(mod_flag::PREEMPT_OPTIMIZE) && history.preempt_optimize.is_latency_sensitive()) {
+      /* Try to mitigate the risk of high preemption latency by always using GMEM, which should break up any larger
+       * draws into smaller ones with tiling.
+       */
+      at_log_base_h("high preemption latency risk, using GMEM", key.hash);
+      return render_mode::GMEM;
+   }
+
+   if (early_return_mode) {
+      at_log_base_h("%" PRIu32 " draw calls, using %s (late)", key.hash, rp_state->drawcall_count,
+                    render_mode_str(*early_return_mode));
+      return *early_return_mode;
+   }
+
    if (config.is_enabled(algorithm::PROFILED) || config.is_enabled(algorithm::PROFILED_IMM))
       return history.profiled.get_optimal_mode(history);
 
@@ -1156,15 +1409,55 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    return default_mode;
 }
 
+uint32_t
+tu_autotune::get_tile_size_divisor(struct tu_cmd_buffer *cmd_buffer)
+{
+   const struct tu_cmd_state *cmd_state = &cmd_buffer->state;
+   const struct tu_render_pass *pass = cmd_state->pass;
+   const struct tu_framebuffer *framebuffer = cmd_state->framebuffer;
+   const struct tu_render_pass_state *rp_state = &cmd_state->rp;
+
+   if (!enabled || !active_config.load().test(mod_flag::PREEMPT_OPTIMIZE) || rp_state->sysmem_single_prim_mode ||
+       pass->has_fdm || cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
+      return 1;
+
+   rp_key key(pass, framebuffer, cmd_buffer);
+   rp_history *history = find_rp_history(key);
+   if (!history) {
+      at_log_base_h("no RP history found, using tile_size_divisor=1", key.hash);
+      return 1;
+   }
+
+   uint32_t tile_size_divisor = history->preempt_optimize.get_tile_size_divisor();
+
+   return tile_size_divisor;
+}
+
+void
+tu_autotune::disable_preempt_optimize()
+{
+   config_t original, updated;
+   do {
+      original = updated = active_config.load();
+      if (!original.test(mod_flag::PREEMPT_OPTIMIZE))
+         return; /* Already disabled, nothing to do. */
+      updated.disable(mod_flag::PREEMPT_OPTIMIZE);
+   } while (!active_config.compare_and_store(original, updated));
+}
+
 /** RP-level CS emissions **/
 
 void
-tu_autotune::begin_renderpass(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, bool sysmem)
+tu_autotune::begin_renderpass(
+   struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, bool sysmem, uint32_t tile_count)
 {
    if (!rp_ctx)
       return;
 
-   rp_ctx->allocate(sysmem);
+   assert(sysmem || tile_count > 0);
+   assert(!sysmem || tile_count == 0);
+
+   rp_ctx->allocate(sysmem, tile_count);
    rp_ctx->emit_rp_start(cmd, cs);
 }
 
@@ -1175,4 +1468,24 @@ tu_autotune::end_renderpass(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_
       return;
 
    rp_ctx->emit_rp_end(cmd, cs);
+}
+
+/** Tile-level CS emissions **/
+
+void
+tu_autotune::begin_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, uint32_t tile_idx)
+{
+   if (!rp_ctx)
+      return;
+
+   rp_ctx->emit_tile_start(cmd, cs, tile_idx);
+}
+
+void
+tu_autotune::end_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, uint32_t tile_idx)
+{
+   if (!rp_ctx)
+      return;
+
+   rp_ctx->emit_tile_end(cmd, cs, tile_idx);
 }
