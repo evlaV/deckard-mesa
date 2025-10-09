@@ -108,9 +108,9 @@ enum class tu_autotune::algorithm : uint8_t {
 
 /* Modifier flags, these modify the behavior of the autotuner in a user-defined way. */
 enum class tu_autotune::mod_flag : uint8_t {
-   BIG_GMEM = BIT(1),          /* All RPs with >= 10 draws use GMEM. */
-   SMALL_SYSMEM = BIT(2),      /* All RPs with <= 5 draws use SYSMEM. */
-   PREEMPT_OPTIMIZE = BIT(3),  /* Attempts to minimize the preemption latency. */
+   BIG_GMEM = BIT(1),         /* All RPs with >= 10 draws use GMEM. */
+   TUNE_SMALL = BIT(2),       /* Try tuning all RPs with <= 5 draws, ignored by default. */
+   PREEMPT_OPTIMIZE = BIT(3), /* Attempts to minimize the preemption latency. */
 };
 
 /* Metric flags, for internal tracking of enabled metrics. */
@@ -215,7 +215,7 @@ struct PACKED tu_autotune::config_t {
 
       str += ", Mod Flags: 0x" + std::to_string(mod_flags) + " (";
       MODF_STR(BIG_GMEM);
-      MODF_STR(SMALL_SYSMEM);
+      MODF_STR(TUNE_SMALL);
       MODF_STR(PREEMPT_OPTIMIZE);
       str += ")";
 
@@ -298,7 +298,7 @@ tu_autotune::get_env_config()
       if (flags_env_str) {
          static const struct debug_control tu_at_flags_control[] = {
             { "big_gmem", (uint32_t) mod_flag::BIG_GMEM },
-            { "small_sysmem", (uint32_t) mod_flag::SMALL_SYSMEM },
+            { "tune_small", (uint32_t) mod_flag::TUNE_SMALL },
             { "preempt_optimize", (uint32_t) mod_flag::PREEMPT_OPTIMIZE },
             { NULL, 0 }
          };
@@ -1575,7 +1575,14 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
     */
    bool simultaneous_use = cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
-   if (!enabled || simultaneous_use)
+   /* These smaller RPs with few draws are too difficult to create a balanced hash for that can independently identify
+    * them while not being so unique to not properly identify them across CBs. They're generally insigificant outside of
+    * a few edge cases such as during deferred rendering G-buffer passes, as we don't have a good way to deal with those
+    * edge cases yet, we just disable the autotuner for small RPs entirely for now unless TUNE_SMALL is specified.
+    */
+   bool ignore_small_rp = !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count <= 5;
+
+   if (!enabled || simultaneous_use || ignore_small_rp)
       return default_mode;
 
    /* We can return early with the decision based on the draw call count, instead of needing to hash the renderpass
@@ -1588,8 +1595,6 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    auto early_return_mode = [&]() -> std::optional<render_mode> {
       if (config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10)
          return render_mode::GMEM;
-      if (config.test(mod_flag::SMALL_SYSMEM) && rp_state->drawcall_count <= 5)
-         return render_mode::SYSMEM;
       return std::nullopt;
    }();
 
