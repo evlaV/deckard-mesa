@@ -4058,7 +4058,7 @@ tu_CreateFramebuffer(VkDevice _device,
       }
    }
 
-   tu_framebuffer_tiling_config(framebuffer, device, pass);
+   tu_framebuffer_init_tiling_config(framebuffer, device, pass);
 
    /* For MSRTSS, allocate extra images that are tied to the VkFramebuffer */
    if (msrtss_attachment_count > 0) {
@@ -4120,7 +4120,7 @@ tu_setup_dynamic_framebuffer(struct tu_cmd_buffer *cmd_buffer,
          view->image->max_tile_h_constraint_fdm;
    }
 
-   tu_framebuffer_tiling_config(framebuffer, cmd_buffer->device, pass);
+   tu_framebuffer_init_tiling_config(framebuffer, cmd_buffer->device, pass);
 }
 
 VkResult

@@ -1235,8 +1235,9 @@ tu_vsc_config(struct tu_cmd_buffer *cmd, const struct tu_tiling_config *tiling)
 static bool
 use_hw_binning(struct tu_cmd_buffer *cmd)
 {
-   const struct tu_framebuffer *fb = cmd->state.framebuffer;
-   const struct tu_tiling_config *tiling = &fb->tiling[cmd->state.gmem_layout];
+   struct tu_framebuffer *fb = cmd->state.framebuffer;
+   const struct tu_tiling_config *tiling =
+      tu_framebuffer_get_tiling_config(fb, cmd->device, cmd->state.pass, cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
    const struct tu_vsc_config *vsc = tu_vsc_config(cmd, tiling);
 
    /* XFB commands are emitted for BINNING || SYSMEM, which makes it
@@ -3108,7 +3109,7 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_regs(cs, RB_BIN_FOVEAT(CHIP));
    }
 
-   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, true);
+   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, true, 0);
 
    tu_cs_sanity_check(cs);
 }
@@ -3481,7 +3482,8 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    if (use_cb)
       tu_trace_start_render_pass(cmd);
 
-   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, false);
+   uint32_t tile_count = vsc->tile_count.width * vsc->tile_count.height;
+   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, false, tile_count);
 
    tu_cs_sanity_check(cs);
 }
@@ -3490,12 +3492,17 @@ template <chip CHIP>
 static void
 tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                 const struct tu_tile_config *tile,
-                const VkOffset2D *fdm_offsets)
+                const VkOffset2D *fdm_offsets,
+                tu_autotune::rp_ctx_t rp_ctx,
+                const struct tu_vsc_config *vsc)
 {
+   uint32_t tile_idx = (tile->pos.y * vsc->tile_count.width) + tile->pos.x;
    tu6_emit_tile_select<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
    tu_lrz_before_tile<CHIP>(cmd, &cmd->cs);
 
    trace_start_draw_ib_gmem(&cmd->trace, &cmd->cs, cmd);
+
+   cmd->device->autotune->begin_tile(cmd, cs, rp_ctx, tile_idx);
 
    /* Primitives that passed all tests are still counted in in each
     * tile even with HW binning beforehand. Do not permit it.
@@ -3507,6 +3514,8 @@ tu6_render_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
 
    if (cmd->state.prim_generated_query_running_before_rp)
       tu_emit_event_write<CHIP>(cmd, cs, FD_START_PRIMITIVE_CTRS);
+
+   cmd->device->autotune->end_tile(cmd, cs, rp_ctx, tile_idx);
 
    if (use_hw_binning(cmd)) {
       tu_cs_emit_pkt7(cs, CP_SET_MARKER, 1);
@@ -3913,7 +3922,9 @@ void
 tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
                    uint32_t tx1, uint32_t ty1, uint32_t tx2, uint32_t ty2,
                    const struct tu_image_view *fdm,
-                   const VkOffset2D *fdm_offsets)
+                   const VkOffset2D *fdm_offsets,
+                   tu_autotune::rp_ctx_t rp_ctx,
+                   const struct tu_vsc_config *vsc)
 {
    uint32_t width = tx2 - tx1;
    uint32_t height = ty2 - ty1;
@@ -3986,7 +3997,7 @@ tu_render_pipe_fdm(struct tu_cmd_buffer *cmd, uint32_t pipe,
          if (tile->visible_views == 0)
             continue;
 
-         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets);
+         tu6_render_tile<CHIP>(cmd, &cmd->cs, tile, fdm_offsets, rp_ctx, vsc);
       }
    }
 }
@@ -4081,7 +4092,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
          if (merge_tiles) {
             tu_render_pipe_fdm<CHIP>(cmd, pipe, tx1, ty1, tx2, ty2, fdm,
-                                     fdm_offsets);
+                                     fdm_offsets, rp_ctx, vsc);
             continue;
          }
 
@@ -4108,7 +4119,8 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
                else
                   tu_identity_frag_area(cmd, &tile);
 
-               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets);
+               tu6_render_tile<CHIP>(cmd, &cmd->cs, &tile, fdm_offsets,
+                                     rp_ctx, vsc);
             }
             slot_row += tile_row_stride;
          }
@@ -4200,6 +4212,7 @@ static void tu_reset_render_pass(struct tu_cmd_buffer *cmd_buffer)
    cmd_buffer->state.attachments = NULL;
    cmd_buffer->state.clear_values = NULL;
    cmd_buffer->state.gmem_layout = TU_GMEM_LAYOUT_COUNT; /* invalid value to prevent looking up gmem offsets */
+   cmd_buffer->state.gmem_layout_divisor = 0;
    cmd_buffer->state.renderpass_cb_disabled = false;
    memset(&cmd_buffer->state.rp, 0, sizeof(cmd_buffer->state.rp));
 
@@ -6240,7 +6253,9 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
           sizeof(cmd->state.render_areas));
    cmd->state.per_layer_render_area = suspended->state.per_layer_render_area;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
-   cmd->state.tiling = &cmd->state.framebuffer->tiling[cmd->state.gmem_layout];
+   cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
+   cmd->state.tiling = tu_framebuffer_get_tiling_config(cmd->state.framebuffer, cmd->device, cmd->state.pass,
+                                                        cmd->state.gmem_layout, cmd->state.gmem_layout_divisor);
    cmd->state.lrz = suspended->state.suspended_pass.lrz;
 }
 
@@ -7242,6 +7257,7 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       cmd->state.suspended_pass.attachments = cmd->state.attachments;
       cmd->state.suspended_pass.clear_values = cmd->state.clear_values;
       cmd->state.suspended_pass.gmem_layout = cmd->state.gmem_layout;
+      cmd->state.suspended_pass.gmem_layout_divisor = cmd->state.gmem_layout_divisor;
    }
 
    tu_fill_render_pass_state(&cmd->state.vk_rp, cmd->state.pass, cmd->state.subpass);

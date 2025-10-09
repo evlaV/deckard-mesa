@@ -641,6 +641,9 @@ tu_queue_init(struct tu_device *device,
 
    queue->fence = -1;
 
+   if (global_priority == VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR)
+      device->autotune->disable_preempt_optimize();
+
    return VK_SUCCESS;
 }
 

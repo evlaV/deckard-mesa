@@ -226,9 +226,24 @@ struct tu_autotune {
 
    render_mode get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx);
 
-   void begin_renderpass(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, bool sysmem);
+   /* Returns the optimal tile size divisor for the given CB state. */
+   uint32_t get_tile_size_divisor(struct tu_cmd_buffer *cmd_buffer);
+
+   /* Disables preemption latency optimization within the autotuner, this is used when high-priority queues are used to
+    * ensure that the autotuner does not interfere with the high-priority queue's performance.
+    *
+    * Note: This should be called before any renderpass is started, otherwise it may lead to undefined behavior.
+    */
+   void disable_preempt_optimize();
+
+   void
+   begin_renderpass(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, bool sysmem, uint32_t tile_count);
 
    void end_renderpass(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx);
+
+   void begin_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, uint32_t tile_idx);
+
+   void end_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_ctx, uint32_t tile_idx);
 
    /* The submit-time hook for autotuner, this may return a CS (can be NULL) which must be amended for autotuner
     * tracking to function correctly.

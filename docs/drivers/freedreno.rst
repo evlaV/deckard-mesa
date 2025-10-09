@@ -708,6 +708,14 @@ environment variables:
     is lower than a certain threshold. The benefits of GMEM rendering are less
     pronounced in these smaller RPs and SYSMEM rendering tends to win more often.
 
+  ``preempt_optimize``
+    Tries to keep non-preemptible time in the render pass is below a certain
+    threshold. This is useful for systems with GPU-based compositors where long
+    non-preemptible times can lead to missed frame deadlines, causing noticeable
+    stuttering. This flag will reduce the performance of the render pass in order
+    to improve overall system responsiveness, it should not be used unless the
+    rest of the system is affected by preemption delays.
+
   Multiple flags can be combined by separating them with commas, e.g.
   ``TU_AUTOTUNE_FLAGS=big_gmem,small_sysmem``.
 
