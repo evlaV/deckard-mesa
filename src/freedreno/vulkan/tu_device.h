@@ -590,7 +590,8 @@ struct tu_framebuffer
 
    uint32_t max_tile_w_constraint;
    uint32_t max_tile_h_constraint;
-   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT];
+   uint32_t initd_divisor; /* The tile divisors up to this have been initialized, for lazy init. */
+   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;
    const struct tu_image_view *attachments[0];
