@@ -104,7 +104,7 @@ enum class tu_autotune::algorithm : uint8_t {
    PROFILED_IMM = 2,  /* Same as PROFILED but immediately resolves the SYSMEM/GMEM probability. */
    PREFER_SYSMEM = 3, /* Always use SYSMEM unless we have strong evidence that GMEM is better. */
 
-   DEFAULT = BANDWIDTH, /* Default algorithm, used if no other is specified. */
+   DEFAULT = PROFILED, /* Default algorithm, used if no other is specified. */
 };
 
 /* Modifier flags, these modify the behavior of the autotuner in a user-defined way. */

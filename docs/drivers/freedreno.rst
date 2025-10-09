@@ -679,14 +679,15 @@ environment variables:
 
   ``bandwidth``
     Estimates the bandwidth usage of rendering in SYSMEM and GMEM modes, and chooses
-    the one with lower estimated bandwidth. This is the default algorithm.
+    the one with lower estimated bandwidth.
 
   ``profiled``
     Dynamically profiles the RP timings in SYSMEM and GMEM modes, and uses that to
     move a probability distribution towards the optimal choice over time. This
     algorithm tends to be far more accurate than the bandwidth algorithm at choosing
     the optimal rendering mode but may result in larger FPS variance due to being
-    based on a probability distribution with random sampling.
+    based on a probability distribution with random sampling. This is the default
+    algorithm.
 
   ``profiled_imm``
     Similar to ``profiled``, but only profiles the first few instances of a RP
