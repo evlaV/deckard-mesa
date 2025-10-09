@@ -133,6 +133,10 @@ fdl6_texswiz(const struct fdl_view_args *args, bool has_z24uint_s8uint)
    unsigned char swiz[4];
    util_format_compose_swizzles(format_swiz, args->swiz, swiz);
 
+   /* Unused for box filter, match the blob behavior. */
+   if (args->filter_width)
+      return 0;
+
    if (CHIP <= A7XX) {
       return A6XX_TEX_CONST_0_SWIZ_X(fdl6_swiz(swiz[0])) |
              A6XX_TEX_CONST_0_SWIZ_Y(fdl6_swiz(swiz[1])) |
@@ -258,7 +262,13 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
       view->descriptor[3] = A6XX_TEX_CONST_3_ARRAY_PITCH(layer_size);
       view->descriptor[4] = base_addr;
       view->descriptor[5] = (base_addr >> 32) | A6XX_TEX_CONST_5_DEPTH(depth);
-      view->descriptor[6] = A6XX_TEX_CONST_6_MIN_LOD_CLAMP(args->min_lod_clamp - args->base_miplevel);
+      if (args->filter_width) {
+         view->descriptor[6] = A6XX_TEX_CONST_6_LOG2_PHASES(
+                                  util_logbase2_ceil(args->filter_num_phases) / 2) |
+                               A6XX_TEX_CONST_6_DILATION(1);
+      } else {
+         view->descriptor[6] = A6XX_TEX_CONST_6_MIN_LOD_CLAMP(args->min_lod_clamp - args->base_miplevel);
+      }
 
       if (layout->tile_all)
          view->descriptor[3] |= A6XX_TEX_CONST_3_TILE_ALL;
@@ -300,6 +310,13 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
 
          assert(args->type != FDL_VIEW_TYPE_3D);
          return;
+      } else if (args->filter_width) {
+         view->descriptor[8] =
+            (A6XX_TEX_CONST_8_FILTER_SIZE_X(args->filter_width) |
+             A6XX_TEX_CONST_8_FILTER_SIZE_Y(args->filter_height));
+         view->descriptor[10] =
+            (A6XX_TEX_CONST_10_FILTER_OFFSET_X(args->filter_center_x) |
+             A6XX_TEX_CONST_10_FILTER_OFFSET_Y(args->filter_center_y));
       }
 
       if (ubwc_enabled) {
@@ -322,6 +339,8 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
       }
    } else if (CHIP >= A8XX) {
       uint32_t *descriptor = view->descriptor;
+
+      assert(!args->filter_width); /* Need descriptor fields defined. */
 
       descriptor[0] = A8XX_TEX_MEMOBJ_0_BASE_LO(base_addr);
       descriptor[1] = A8XX_TEX_MEMOBJ_1_BASE_HI(base_addr >> 32) |
