@@ -956,6 +956,7 @@ struct tu_autotune::rp_history {
 
    rp_history(uint64_t hash): hash(hash)
    {
+      profiled.init(hash);
    }
 
    /** Bandwidth Estimation Algorithm **/
@@ -1037,8 +1038,14 @@ struct tu_autotune::rp_history {
     private:
       /* Range [0 (GMEM), 100 (SYSMEM)], where 50 means no preference. */
       std::atomic<uint32_t> sysmem_probability = 50;
+      uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
 
     public:
+      void init(uint64_t hash)
+      {
+         seed[1] = hash;
+      }
+
       void update(bool immediate, uint64_t avg_gmem, uint64_t avg_sysmem, uint32_t sysmem_count, uint32_t gmem_count)
       {
          uint32_t sysmem_prob = sysmem_probability.load(std::memory_order_relaxed);
@@ -1085,7 +1092,6 @@ struct tu_autotune::rp_history {
       render_mode get_optimal_mode(rp_history &history)
       {
          uint32_t l_sysmem_probability = sysmem_probability.load(std::memory_order_relaxed);
-         uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
          bool select_sysmem = (rand_xorshift128plus(seed) % 100) < l_sysmem_probability;
          render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;
 
