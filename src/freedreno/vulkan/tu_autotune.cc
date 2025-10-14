@@ -784,15 +784,11 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
     */
 
    struct packed_att_properties {
-      union {
-         struct {
-            bool load          : 1;
-            bool store         : 1;
-            bool load_stencil  : 1;
-            bool store_stencil : 1;
-         };
-         uint32_t value;
-      };
+      uint64_t iova;
+      bool load          : 1;
+      bool store         : 1;
+      bool load_stencil  : 1;
+      bool store_stencil : 1;
    };
 
    auto get_hash = [&](uint32_t *data, size_t size) {
@@ -802,17 +798,18 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
       *ptr++ = framebuffer->layers;
 
       for (unsigned i = 0; i < pass->attachment_count; i++) {
-         *ptr++ = packed_att_properties {
-            {
-               .load = pass->attachments[i].load,
-               .store = pass->attachments[i].store,
-               .load_stencil = pass->attachments[i].load_stencil,
-               .store_stencil = pass->attachments[i].store_stencil,
-            }
-         }.value;
-         *((uint64_t *) ptr) = cmd->state.attachments[i]->image->iova + cmd->state.attachments[i]->view.offset;
-         ptr += sizeof(uint64_t) / sizeof(uint32_t);
+         auto props = packed_att_properties {
+            .iova = cmd->state.attachments[i]->image->iova + cmd->state.attachments[i]->view.offset,
+            .load = pass->attachments[i].load,
+            .store = pass->attachments[i].store,
+            .load_stencil = pass->attachments[i].load_stencil,
+            .store_stencil = pass->attachments[i].store_stencil,
+         };
+
+         memcpy(ptr, &props, sizeof(packed_att_properties));
+         ptr += sizeof(packed_att_properties) / sizeof(uint32_t);
       }
+      assert(ptr == data + size);
 
       return XXH64(data, size * sizeof(uint32_t), 0);
    };
@@ -820,7 +817,7 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
    /* We do a manual Boost-style "small vector" optimization here where the stack is used for the vast majority of
     * cases, while only extreme cases need to allocate on the heap.
     */
-   size_t data_count = 3 + (pass->attachment_count * 3);
+   size_t data_count = 3 + (pass->attachment_count * sizeof(packed_att_properties) / sizeof(uint32_t));
    constexpr size_t STACK_MAX_DATA_COUNT = 3 + (5 * 3); /* in u32 units. */
 
    if (data_count <= STACK_MAX_DATA_COUNT) {
