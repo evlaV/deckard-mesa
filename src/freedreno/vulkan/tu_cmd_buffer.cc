@@ -6467,15 +6467,6 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
 
       struct tu_resolve_group resolve_group = {};
 
-      if (subpass->resolve_attachments) {
-         bool per_layer_render_area = cmd->state.per_layer_render_area;
-
-         if (!per_layer_render_area)
-            tu6_emit_blit_scissor(cmd, cs, 0, true, false);
-
-         tu6_emit_gmem_resolves<CHIP>(cmd, subpass, &resolve_group, cs);
-      }
-
       tu6_emit_gmem_stores<CHIP>(cmd, &cmd->draw_cs, &resolve_group, subpass);
 
       tu_emit_resolve_group<CHIP>(cmd, cs, &resolve_group);
