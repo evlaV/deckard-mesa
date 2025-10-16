@@ -505,11 +505,6 @@ VkResult
 tu_allocate_lazy_memory(struct tu_device *dev,
                         struct tu_device_memory *mem);
 
-struct tu_attachment_info
-{
-   struct tu_image_view *attachment;
-};
-
 struct tu_vsc_config {
    /* number of tiles */
    VkExtent2D tile_count;
@@ -554,7 +549,7 @@ struct tu_framebuffer
    struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;
-   struct tu_attachment_info attachments[0];
+   const struct tu_image_view *attachments[0];
 };
 VK_DEFINE_NONDISP_HANDLE_CASTS(tu_framebuffer, base, VkFramebuffer,
                                VK_OBJECT_TYPE_FRAMEBUFFER)
