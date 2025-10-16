@@ -1182,11 +1182,13 @@ r3d_src_buffer(struct tu_cmd_buffer *cmd,
    r3d_src_common(cmd, cs, desc, 0, 0, VK_FILTER_NEAREST);
 }
 
+template <chip CHIP>
 static void
 r3d_src_depth(struct tu_cmd_buffer *cmd,
               struct tu_cs *cs,
               const struct tu_image_view *iview,
-              uint32_t layer)
+              uint32_t layer,
+              VkFilter filter)
 {
    uint32_t desc[A6XX_TEX_CONST_DWORDS];
 
@@ -1217,11 +1219,13 @@ r3d_src_depth(struct tu_cmd_buffer *cmd,
                   VK_FILTER_NEAREST);
 }
 
+template <chip CHIP>
 static void
 r3d_src_stencil(struct tu_cmd_buffer *cmd,
                 struct tu_cs *cs,
                 const struct tu_image_view *iview,
-                uint32_t layer)
+                uint32_t layer,
+                VkFilter filter)
 {
    uint32_t desc[A6XX_TEX_CONST_DWORDS];
 
@@ -1717,6 +1721,12 @@ struct blit_ops {
                       uint64_t va, uint32_t pitch,
                       uint32_t width, uint32_t height,
                       enum pipe_format dst_format);
+   void (*src_depth)(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+                     const struct tu_image_view *iview,
+                     uint32_t layer, VkFilter filter);
+   void (*src_stencil)(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+                       const struct tu_image_view *iview,
+                       uint32_t layer, VkFilter filter);
    void (*dst)(struct tu_cs *cs, const struct fdl6_view *iview, uint32_t layer,
                enum pipe_format src_format);
    void (*dst_depth)(struct tu_cs *cs, const struct tu_image_view *iview, uint32_t layer);
@@ -1744,6 +1754,8 @@ static const struct blit_ops r2d_ops = {
    .clear_value = r2d_clear_value,
    .src = r2d_src<CHIP>,
    .src_buffer = r2d_src_buffer<CHIP>,
+   .src_depth = r2d_src_depth<CHIP>,
+   .src_stencil = r2d_src_stencil<CHIP>,
    .dst = r2d_dst<CHIP>,
    .dst_depth = r2d_dst_depth,
    .dst_stencil = r2d_dst_stencil,
@@ -1759,6 +1771,8 @@ static const struct blit_ops r3d_ops = {
    .clear_value = r3d_clear_value,
    .src = r3d_src,
    .src_buffer = r3d_src_buffer<CHIP>,
+   .src_depth = r3d_src_depth<CHIP>,
+   .src_stencil = r3d_src_stencil<CHIP>,
    .dst = r3d_dst<CHIP>,
    .dst_depth = r3d_dst_depth<CHIP>,
    .dst_stencil = r3d_dst_stencil<CHIP>,
@@ -3578,9 +3592,9 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
    for_each_layer(i, layer_mask, layers) {
       if (src_separate_ds) {
          if (vk_src_format == VK_FORMAT_D32_SFLOAT || vk_dst_format == VK_FORMAT_D32_SFLOAT) {
-            r2d_src_depth<CHIP>(cmd, cs, src, i, VK_FILTER_NEAREST);
+            ops->src_depth(cmd, cs, src, i, VK_FILTER_NEAREST);
          } else {
-            r2d_src_stencil<CHIP>(cmd, cs, src, i, VK_FILTER_NEAREST);
+            ops->src_stencil(cmd, cs, src, i, VK_FILTER_NEAREST);
          }
       } else {
          ops->src(cmd, cs, &src->view, i, VK_FILTER_NEAREST, dst_format);
@@ -4997,9 +5011,9 @@ load_3d_blit(struct tu_cmd_buffer *cmd,
 
       if (iview->image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
          if (separate_stencil)
-            r3d_src_stencil(cmd, cs, iview, i);
+            r3d_src_stencil<CHIP>(cmd, cs, iview, i, VK_FILTER_NEAREST);
          else
-            r3d_src_depth(cmd, cs, iview, i);
+            r3d_src_depth<CHIP>(cmd, cs, iview, i, VK_FILTER_NEAREST);
       } else {
          r3d_src_gmem_load(cmd, cs, iview, i);
       }
