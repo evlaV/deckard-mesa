@@ -301,6 +301,16 @@ tu_autotune::get_env_config()
             mesa_logi("TU_AUTOTUNE_ALGO=%u (%s)", (uint8_t) algo, algo_strv.data());
       }
 
+      if (device->instance->autotune_prefer_sysmem) {
+         if (TU_DEBUG(STARTUP))
+            mesa_logi("tu_autotune_prefer_sysmem is enabled, using PREFER_SYSMEM algorithm");
+         algo = algorithm::PREFER_SYSMEM;
+      } else if (device->instance->autotune_prefer_gmem) {
+         if (TU_DEBUG(STARTUP))
+            mesa_logi("tu_autotune_prefer_gmem is enabled, using PREFER_GMEM algorithm");
+         algo = algorithm::PREFER_GMEM;
+      }
+
       /* Parse the flags from the environment variable. */
       const char *flags_env_str = os_get_option("TU_AUTOTUNE_FLAGS");
       uint32_t mod_flags = 0;
@@ -1836,6 +1846,8 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
          return render_mode::GMEM;
       if (config.is_enabled(algorithm::PREFER_SYSMEM))
          return render_mode::SYSMEM;
+      if (config.is_enabled(algorithm::PREFER_GMEM))
+         return render_mode::GMEM;
       return std::nullopt;
    }();
 
@@ -1893,6 +1905,9 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
 
    if (config.is_enabled(algorithm::BANDWIDTH))
       return history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state);
+
+   if (config.is_enabled(algorithm::PREFER_GMEM))
+      return render_mode::GMEM;
 
    return default_mode;
 }

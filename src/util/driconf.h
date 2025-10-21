@@ -693,6 +693,14 @@
    DRI_CONF_OPT_S_NODEF(tu_autotune_algorithm, \
                         "Set the preferred autotune algorithm")
 
+#define DRI_CONF_TU_AUTOTUNE_PREFER_SYSMEM(def) \
+   DRI_CONF_OPT_B(tu_autotune_prefer_sysmem, def, \
+                  "Prefer using SYSMEM over GMEM rendering by default in the autotuner")
+
+#define DRI_CONF_TU_AUTOTUNE_PREFER_GMEM(def) \
+   DRI_CONF_OPT_B(tu_autotune_prefer_gmem, def, \
+                  "Prefer using GMEM over SYSMEM rendering by default in the autotuner")
+
 #define DRI_CONF_TU_EMULATE_ALPHA_TO_COVERAGE(def) \
    DRI_CONF_OPT_B(tu_emulate_alpha_to_coverage, def, \
                   "Enable emulation of alpha-to-coverage")

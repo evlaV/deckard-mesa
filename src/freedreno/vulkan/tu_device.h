@@ -237,6 +237,12 @@ struct tu_instance
    /* Configuration option to use a specific autotune algorithm by default. */
    const char *autotune_algo;
 
+   /* Configuration option to prefer SYSMEM over GMEM rendering in the autotuner. */
+   bool autotune_prefer_sysmem;
+
+   /* Configuration option to prefer GMEM over SYSMEM rendering in the autotuner. */
+   bool autotune_prefer_gmem;
+
    /* The hardware implementation of alpha-to-coverage gives visually poor
     * results for many games. Set this option to enable it in the shader
     * instead.
