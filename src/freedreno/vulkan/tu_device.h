@@ -233,6 +233,9 @@ struct tu_instance
 
    /* Configuration option to prefer SYSMEM over GMEM rendering in the autotuner. */
    bool autotune_prefer_sysmem;
+
+   /* Configuration option to prefer GMEM over SYSMEM rendering in the autotuner. */
+   bool autotune_prefer_gmem;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)

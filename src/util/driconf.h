@@ -643,6 +643,10 @@
    DRI_CONF_OPT_B(tu_autotune_prefer_sysmem, def, \
                   "Prefer using SYSMEM over GMEM rendering by default in the autotuner")
 
+#define DRI_CONF_TU_AUTOTUNE_PREFER_GMEM(def) \
+   DRI_CONF_OPT_B(tu_autotune_prefer_gmem, def, \
+                  "Prefer using GMEM over SYSMEM rendering by default in the autotuner")
+
 /**
  * \brief Honeykrisp specific configuration options
  */
