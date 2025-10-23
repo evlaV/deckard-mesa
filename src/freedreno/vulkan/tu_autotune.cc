@@ -1046,6 +1046,7 @@ struct tu_autotune::rp_history {
     private:
       /* Range [0 (GMEM), 100 (SYSMEM)], where 50 means no preference. */
       std::atomic<uint32_t> sysmem_probability = 50;
+      bool should_reset = false;
       uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
 
     public:
@@ -1078,7 +1079,13 @@ struct tu_autotune::rp_history {
             if (sysmem_ema.count < MIN_PROFILE_DURATION_COUNT || gmem_ema.count < MIN_PROFILE_DURATION_COUNT) {
                /* Not enough data to make a decision, bias towards least used. */
                sysmem_prob = sysmem_ema.count < gmem_ema.count ? 75 : 25;
+               should_reset = true;
             } else {
+               if (should_reset) {
+                  sysmem_prob = 50;
+                  should_reset = false;
+               }
+
                /* Adjust probability based on timing results. */
                constexpr uint32_t STEP_DELTA = 5, MIN_PROBABILITY = 5, MAX_PROBABILITY = 95;
 
