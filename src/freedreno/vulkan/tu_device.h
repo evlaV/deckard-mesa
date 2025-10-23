@@ -563,7 +563,7 @@ struct tu_framebuffer
    struct tu_device_memory *depth_mem, *color_mem;
 
    uint32_t initd_divisor; /* The tile divisors up to this have been initialized, for lazy init. */
-   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT];
+   struct tu_tiling_config tiling[TU_GMEM_LAYOUT_COUNT * TU_GMEM_LAYOUT_DIVISOR_MAX];
 
    uint32_t attachment_count;
    const struct tu_image_view *attachments[0];
