@@ -3794,6 +3794,7 @@ tu_init_msrtss_attachments(struct tu_device *device,
              VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT),
       };
 
+      memset(&images[i], 0, sizeof(images[i]));
       vk_image_init(&device->vk, &images[i].vk, &image_info);
       tu_image_init(device, &images[i], &image_info);
       TU_CALLX(device, tu_image_update_layout)(device, &images[i], DRM_FORMAT_MOD_INVALID, NULL);
