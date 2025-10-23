@@ -1044,8 +1044,10 @@ struct tu_autotune::rp_history {
    /** Profiled Algorithms **/
    struct profiled_algo {
     private:
-      /* Range [0 (GMEM), 100 (SYSMEM)], where 50 means no preference. */
-      std::atomic<uint32_t> sysmem_probability = 50;
+      constexpr static uint32_t PROBABILITY_LIMIT = 1000, PROBABILITY_MID = 500, PROBABILITY_PREFER_SYSMEM = 800,
+                                PROBABILITY_PREFER_GMEM = 200;
+      /* Range [0 (GMEM), 1000 (SYSMEM)], where 500 means no preference. */
+      std::atomic<uint32_t> sysmem_probability = PROBABILITY_MID;
       bool should_reset = false;
       uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
 
@@ -1065,36 +1067,43 @@ struct tu_autotune::rp_history {
              * scenario for autotune performance, since we know the optimal decisions.
              */
 
-            if (sysmem_prob == 0 || sysmem_prob == 100)
+            if (sysmem_prob == 0 || sysmem_prob == PROBABILITY_LIMIT)
                return; /* Already resolved, no further updates are necessary. */
 
             if (sysmem_ema.count < 1) {
-               sysmem_prob = 100;
+               sysmem_prob = PROBABILITY_LIMIT;
             } else if (gmem_ema.count < 1) {
                sysmem_prob = 0;
             } else {
-               sysmem_prob = gmem_ema.get() < sysmem_ema.get() ? 0 : 100;
+               sysmem_prob = gmem_ema.get() < sysmem_ema.get() ? 0 : PROBABILITY_LIMIT;
             }
          } else {
             if (sysmem_ema.count < MIN_PROFILE_DURATION_COUNT || gmem_ema.count < MIN_PROFILE_DURATION_COUNT) {
                /* Not enough data to make a decision, bias towards least used. */
-               sysmem_prob = sysmem_ema.count < gmem_ema.count ? 75 : 25;
+               sysmem_prob = sysmem_ema.count < gmem_ema.count ? PROBABILITY_PREFER_SYSMEM : PROBABILITY_PREFER_GMEM;
                should_reset = true;
             } else {
                if (should_reset) {
-                  sysmem_prob = 50;
+                  sysmem_prob = PROBABILITY_MID;
                   should_reset = false;
                }
 
                /* Adjust probability based on timing results. */
-               constexpr uint32_t STEP_DELTA = 5, MIN_PROBABILITY = 5, MAX_PROBABILITY = 95;
+               constexpr uint32_t FAST_STEP_DELTA = 50, FAST_MIN_PROBABILITY = 50, FAST_MAX_PROBABILITY = 950;
+               constexpr uint32_t SLOW_STEP_DELTA = 2, SLOW_MIN_PROBABILITY = 2, SLOW_MAX_PROBABILITY = 998;
 
                uint64_t avg_sysmem = sysmem_ema.get();
                uint64_t avg_gmem = gmem_ema.get();
-               if (avg_gmem < avg_sysmem && sysmem_prob > MIN_PROBABILITY) {
-                  sysmem_prob = MAX2(sysmem_prob - STEP_DELTA, MIN_PROBABILITY);
-               } else if (avg_sysmem < avg_gmem && sysmem_prob < MAX_PROBABILITY) {
-                  sysmem_prob = MIN2(sysmem_prob + STEP_DELTA, MAX_PROBABILITY);
+               if (avg_gmem < avg_sysmem) {
+                  if (sysmem_prob > FAST_MIN_PROBABILITY && sysmem_prob <= FAST_MAX_PROBABILITY)
+                     sysmem_prob = MAX2(sysmem_prob - FAST_STEP_DELTA, FAST_MIN_PROBABILITY);
+                  else if (sysmem_prob > SLOW_MIN_PROBABILITY)
+                     sysmem_prob = MAX2(sysmem_prob - SLOW_STEP_DELTA, SLOW_MIN_PROBABILITY);
+               } else if (avg_sysmem < avg_gmem) {
+                  if (sysmem_prob >= FAST_MIN_PROBABILITY && sysmem_prob < FAST_MAX_PROBABILITY)
+                     sysmem_prob = MIN2(sysmem_prob + FAST_STEP_DELTA, FAST_MAX_PROBABILITY);
+                  else if (sysmem_prob < SLOW_MAX_PROBABILITY)
+                     sysmem_prob = MIN2(sysmem_prob + SLOW_STEP_DELTA, SLOW_MAX_PROBABILITY);
                }
             }
          }
@@ -1112,7 +1121,7 @@ struct tu_autotune::rp_history {
       render_mode get_optimal_mode(rp_history &history)
       {
          uint32_t l_sysmem_probability = sysmem_probability.load(std::memory_order_relaxed);
-         bool select_sysmem = (rand_xorshift128plus(seed) % 100) < l_sysmem_probability;
+         bool select_sysmem = (rand_xorshift128plus(seed) % PROBABILITY_LIMIT) < l_sysmem_probability;
          render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;
 
          if (TU_AUTOTUNE_DEBUG_LOG_PROFILED) {
