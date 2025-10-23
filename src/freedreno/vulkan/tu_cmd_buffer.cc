@@ -6451,6 +6451,7 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       cmd->state.suspended_pass.attachments = cmd->state.attachments;
       cmd->state.suspended_pass.clear_values = cmd->state.clear_values;
       cmd->state.suspended_pass.gmem_layout = cmd->state.gmem_layout;
+      cmd->state.suspended_pass.gmem_layout_divisor = cmd->state.gmem_layout_divisor;
    }
 
    if (!resuming) {
