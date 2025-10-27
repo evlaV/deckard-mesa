@@ -1117,9 +1117,9 @@ struct tu_autotune::rp_history {
                 * avoids performance hazards from switching to an extremely suboptimal mode even if done very rarely.
                 * Note: Due to the potentially huge negative impact of a bad lock, this is a very conservative check.
                 */
-               constexpr uint32_t MIN_LOCK_DURATION_COUNT = 50;
+               constexpr uint32_t MIN_LOCK_DURATION_COUNT = 15;
                constexpr uint64_t MIN_LOCK_THRESHOLD = GPU_TICKS_PER_US * 1'000; /* 1ms */
-               constexpr uint32_t LOCK_PERCENT_DIFF = 40;
+               constexpr uint32_t LOCK_PERCENT_DIFF = 30;
 
                bool has_resolved = sysmem_prob == SLOW_MAX_PROBABILITY || sysmem_prob == SLOW_MIN_PROBABILITY;
                bool enough_samples =
