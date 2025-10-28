@@ -522,7 +522,7 @@ struct tu_cmd_state
 
    /* Override the current subpass'es srgb_cntl. */
    bool override_srgb_cntl;
-   uint32_t srgb_cntl;
+   VkBool32 srgb_cntl;
 
    const struct tu_render_pass *pass;
    const struct tu_subpass *subpass;
