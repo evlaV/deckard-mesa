@@ -141,6 +141,7 @@ struct tu_autotune {
    /** Renderpass State Tracking **/
 
    struct rp_history;
+   struct rp_history_handle;
 
    /* A strongly typed key which generates a hash to uniquely identify a renderpass instance. This hash is expected to
     * be stable across runs, so it can be used to identify the same renderpass instance consistently.
@@ -181,12 +182,15 @@ struct tu_autotune {
    };
 
    /* A map between the hash of an RP and the historical state of the RP. Synchronized by rp_mutex. */
-   std::unordered_map<rp_key, rp_history, rp_hash> rp_histories;
+   using rp_histories_t = std::unordered_map<rp_key, rp_history, rp_hash>;
+   rp_histories_t rp_histories;
    std::shared_mutex rp_mutex;
+   uint64_t last_reap_ts = 0;
 
    /* Note: These will internally lock rp_mutex internally, no need to lock it. */
-   rp_history *find_rp_history(const rp_key &key);
-   rp_history &find_or_create_rp_history(const rp_key &key);
+   rp_history_handle find_rp_history(const rp_key &key);
+   rp_history_handle find_or_create_rp_history(const rp_key &key);
+   void reap_old_rp_histories();
 
  public:
    tu_autotune(struct tu_device *device, VkResult &result);
@@ -207,7 +211,8 @@ struct tu_autotune {
       std::shared_ptr<rp_entry_batch> batch;
 
       /* Creates a new RP entry attached to this CB. */
-      rp_entry *attach_rp_entry(struct tu_device *device, rp_history &entry, config_t config, uint32_t draw_count);
+      rp_entry *
+      attach_rp_entry(struct tu_device *device, rp_history_handle &&history, config_t config, uint32_t draw_count);
 
       rp_entry *find_rp_entry(const rp_key &key);
 
