@@ -5,6 +5,7 @@
 
 #include "tu_autotune.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <optional>
@@ -437,6 +438,60 @@ struct PACKED tu_autotune::tile_gpu_data {
    }
 };
 
+/* A small wrapper around rp_history to provide ref-counting and usage timestamps. */
+struct tu_autotune::rp_history_handle {
+   rp_history *history;
+
+   /* Note: Must be called with rp_mutex held. */
+   rp_history_handle(rp_history &history);
+
+   constexpr rp_history_handle(std::nullptr_t): history(nullptr)
+   {
+   }
+
+   rp_history_handle(const rp_history_handle &) = delete;
+   rp_history_handle &operator=(const rp_history_handle &) = delete;
+
+   constexpr rp_history_handle(rp_history_handle &&other): history(other.history)
+   {
+      other.history = nullptr;
+   }
+
+   constexpr rp_history_handle &operator=(rp_history_handle &&other)
+   {
+      if (this != &other) {
+         history = other.history;
+         other.history = nullptr;
+      }
+      return *this;
+   }
+
+   constexpr operator bool() const
+   {
+      return history != nullptr;
+   }
+
+   constexpr rp_history &operator*() const
+   {
+      assert(history);
+      return *history;
+   }
+
+   constexpr operator rp_history *() const
+   {
+      assert(history);
+      return history;
+   }
+
+   constexpr rp_history *operator->() const
+   {
+      assert(history);
+      return history;
+   }
+
+   ~rp_history_handle();
+};
+
 /* An "entry" of renderpass autotune results, which is used to store the results of a renderpass autotune run for a
  * given command buffer. */
 struct tu_autotune::rp_entry {
@@ -452,8 +507,8 @@ struct tu_autotune::rp_entry {
    static_assert(sizeof(rp_gpu_data) % alignof(tile_gpu_data) == 0);
 
  public:
-   rp_history *history; /* Guaranteed to never be nullptr. */
-   config_t config;     /* Configuration at the time of entry creation. */
+   rp_history_handle history;
+   config_t config; /* Configuration at the time of entry creation. */
    bool sysmem;
    uint32_t tile_count;
    uint32_t draw_count;
@@ -461,8 +516,8 @@ struct tu_autotune::rp_entry {
    /* Amount of repeated RPs so far, used for uniquely identifying instances of the same RPs. */
    uint32_t duplicates = 0;
 
-   rp_entry(struct tu_device *device, rp_history &history, config_t config, uint32_t draw_count)
-       : device(device), map(nullptr), history(&history), config(config), draw_count(draw_count)
+   rp_entry(struct tu_device *device, rp_history_handle &&history, config_t config, uint32_t draw_count)
+       : device(device), map(nullptr), history(std::move(history)), config(config), draw_count(draw_count)
    {
    }
 
@@ -479,7 +534,7 @@ struct tu_autotune::rp_entry {
    rp_entry &operator=(const rp_entry &) = delete;
 
    rp_entry(rp_entry &&other) noexcept
-       : device(other.device), bo(other.bo), map(other.map), history(other.history), config(other.config),
+       : device(other.device), bo(other.bo), map(other.map), history(std::move(other.history)), config(other.config),
          sysmem(other.sysmem), tile_count(other.tile_count), draw_count(other.draw_count)
    {
       other.map = nullptr; /* Prevent the destructor from freeing the BO. */
@@ -491,7 +546,7 @@ struct tu_autotune::rp_entry {
          device = other.device;
          bo = other.bo;
          map = other.map;
-         history = other.history;
+         history = std::move(other.history);
          config = other.config;
          sysmem = other.sysmem;
          tile_count = other.tile_count;
@@ -966,9 +1021,11 @@ struct tu_autotune::rp_history {
 
  public:
    uint64_t hash; /* The hash of the renderpass, just for debug output. */
-   uint32_t duplicates;
 
-   rp_history(uint64_t hash): hash(hash), profiled(hash)
+   std::atomic<uint32_t> refcount = 0; /* Reference count to prevent deletion when active. */
+   std::atomic<uint64_t> last_use_ts;  /* Last time the reference count was updated, in monotonic nanoseconds. */
+
+   rp_history(uint64_t hash): hash(hash), last_use_ts(os_time_get_nano()), profiled(hash)
    {
    }
 
@@ -1378,18 +1435,34 @@ struct tu_autotune::rp_history {
    }
 };
 
-tu_autotune::rp_history *
+tu_autotune::rp_history_handle::~rp_history_handle()
+{
+   if (!history)
+      return;
+
+   history->last_use_ts.store(os_time_get_nano(), std::memory_order_relaxed);
+   ASSERTED uint32_t old_refcount = history->refcount.fetch_sub(1, std::memory_order_relaxed);
+   assert(old_refcount != 0); /* Underflow check. */
+}
+
+tu_autotune::rp_history_handle::rp_history_handle(rp_history &history): history(&history)
+{
+   history.refcount.fetch_add(1, std::memory_order_relaxed);
+   history.last_use_ts.store(os_time_get_nano(), std::memory_order_relaxed);
+}
+
+tu_autotune::rp_history_handle
 tu_autotune::find_rp_history(const rp_key &key)
 {
    std::shared_lock lock(rp_mutex);
    auto it = rp_histories.find(key);
    if (it != rp_histories.end())
-      return &it->second;
+      return rp_history_handle(it->second);
 
-   return nullptr;
+   return rp_history_handle(nullptr);
 }
 
-tu_autotune::rp_history &
+tu_autotune::rp_history_handle
 tu_autotune::find_or_create_rp_history(const rp_key &key)
 {
    rp_history *existing = find_rp_history(key);
@@ -1402,7 +1475,63 @@ tu_autotune::find_or_create_rp_history(const rp_key &key)
    if (it != rp_histories.end())
       return it->second; /* Another thread created the history while we were waiting for the lock. */
    auto history = rp_histories.emplace(std::make_pair(key, key.hash));
-   return history.first->second;
+   return rp_history_handle(history.first->second);
+}
+
+void
+tu_autotune::reap_old_rp_histories()
+{
+   constexpr uint64_t REAP_INTERVAL_NS = 10'000'000'000; /* 10s */
+   uint64_t now = os_time_get_nano();
+   if (last_reap_ts + REAP_INTERVAL_NS > now)
+      return;
+   last_reap_ts = now;
+
+   constexpr size_t MAX_RP_HISTORIES = 1024; /* Not a hard limit, we might exceed this if there's many active RPs. */
+   {
+      /* Quicker non-unique lock, should hit this path mostly. */
+      std::shared_lock lock(rp_mutex);
+      if (rp_histories.size() <= MAX_RP_HISTORIES)
+         return;
+   }
+
+   std::unique_lock lock(rp_mutex);
+   size_t og_size = rp_histories.size();
+   if (og_size <= MAX_RP_HISTORIES)
+      return;
+
+   std::vector<rp_histories_t::iterator> candidates;
+   candidates.reserve(og_size);
+   for (auto it = rp_histories.begin(); it != rp_histories.end(); ++it) {
+      if (it->second.refcount.load(std::memory_order_relaxed) == 0)
+         candidates.push_back(it);
+   }
+
+   size_t to_purge = std::min(candidates.size(), og_size - MAX_RP_HISTORIES);
+   if (to_purge == 0) {
+      at_log_base("no RP histories to reap at size %zu, all are active", og_size);
+      return;
+   }
+
+   /* Partition candidates by last use timestamp, oldest first. */
+   auto partition_end = candidates.begin() + to_purge;
+   if (to_purge < candidates.size()) {
+      std::nth_element(candidates.begin(), partition_end, candidates.end(),
+                       [](rp_histories_t::iterator a, rp_histories_t::iterator b) {
+                          return a->second.last_use_ts.load(std::memory_order_relaxed) <
+                                 b->second.last_use_ts.load(std::memory_order_relaxed);
+                       });
+   }
+
+   for (auto it = candidates.begin(); it != partition_end; ++it) {
+      rp_history &history = (*it)->second;
+      if (history.refcount.load(std::memory_order_relaxed) == 0) {
+         at_log_base("reaping RP history %016" PRIx64, history.hash);
+         rp_histories.erase(*it);
+      }
+   }
+
+   at_log_base("reaped old RP histories %zu -> %zu", og_size, rp_histories.size());
 }
 
 void
@@ -1439,6 +1568,7 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
     * processed all entries from prior CBs before we submit any new CBs with the same RP to the GPU.
     */
    process_entries();
+   reap_old_rp_histories();
 
    bool has_results = false;
    for (uint32_t i = 0; i < cmd_buffer_count; i++) {
@@ -1557,11 +1687,11 @@ tu_autotune::cmd_buf_ctx::reset()
 
 tu_autotune::rp_entry &
 tu_autotune::cmd_buf_ctx::attach_rp_entry(struct tu_device *device,
-                                          rp_history &history,
+                                          rp_history_handle &&history,
                                           config_t config,
                                           uint32_t drawcall_count)
 {
-   return batch->entries.emplace_back(device, history, config, drawcall_count);
+   return batch->entries.emplace_back(device, std::move(history), config, drawcall_count);
 }
 
 tu_autotune::rp_entry *
@@ -1660,8 +1790,8 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
       key = rp_key(key, entry->duplicates);
    }
 
-   auto &history = find_or_create_rp_history(key);
-   *rp_ctx = &cb_ctx.attach_rp_entry(device, history, config, rp_state->drawcall_count);
+   *rp_ctx = &cb_ctx.attach_rp_entry(device, find_or_create_rp_history(key), config, rp_state->drawcall_count);
+   rp_history &history = *((*rp_ctx)->history);
 
    if (config.test(mod_flag::PREEMPT_OPTIMIZE) && history.preempt_optimize.is_latency_sensitive()) {
       /* Try to mitigate the risk of high preemption latency by always using GMEM, which should break up any larger
