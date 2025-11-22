@@ -77,6 +77,7 @@
 #include "util/os_time.h"
 #include "util/u_overflow.h"
 #include "util/timespec.h"
+#include "util/perf/cpu_trace.h"
 
 #include "vk_device.h"
 #include "vk_fence.h"
@@ -1959,6 +1960,8 @@ wsi_display_page_flip_handler2(int fd,
             nsec, &image->base);
    }
 
+   MESA_TRACE_FUNC();
+
    wsi_display_debug("image %ld displayed at %d\n",
                      image - &(image->chain->images[0]), frame);
    image->state = WSI_IMAGE_DISPLAYING;
@@ -1966,6 +1969,8 @@ wsi_display_page_flip_handler2(int fd,
    chain->last_vblank_timestamp.sequence = frame;
    chain->last_vblank_timestamp.tv_sec = sec;
    chain->last_vblank_timestamp.tv_usec = usec;
+
+   _MESA_TRACE_SCOPE("frame=%" PRId32 " t=[%" PRId32 ",%" PRId32 "]",frame,sec,usec);
 
    wsi_display_idle_old_displaying(image);
 
@@ -3432,6 +3437,8 @@ wsi_display_wait_for_present(struct wsi_swapchain *wsi_chain,
    struct wsi_display_swapchain *chain = (struct wsi_display_swapchain *)wsi_chain;
    struct timespec abs_timespec;
    uint64_t abs_timeout = 0;
+   
+   MESA_TRACE_FUNC();
 
    if (timeout != 0)
       abs_timeout = os_time_get_absolute_timeout(timeout);
@@ -4577,6 +4584,7 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
 
    if (counter == VK_SURFACE_COUNTER_VBLANK_TIMESTAMP_VALVE) {
       *(struct wsi_valve_vblank_timestamp *)pCounterValue = swapchain->last_vblank_timestamp;
+      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]", swapchain->last_vblank_timestamp.sequence, swapchain->last_vblank_timestamp.tv_sec, swapchain->last_vblank_timestamp.tv_usec);
       return VK_SUCCESS;
    } else if (counter != VK_SURFACE_COUNTER_VBLANK_EXT) {
       return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -4590,8 +4598,11 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
       return VK_SUCCESS;
    }
 
-   int ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id,
-                                pCounterValue, NULL);
+   int ret;
+   {
+      ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id, pCounterValue, NULL);
+      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [NORMAL] pCounterValue=%" PRIu64 "", *pCounterValue);
+   }
    if (ret)
       *pCounterValue = 0;
 
