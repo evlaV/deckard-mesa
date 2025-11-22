@@ -1870,9 +1870,9 @@ wsi_display_page_flip_handler2(int fd,
                      image - &(image->chain->images[0]), frame);
    image->state = WSI_IMAGE_DISPLAYING;
    wsi_display_present_complete(chain, image);
-   chain->last_vblank_timestamp.sequence = frame;
    chain->last_vblank_timestamp.tv_sec = sec;
    chain->last_vblank_timestamp.tv_usec = usec;
+   p_atomic_set(&chain->last_vblank_timestamp.sequence,frame); //this should synchronize all of these
 
    _MESA_TRACE_SCOPE("frame=%" PRId32 " t=[%" PRId32 ",%" PRId32 "]",frame,sec,usec);
 
@@ -4334,8 +4334,11 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
       wsi_display_mode_from_handle(swapchain->surface->displayMode)->connector;
 
    if (counter == VK_SURFACE_COUNTER_VBLANK_TIMESTAMP_VALVE) {
-      *(struct wsi_valve_vblank_timestamp *)pCounterValue = swapchain->last_vblank_timestamp;
-      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]",swapchain->last_vblank_timestamp.sequence ,swapchain->last_vblank_timestamp.tv_sec, swapchain->last_vblank_timestamp.tv_usec);
+      struct wsi_valve_vblank_timestamp * last_vblank_timestamp = (struct wsi_valve_vblank_timestamp *) pCounterValue; 
+      last_vblank_timestamp->sequence = p_atomic_read(&swapchain->last_vblank_timestamp.sequence);
+      last_vblank_timestamp->tv_sec = p_atomic_read(&swapchain->last_vblank_timestamp.tv_sec);
+      last_vblank_timestamp->tv_usec = p_atomic_read(&swapchain->last_vblank_timestamp.tv_usec);
+      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]",last_vblank_timestamp->sequence ,last_vblank_timestamp->tv_sec, last_vblank_timestamp->tv_usec);
       return VK_SUCCESS;
    } else if (counter != VK_SURFACE_COUNTER_VBLANK_EXT) {
       return VK_ERROR_FEATURE_NOT_PRESENT;
