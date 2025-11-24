@@ -517,6 +517,7 @@ struct wsi_display_swapchain {
    uint64_t                        color_outcome_serial;
    VkHdrMetadataEXT                hdr_metadata;
 
+   mtx_t                             vblank_timestamp_mutex;
    struct wsi_valve_vblank_timestamp last_vblank_timestamp;
    struct wsi_image_timing_request timing_request;
 
@@ -1907,6 +1908,8 @@ wsi_display_swapchain_destroy(struct wsi_swapchain *drv_chain,
    mtx_destroy(&chain->present_id_mutex);
    u_cnd_monotonic_destroy(&chain->present_id_cond);
 
+   mtx_destroy(&chain->vblank_timestamp_mutex);
+
    wsi_display_mode *display_mode =
       wsi_display_mode_from_handle(chain->surface->displayMode);
    if (p_atomic_dec_zero(&display_mode->connector->refcount))
@@ -2038,9 +2041,12 @@ wsi_display_page_flip_handler2(int fd,
                      image - &(image->chain->images[0]), frame);
    image->state = WSI_IMAGE_DISPLAYING;
    wsi_display_present_complete(chain, image);
+
+   mtx_lock(&chain->vblank_timestamp_mutex);
    chain->last_vblank_timestamp.sequence = frame;
    chain->last_vblank_timestamp.tv_sec = sec;
    chain->last_vblank_timestamp.tv_usec = usec;
+   mtx_unlock(&chain->vblank_timestamp_mutex);
 
    _MESA_TRACE_SCOPE("frame=%" PRId32 " t=[%" PRId32 ",%" PRId32 "]",frame,sec,usec);
 
@@ -3639,6 +3645,14 @@ wsi_display_surface_create_swapchain(
       goto fail_mtx_destroy;
    }
 
+   ret = mtx_init(&chain->vblank_timestamp_mutex, mtx_plain);
+   if (ret != thrd_success) {
+      u_cnd_monotonic_destroy(&chain->present_id_cond);
+      mtx_destroy(&chain->present_id_mutex);
+      vk_free(allocator, chain);
+      return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+
    result =
       wsi_display_setup_connector(display_mode->connector, display_mode);
    if (result != VK_SUCCESS)
@@ -3734,6 +3748,7 @@ fail_swapchain_fini:
 fail_drop_master:
    if (wsi->fd == wsi->device_fd)
       wsi_display_drop_master(wsi);
+   mtx_destroy(&chain->vblank_timestamp_mutex);
 fail_cond_destroy:
    u_cnd_monotonic_destroy(&chain->present_id_cond);
 fail_mtx_destroy:
@@ -4701,8 +4716,12 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
       wsi_display_mode_from_handle(swapchain->surface->displayMode)->connector;
 
    if (counter == VK_SURFACE_COUNTER_VBLANK_TIMESTAMP_VALVE) {
-      *(struct wsi_valve_vblank_timestamp *)pCounterValue = swapchain->last_vblank_timestamp;
-      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]", swapchain->last_vblank_timestamp.sequence, swapchain->last_vblank_timestamp.tv_sec, swapchain->last_vblank_timestamp.tv_usec);
+      mtx_lock(&swapchain->vblank_timestamp_mutex);
+      struct wsi_valve_vblank_timestamp local_timestamp = swapchain->last_vblank_timestamp;
+      mtx_unlock(&swapchain->vblank_timestamp_mutex);
+
+      *(struct wsi_valve_vblank_timestamp *)pCounterValue = local_timestamp;
+      _MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]", local_timestamp.sequence, local_timestamp.tv_sec, local_timestamp.tv_usec);
       return VK_SUCCESS;
    } else if (counter != VK_SURFACE_COUNTER_VBLANK_EXT) {
       return VK_ERROR_FEATURE_NOT_PRESENT;
