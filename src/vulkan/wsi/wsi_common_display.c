@@ -501,6 +501,11 @@ struct wsi_valve_vblank_timestamp {
    uint32_t  tv_usec;
 };
 
+struct wsi_valve_vblank_timestamp_2 {
+   uint64_t  sequence;
+   uint64_t  ts_ns;
+};
+
 struct wsi_display_swapchain {
    struct wsi_swapchain            base;
    struct wsi_display              *wsi;
@@ -4715,18 +4720,6 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
    struct wsi_display_connector *connector =
       wsi_display_mode_from_handle(swapchain->surface->displayMode)->connector;
 
-   if (counter == VK_SURFACE_COUNTER_VBLANK_TIMESTAMP_VALVE) {
-      mtx_lock(&swapchain->vblank_timestamp_mutex);
-      struct wsi_valve_vblank_timestamp local_timestamp = swapchain->last_vblank_timestamp;
-      mtx_unlock(&swapchain->vblank_timestamp_mutex);
-
-      *(struct wsi_valve_vblank_timestamp *)pCounterValue = local_timestamp;
-      MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRId32 ",%" PRId32 "]", local_timestamp.sequence, local_timestamp.tv_sec, local_timestamp.tv_usec);
-      return VK_SUCCESS;
-   } else if (counter != VK_SURFACE_COUNTER_VBLANK_EXT) {
-      return VK_ERROR_FEATURE_NOT_PRESENT;
-   }
-
    if (wsi->fd < 0)
       return VK_ERROR_INITIALIZATION_FAILED;
 
@@ -4736,10 +4729,20 @@ wsi_GetSwapchainCounterEXT(VkDevice _device,
    }
 
    int ret;
-   {
+   if (counter == VK_SURFACE_COUNTER_VBLANK_TIMESTAMP_VALVE) {
+      struct wsi_valve_vblank_timestamp_2 *timestamp_value = (struct wsi_valve_vblank_timestamp_2 *)pCounterValue;
+      ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id,
+                               &timestamp_value->sequence,
+                               &timestamp_value->ts_ns);
+
+      MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [TIMESTAMP_VALVE] seq=%" PRIu64 " t=[%" PRIu64 "]", timestamp_value->sequence, timestamp_value->ts_ns);
+   } else if (counter == VK_SURFACE_COUNTER_VBLANK_EXT) {
       ret = drmCrtcGetSequence(wsi->fd, connector->crtc_id, pCounterValue, NULL);
       MESA_TRACE_SCOPE("wsi_GetSwapchainCounterEXT [NORMAL] pCounterValue=%" PRIu64 "", *pCounterValue);
+   } else {
+      return VK_ERROR_FEATURE_NOT_PRESENT;
    }
+   
    if (ret)
       *pCounterValue = 0;
 
