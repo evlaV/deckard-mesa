@@ -26,6 +26,10 @@ if with_platform_wayland
   files_vulkan_wsi += wp_files['color-management-v1']
 endif
 
+if with_platform_x11 or with_platform_xcb
+  links_vulkan_wsi += libloader
+endif
+
 if with_platform_windows
   files_vulkan_wsi += files('wsi_common_win32.cpp')
   platform_deps += dep_dxheaders
