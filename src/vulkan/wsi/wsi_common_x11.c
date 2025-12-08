@@ -695,7 +695,16 @@ wsi_GetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice,
 {
    VK_FROM_HANDLE(vk_physical_device, pdevice, physicalDevice);
    struct wsi_device *wsi_device = pdevice->wsi_device;
-   if (!(wsi_device->queue_supports_blit & BITFIELD64_BIT(queueFamilyIndex)))
+
+   /* These should overlap. */
+   uint64_t effective_queues = wsi_device->queue_supports_blit & wsi_device->queue_supports_timestamps;
+
+   /* If there are no queues that support both blits and timestamps,
+    * don't report support for queue timestamps. */
+   if (!effective_queues)
+      effective_queues = wsi_device->queue_supports_blit;
+
+   if (!(effective_queues & BITFIELD64_BIT(queueFamilyIndex)))
       return false;
 
    struct wsi_x11_icd_surface *wsi_conn =
@@ -1445,7 +1454,7 @@ static void x11_present_complete(struct x11_swapchain *swapchain,
     * this way we get minimal latency for reports. */
    uint64_t timing_serial = image->pending_completions[index].timing_serial;
    if (timing_serial)
-      wsi_swapchain_present_timing_notify_completion(&swapchain->base, timing_serial, ust * 1000);
+      wsi_swapchain_present_timing_notify_completion(&swapchain->base, timing_serial, ust * 1000, &image->base);
 
    uint64_t signal_present_id = image->pending_completions[index].signal_present_id;
    if (signal_present_id) {

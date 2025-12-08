@@ -199,6 +199,9 @@ struct wsi_image {
    int dma_buf_fd;
 #endif
    void *cpu_map;
+
+   VkQueryPool query_pool;
+   VkCommandBuffer *timestamp_cmd_buffers;
 };
 
 struct wsi_presentation_timing {
@@ -285,6 +288,7 @@ struct wsi_swapchain {
    } present_timing;
 
    bool capture_key_pressed;
+   float timestamp_period;
 
    /* Command pools, one per queue family */
    VkCommandPool *cmd_pools;
@@ -420,6 +424,10 @@ wsi_create_image(const struct wsi_swapchain *chain,
 void
 wsi_image_init(struct wsi_image *image);
 
+VkResult
+wsi_image_init_timestamp(const struct wsi_swapchain *chain,
+                         struct wsi_image *image);
+
 void
 wsi_destroy_image(const struct wsi_swapchain *chain,
                   struct wsi_image *image);
@@ -430,7 +438,8 @@ wsi_swapchain_wait_for_present_semaphore(const struct wsi_swapchain *chain,
 
 void
 wsi_swapchain_present_timing_notify_completion(struct wsi_swapchain *chain,
-                                               uint64_t timing_serial, uint64_t timestamp);
+                                               uint64_t timing_serial, uint64_t timestamp,
+                                               struct wsi_image *img);
 
 void
 wsi_swapchain_present_timing_update_refresh_rate(struct wsi_swapchain *chain,
