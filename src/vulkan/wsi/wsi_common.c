@@ -2467,6 +2467,8 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_CAC_PLANE_ADJUST_INFO_VALVE);
    const struct VkQueuePresentSetModeVALVE *mode_info =
       vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_SET_MODE_INFO_VALVE);
+   const struct queue_present_update_cac_info_valve *cac_info_update =
+      vk_find_struct_const(pPresentInfo->pNext, QUEUE_PRESENT_UPDATE_CAC_INFO_VALVE);
 
    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
       VK_FROM_HANDLE(wsi_swapchain, swapchain, pPresentInfo->pSwapchains[i]);
@@ -2515,6 +2517,10 @@ wsi_common_queue_present(const struct wsi_device *wsi,
       if (regions && regions->pRegions)
          region = &regions->pRegions[i];
 
+      if (mode_info) {
+         swapchain->set_display_mode(swapchain, mode_info->displayMode);
+      }
+
       if(cacplaneadjust) {
          results[i] = swapchain->cac_plane_adjust(swapchain, image_index,
                                                   cacplaneadjust->plane_index,
@@ -2528,8 +2534,21 @@ wsi_common_queue_present(const struct wsi_device *wsi,
                                                   cacplaneadjust->dst_height);
       }
 
-      if (mode_info) {
-         swapchain->set_display_mode(swapchain, mode_info->displayMode);
+      if(cac_info_update)
+      {
+         for(int j=0; j<VALVESURFACEPLANESMAX; j++)
+         {
+            results[i] = swapchain->cac_plane_adjust(swapchain, image_index,
+                                                   j, 
+                                                   cac_info_update->src_rgb[j].offset.x,
+                                                   cac_info_update->src_rgb[j].offset.y,
+                                                   cac_info_update->src_rgb[j].extent.width,
+                                                   cac_info_update->src_rgb[j].extent.height,
+                                                   cac_info_update->dst_rgb[j].offset.x,
+                                                   cac_info_update->dst_rgb[j].offset.y,
+                                                   cac_info_update->dst_rgb[j].extent.width,
+                                                   cac_info_update->dst_rgb[j].extent.height);
+         }
       }
 
       results[i] = swapchain->queue_present(swapchain, image_index,
