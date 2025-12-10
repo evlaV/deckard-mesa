@@ -320,7 +320,7 @@ struct wsi_swapchain {
    void (*set_timing_request)(struct wsi_swapchain *swap_chain,
                             const struct wsi_image_timing_request *request);
    void (*poll_timing_request)(struct wsi_swapchain *swap_chain);
-   uint64_t (*poll_early_refresh)(struct wsi_swapchain *swap_chain);
+   uint64_t (*poll_early_refresh)(struct wsi_swapchain *swap_chain, uint64_t *interval);
 };
 
 bool

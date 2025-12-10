@@ -2074,11 +2074,14 @@ x11_set_timing_request(struct wsi_swapchain *wsi_chain,
 }
 
 static uint64_t
-x11_poll_early_refresh(struct wsi_swapchain *wsi_chain)
+x11_poll_early_refresh(struct wsi_swapchain *wsi_chain, uint64_t *interval)
 {
    struct x11_swapchain *chain = (struct x11_swapchain *)wsi_chain;
    struct wsi_x11_icd_surface *wsi_conn =
          wsi_x11_get_icd_surface((struct wsi_device*)chain->base.wsi, chain->conn, chain->window);
+
+   /* We don't know yet. */
+   *interval = 0;
    return x11_icd_surface_update_present_timing(wsi_conn, chain->extent.width, chain->extent.height);
 }
 
