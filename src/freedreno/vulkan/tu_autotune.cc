@@ -969,6 +969,9 @@ struct tu_autotune::rp_history {
       bool locked = false;       /* If true, the probability will no longer be updated. */
       uint64_t seed[2] { 0x3bffb83978e24f88, 0x9238d5d56c71cd35 };
 
+      bool is_sysmem_winning = false;
+      uint64_t winning_since_ts = 0;
+
     public:
       profiled_algo(uint64_t hash)
       {
@@ -1035,6 +1038,15 @@ struct tu_autotune::rp_history {
                constexpr uint32_t MIN_LOCK_DURATION_COUNT = 15;
                constexpr uint64_t MIN_LOCK_THRESHOLD = GPU_TICKS_PER_US * 1'000; /* 1ms */
                constexpr uint32_t LOCK_PERCENT_DIFF = 30;
+               constexpr uint64_t LOCK_TIME_WINDOW_NS = 30'000'000'000; /* 30s */
+
+               uint64_t now = os_time_get_nano();
+               bool current_sysmem_winning = avg_sysmem < avg_gmem;
+
+               if (winning_since_ts == 0 || current_sysmem_winning != is_sysmem_winning) {
+                  winning_since_ts = now;
+                  is_sysmem_winning = current_sysmem_winning;
+               }
 
                bool has_resolved = sysmem_prob == SLOW_MAX_PROBABILITY || sysmem_prob == SLOW_MIN_PROBABILITY;
                bool enough_samples =
@@ -1044,7 +1056,7 @@ struct tu_autotune::rp_history {
                uint64_t percent_diff = (100 * (max_avg - min_avg)) / min_avg;
 
                if (has_resolved && enough_samples && max_avg >= MIN_LOCK_THRESHOLD &&
-                   percent_diff >= LOCK_PERCENT_DIFF) {
+                   percent_diff >= LOCK_PERCENT_DIFF && (now - winning_since_ts) >= LOCK_TIME_WINDOW_NS) {
                   if (avg_gmem < avg_sysmem)
                      sysmem_prob = 0;
                   else
@@ -1534,6 +1546,7 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    if (!enabled || simultaneous_use || ignore_small_rp)
       return default_mode;
 
+  
    /* We can return early with the decision based on the draw call count, instead of needing to hash the renderpass
     * instance and look up the history, which is far more expensive.
     *
