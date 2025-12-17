@@ -529,33 +529,11 @@ struct tu_autotune::rp_entry {
       }
    }
 
-   /* Disable the copy operators as that shouldn't be done. */
+   /* Disable the copy/move operators as that shouldn't be done. */
    rp_entry(const rp_entry &) = delete;
    rp_entry &operator=(const rp_entry &) = delete;
-
-   rp_entry(rp_entry &&other) noexcept
-       : device(other.device), bo(other.bo), map(other.map), history(std::move(other.history)), config(other.config),
-         sysmem(other.sysmem), tile_count(other.tile_count), draw_count(other.draw_count)
-   {
-      other.map = nullptr; /* Prevent the destructor from freeing the BO. */
-   }
-
-   rp_entry &operator=(rp_entry &&other) noexcept
-   {
-      if (this != &other) {
-         device = other.device;
-         bo = other.bo;
-         map = other.map;
-         history = std::move(other.history);
-         config = other.config;
-         sysmem = other.sysmem;
-         tile_count = other.tile_count;
-         draw_count = other.draw_count;
-
-         other.map = nullptr;
-      }
-      return *this;
-   }
+   rp_entry(rp_entry &&) = delete;
+   rp_entry &operator=(rp_entry &&) = delete;
 
    void allocate(bool sysmem, uint32_t tile_count)
    {
@@ -1559,8 +1537,8 @@ tu_autotune::process_entries()
          break; /* Entries are allocated in sequence, next will be newer and
                    also fail so we can just directly break out of the loop. */
 
-      for (rp_entry &entry : batch->entries)
-         entry.history->process(entry, *this);
+      for (auto &entry : batch->entries)
+         entry->history->process(*entry, *this);
 
       active_batches.pop_front();
    }
@@ -1697,21 +1675,23 @@ tu_autotune::cmd_buf_ctx::reset()
    batch = std::make_shared<rp_entry_batch>();
 }
 
-tu_autotune::rp_entry &
+tu_autotune::rp_entry *
 tu_autotune::cmd_buf_ctx::attach_rp_entry(struct tu_device *device,
                                           rp_history_handle &&history,
                                           config_t config,
                                           uint32_t drawcall_count)
 {
-   return batch->entries.emplace_back(device, std::move(history), config, drawcall_count);
+   std::unique_ptr<rp_entry> &new_entry =
+      batch->entries.emplace_back(std::make_unique<rp_entry>(device, std::move(history), config, drawcall_count));
+   return new_entry.get();
 }
 
 tu_autotune::rp_entry *
 tu_autotune::cmd_buf_ctx::find_rp_entry(const rp_key &key)
 {
    for (auto &entry : batch->entries) {
-      if (entry.history->hash == key.hash)
-         return &entry;
+      if (entry->history->hash == key.hash)
+         return entry.get();
    }
    return nullptr;
 }
@@ -1803,7 +1783,7 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
       key = rp_key(key, entry->duplicates);
    }
 
-   *rp_ctx = &cb_ctx.attach_rp_entry(device, find_or_create_rp_history(key), config, rp_state->drawcall_count);
+   *rp_ctx = cb_ctx.attach_rp_entry(device, find_or_create_rp_history(key), config, rp_state->drawcall_count);
    rp_history &history = *((*rp_ctx)->history);
 
    if (config.test(mod_flag::PREEMPT_OPTIMIZE) && history.preempt_optimize.is_latency_sensitive()) {

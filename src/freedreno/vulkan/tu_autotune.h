@@ -114,7 +114,7 @@ struct tu_autotune {
                          valid fence. */
       uint32_t fence; /* The fence value which is used to signal the completion of the CB submission. This is used to
                          determine when the entries can be processed. */
-      std::vector<rp_entry> entries;
+      std::vector<std::unique_ptr<rp_entry>> entries;
 
       rp_entry_batch();
 
@@ -219,7 +219,7 @@ struct tu_autotune {
       std::shared_ptr<rp_entry_batch> batch;
 
       /* Creates a new RP entry attached to this CB. */
-      rp_entry &
+      rp_entry *
       attach_rp_entry(struct tu_device *device, rp_history_handle &&history, config_t config, uint32_t draw_count);
 
       rp_entry *find_rp_entry(const rp_key &key);
