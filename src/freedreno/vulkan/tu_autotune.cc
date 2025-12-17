@@ -1746,7 +1746,7 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
     * a few edge cases such as during deferred rendering G-buffer passes, as we don't have a good way to deal with those
     * edge cases yet, we just disable the autotuner for small RPs entirely for now unless TUNE_SMALL is specified.
     */
-   bool ignore_small_rp = !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count <= 5;
+   bool ignore_small_rp = !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count < 5;
 
    if (!enabled || simultaneous_use || ignore_small_rp)
       return default_mode;
