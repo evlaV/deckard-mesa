@@ -865,12 +865,12 @@ tu_autotune::rp_key::rp_key(const struct tu_render_pass *pass,
     * Note: Not using image IOVA leads to too many false matches.
     */
 
-   struct packed_att_properties {
+   struct PACKED packed_att_properties {
       uint64_t iova;
-      bool load          : 1;
-      bool store         : 1;
-      bool load_stencil  : 1;
-      bool store_stencil : 1;
+      bool load;
+      bool store;
+      bool load_stencil;
+      bool store_stencil;
    };
 
    auto get_hash = [&](uint32_t *data, size_t size) {
