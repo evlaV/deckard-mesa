@@ -233,6 +233,12 @@ struct tu_instance
 
    /* Configuration option to use a specific autotune algorithm by default. */
    const char *autotune_algo;
+
+   /* The hardware implementation of alpha-to-coverage gives visually poor
+    * results for many games. Set this option to enable it in the shader
+    * instead.
+    */
+   bool emulate_alpha_to_coverage;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)
