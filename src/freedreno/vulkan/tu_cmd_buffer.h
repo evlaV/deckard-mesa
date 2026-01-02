@@ -45,6 +45,9 @@ enum tu_draw_state_group_id
    /* dynamic state related draw states */
    TU_DRAW_STATE_DYNAMIC,
    TU_DRAW_STATE_COUNT = TU_DRAW_STATE_DYNAMIC + TU_DYNAMIC_STATE_COUNT,
+
+   /* autotune preemption delay tracking draw state */
+   TU_DRAW_STATE_AT_WRITE_RP_HASH = TU_DRAW_STATE_COUNT + 1,
 };
 
 struct tu_descriptor_state
@@ -856,6 +859,9 @@ void tu_disable_draw_states(struct tu_cmd_buffer *cmd, struct tu_cs *cs);
 
 void tu6_apply_depth_bounds_workaround(struct tu_device *device,
                                        uint32_t *rb_depth_cntl);
+
+void
+tu_cs_emit_draw_state(struct tu_cs *cs, uint32_t id, struct tu_draw_state state);
 
 bool tu_enable_fdm_offset(struct tu_cmd_buffer *cmd);
 

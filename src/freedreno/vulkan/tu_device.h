@@ -291,6 +291,18 @@ struct tu6_global
    volatile uint32_t userspace_fence;
    uint32_t _pad5;
 
+   /* Autotune preemption delay tracking */
+   uint64_t cur_rp_hash;
+
+   uint64_t base_preemption_latency;
+   uint64_t new_preemption_latency;
+   volatile uint64_t preemption_latency;
+
+   volatile uint64_t max_preemption_latency;
+   volatile uint64_t max_preemption_latency_rp_hash;
+   uint64_t preemption_latency_cmp_scratch;
+   uint64_t zero_64b;
+
    struct bcolor_entry bcolor[];
 };
 #define gb_offset(member) offsetof(struct tu6_global, member)
@@ -443,6 +455,8 @@ struct tu_device
    struct tu_cs_entry cmdbuf_start_a725_quirk_entry;
 
    struct tu_cs_entry bin_preamble_entry, bin_preamble_bv_entry;
+
+   struct tu_cs_entry switch_away_amble_entry, switch_back_amble_entry;
 
    struct tu_bo *vis_stream_bo;
    mtx_t vis_stream_mtx;

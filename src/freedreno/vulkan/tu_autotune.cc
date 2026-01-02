@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -315,6 +314,11 @@ tu_autotune::get_env_config()
          mod_flags = parse_debug_string(flags_env_str, tu_at_flags_control);
          if (TU_DEBUG(STARTUP))
             mesa_logi("TU_AUTOTUNE_FLAGS=0x%x (%s)", mod_flags, flags_env_str);
+
+         if ((mod_flags & ~supported_mod_flags) != 0) {
+            mesa_logw("Unsupported TU_AUTOTUNE_FLAGS=0x%x, supported flags: 0x%x", mod_flags, supported_mod_flags);
+            mod_flags &= supported_mod_flags;
+         }
       }
 
       assert((uint8_t) mod_flags == mod_flags);
@@ -325,6 +329,16 @@ tu_autotune::get_env_config()
       mesa_logi("TU_AUTOTUNE: %s", at_config.to_string().c_str());
 
    return at_config;
+}
+
+uint32_t
+tu_autotune::get_supported_mod_flags(tu_device *device) const
+{
+   uint32_t supported_mod_flags = (uint32_t) mod_flag::BIG_GMEM | (uint32_t) mod_flag::TUNE_SMALL;
+   if (device->physical_device->info->props.max_draw_states > TU_DRAW_STATE_AT_WRITE_RP_HASH) {
+      supported_mod_flags |= (uint32_t) mod_flag::PREEMPT_OPTIMIZE;
+   }
+   return supported_mod_flags;
 }
 
 /** Global Fence and Internal CS Management **/
@@ -421,6 +435,11 @@ struct PACKED tu_autotune::tile_gpu_data {
    {
       return sizeof(rp_gpu_data) + (tile_index * sizeof(tile_gpu_data));
    }
+};
+
+struct PACKED tu_autotune::rp_batch_preempt_gpu_data {
+   uint64_t preemption_latency;
+   uint64_t preemption_latency_rp_hash;
 };
 
 /* A small wrapper around rp_history to provide ref-counting and usage timestamps. */
@@ -686,8 +705,52 @@ struct tu_autotune::rp_entry {
    }
 };
 
-tu_autotune::rp_entry_batch::rp_entry_batch(): active(false), fence(0), entries()
+
+tu_autotune::rp_batch_preempt_latency::rp_batch_preempt_latency(struct tu_device *device, bool allocate)
+    : device(device), allocated(allocate)
 {
+   if (!allocate)
+      return;
+
+   {
+      std::scoped_lock lock(device->autotune->suballoc_mutex);
+      VkResult result = tu_suballoc_bo_alloc(&bo, &device->autotune->suballoc, sizeof(rp_batch_preempt_gpu_data),
+                                             alignof(rp_batch_preempt_gpu_data));
+
+      if (result != VK_SUCCESS) {
+         mesa_loge("Failed to allocate BO for autotune rp_batch_preempt_gpu_data: %u", result);
+         allocated = false;
+         return;
+      }
+   }
+
+   map = (uint8_t *) tu_suballoc_bo_map(&bo);
+   memset(map, 0, sizeof(rp_batch_preempt_gpu_data));
+}
+
+tu_autotune::rp_batch_preempt_latency::~rp_batch_preempt_latency()
+{
+   if (!allocated)
+      return;
+
+   std::scoped_lock lock(device->autotune->suballoc_mutex);
+   tu_suballoc_bo_free(&device->autotune->suballoc, &bo);
+}
+
+tu_autotune::rp_batch_preempt_gpu_data tu_autotune::rp_batch_preempt_latency::get_gpu_data()
+{
+   assert(allocated);
+   return *(rp_batch_preempt_gpu_data *) map;
+}
+
+tu_autotune::rp_entry_batch::rp_entry_batch(struct tu_device *device, bool track_preempt_latency)
+    : active(false), fence(0), entries(), preempt_latency(device, track_preempt_latency)
+{
+}
+
+bool tu_autotune::rp_entry_batch::requires_processing() const
+{
+   return !entries.empty() || (preempt_latency.allocated && !all_renderpasses.empty());
 }
 
 void
@@ -704,6 +767,18 @@ tu_autotune::rp_entry_batch::mark_inactive()
    assert(active);
    active = false;
    fence = 0;
+}
+
+void tu_autotune::rp_entry_batch::snapshot_preempt_data(struct tu_cs *cs)
+{
+   if (!preempt_latency.allocated) {
+      return;
+   }
+
+   tu_cs_emit_pkt7(cs, CP_MEMCPY, 5);
+   tu_cs_emit(cs, 4);
+   tu_cs_emit_qw(cs, preempt_latency.device->global_bo->iova + gb_offset(max_preemption_latency));
+   tu_cs_emit_qw(cs, preempt_latency.bo.iova + offsetof(rp_batch_preempt_gpu_data, preemption_latency));
 }
 
 /** Renderpass state tracking. **/
@@ -1091,7 +1166,6 @@ struct tu_autotune::rp_history {
    /** Preemption Latency Optimization Mode **/
    struct preempt_optimize_mode {
     private:
-      adaptive_average<uint64_t> sysmem_draw_average;
       adaptive_average<uint64_t> gmem_tile_average;
 
       /* If the renderpass has long draws which are at risk of causing high preemptible latency. */
@@ -1110,36 +1184,6 @@ struct tu_autotune::rp_history {
       static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 1500;
 
     public:
-      void update_sysmem(rp_history &history, uint64_t draw_duration)
-      {
-         bool l_latency_risk = latency_risk.load(std::memory_order_relaxed);
-
-         if (!l_latency_risk) {
-            /* Try to estimate the minimum non-preemptible duration for draw-level preemption, by dividing the total
-             * time by the RP by the amount of draws. This isn't very accurate as it's skewed by the time taken by
-             * commands other than draws (e.g. clears or blits), but it's a good enough estimate to catch the worst
-             * offenders.
-             *
-             * If the average draw duration is above a certain threshold, we mark the RP as latency sensitive which
-             * should bias the decision towards GMEM.
-             */
-
-            sysmem_draw_average.add(draw_duration);
-            uint64_t avg_sysmem_draw = sysmem_draw_average.get();
-            uint64_t sysmem_draw_count = sysmem_draw_average.count;
-
-            at_log_preempt_h("avg_sysmem_draw: %" PRIu64 " us (%u), latency_risk: %u"
-                             history.hash, ticks_to_us(avg_sysmem_draw), avg_sysmem_draw > TARGET_THRESHOLD,
-                             l_latency_risk
-            );
-
-            if (sysmem_draw_count >= MIN_PROFILE_DURATION_COUNT && avg_sysmem_draw > TARGET_THRESHOLD) {
-               latency_risk.store(true, std::memory_order_relaxed);
-               at_log_preempt_h("high sysmem draw duration %" PRIu64 " us, marking as latency sensitive", history.hash,
-                                ticks_to_us(avg_sysmem_draw));
-            }
-         }
-      }
 
       void update_gmem(rp_history &history, uint64_t tile_duration)
       {
@@ -1228,6 +1272,11 @@ struct tu_autotune::rp_history {
          return latency_risk.load(std::memory_order_relaxed);
       }
 
+      void mark_as_latency_sensitive()
+      {
+         latency_risk.store(true, std::memory_order_relaxed);
+      }
+
       uint32_t get_tile_size_divisor() const
       {
          return tile_size_divisor.load(std::memory_order_relaxed);
@@ -1247,9 +1296,6 @@ struct tu_autotune::rp_history {
             uint64_t rp_duration = entry.get_rp_duration();
 
             sysmem_rp_average.add(rp_duration);
-
-            if (at_config.test(mod_flag::PREEMPT_OPTIMIZE))
-               preempt_optimize.update_sysmem(*this, rp_duration / entry.draw_count);
          } else {
             gmem_rp_average.add(entry.get_rp_duration());
 
@@ -1363,6 +1409,71 @@ tu_autotune::reap_old_rp_histories()
    at_log_base("reaped old RP histories %zu -> %zu", og_size, rp_histories.size());
 }
 
+std::shared_ptr<tu_autotune::rp_entry_batch>
+tu_autotune::create_batch() const
+{
+   return std::make_shared<rp_entry_batch>(device, active_config.load().test(mod_flag::PREEMPT_OPTIMIZE));
+}
+
+bool
+tu_autotune::supports_preempt_latency_tracking() const
+{
+   return supported_mod_flags & (uint32_t) mod_flag::PREEMPT_OPTIMIZE;
+}
+
+void
+tu_autotune::cleanup_latency_tracking()
+{
+   constexpr uint64_t CLEANUP_INTERVAL_NS = 10'000'000'000; /* 10s */
+   constexpr uint64_t FORGET_ABOUT_DELAY_AFTER_NS = 20'000'000'000; /* 20s */
+
+   if (!active_config.load().test(mod_flag::PREEMPT_OPTIMIZE))
+      return;
+
+   uint64_t now = os_time_get_nano();
+   if (last_latency_cleanup_ts + CLEANUP_INTERVAL_NS > now)
+      return;
+   last_latency_cleanup_ts = now;
+
+   std::scoped_lock delay_lock(rp_latency_mutex);
+   std::shared_lock history_lock(rp_mutex);
+
+   for (auto it = rp_latency_tracking.begin(); it != rp_latency_tracking.end();) {
+      auto &tracker = it->second;
+      uint64_t rp_hash = it->first;
+
+      /* Check if corresponding rp_history has cleared its latency_risk flag. */
+      if (tracker.info.is_latency_sensitive) {
+         auto history_it = rp_histories.find(rp_key{rp_hash});
+         if (history_it == rp_histories.end() || !history_it->second.preempt_optimize.is_latency_sensitive() ||
+             history_it->second.last_use_ts.load(std::memory_order_relaxed) + FORGET_ABOUT_DELAY_AFTER_NS < now) {
+            tracker.info.is_latency_sensitive = false;
+            at_log_preempt_h("clearing latency-sensitive flag", rp_hash);
+         }
+      }
+
+      /* Remove tracking entry if no recent latency events and flag is cleared. */
+      if (tracker.recent_latency_timestamps_ns.empty() && !tracker.info.is_latency_sensitive) {
+         it = rp_latency_tracking.erase(it);
+      } else {
+         ++it;
+      }
+   }
+}
+
+const tu_autotune::rp_latency_info
+tu_autotune::get_rp_latency_info(uint64_t rp_hash)
+{
+   std::scoped_lock lock(rp_latency_mutex);
+   auto it = rp_latency_tracking.find(rp_hash);
+   if (it == rp_latency_tracking.end())
+      return rp_latency_info();
+
+   rp_latency_info info = it->second.info;
+   it->second.info.mark_rp_as_sensitive = false;
+   return info;
+}
+
 void
 tu_autotune::process_entries()
 {
@@ -1375,6 +1486,8 @@ tu_autotune::process_entries()
       if (fence_before(current_fence, batch->fence))
          break; /* Entries are allocated in sequence, next will be newer and
                    also fail so we can just directly break out of the loop. */
+
+      process_batch_preempt_data(*batch);
 
       for (auto &entry : batch->entries)
          entry->history->process(*entry, *this);
@@ -1389,6 +1502,39 @@ tu_autotune::process_entries()
    }
 }
 
+void tu_autotune::process_batch_preempt_data(rp_entry_batch &batch)
+{
+   constexpr uint64_t LATENCY_THRESHOLD = 2'000'000; /* ~2ms at max GPU frequency */
+   constexpr uint64_t LATENCY_WINDOW_NS = 2'000'000'000; /* 2s */
+
+   if (!active_config.load().test(mod_flag::PREEMPT_OPTIMIZE))
+      return;
+
+   rp_batch_preempt_gpu_data gpu_data = batch.preempt_latency.get_gpu_data();
+   if (gpu_data.preemption_latency < LATENCY_THRESHOLD || gpu_data.preemption_latency_rp_hash == 0)
+      return;
+
+   std::scoped_lock lock(rp_latency_mutex);
+   uint64_t now = os_time_get_nano();
+
+   auto &tracker = rp_latency_tracking[gpu_data.preemption_latency_rp_hash];
+   tracker.recent_latency_timestamps_ns.push_back(now);
+
+   /* Remove old timestamps outside the window. */
+   tracker.recent_latency_timestamps_ns.erase(
+      std::remove_if(tracker.recent_latency_timestamps_ns.begin(), tracker.recent_latency_timestamps_ns.end(),
+                     [&](uint64_t ts) { return (now - ts) > LATENCY_WINDOW_NS; }),
+      tracker.recent_latency_timestamps_ns.end());
+
+   /* Mark as latency-sensitive if 2+ occurrences in window. */
+   if (tracker.recent_latency_timestamps_ns.size() >= 2) {
+      tracker.info.is_latency_sensitive = true;
+      tracker.info.mark_rp_as_sensitive = true;
+      at_log_preempt_h("marking RP as latency-sensitive after %zu latency events", gpu_data.preemption_latency_rp_hash,
+                       tracker.recent_latency_timestamps_ns.size());
+   }
+}
+
 struct tu_cs *
 tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_count)
 {
@@ -1398,12 +1544,13 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
     * processed all entries from prior CBs before we submit any new CBs with the same RP to the GPU.
     */
    process_entries();
+   cleanup_latency_tracking();
    reap_old_rp_histories();
 
    bool has_results = false;
    for (uint32_t i = 0; i < cmd_buffer_count; i++) {
       auto &batch = cmd_buffers[i]->autotune_ctx.batch;
-      if (!batch->entries.empty()) {
+      if (batch->requires_processing()) {
          has_results = true;
          break;
       }
@@ -1418,7 +1565,7 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
       /* Transfer the entries from the command buffers to the active queue. */
       struct tu_cmd_buffer *cmdbuf = cmd_buffers[i];
       auto &batch = cmdbuf->autotune_ctx.batch;
-      if (batch->entries.empty())
+      if (!batch->requires_processing())
          continue;
 
       batch->assign_fence(new_fence);
@@ -1435,9 +1582,59 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
    return fence_cs;
 }
 
-tu_autotune::tu_autotune(struct tu_device *device, VkResult &result): device(device), active_config(get_env_config())
+tu_autotune::tu_autotune(struct tu_device *device, VkResult &result)
+    : device(device),
+      supported_mod_flags(get_supported_mod_flags(device)),
+      active_config(get_env_config())
 {
    tu_bo_suballocator_init(&suballoc, device, 128 * 1024, TU_BO_ALLOC_INTERNAL_RESOURCE, "autotune_suballoc");
+
+   uint32_t group_count;
+   const struct fd_perfcntr_group *groups = fd_perfcntrs(&device->physical_device->dev_id, &group_count);
+
+   for (uint32_t i = 0; i < group_count; i++) {
+      if (strcmp(groups[i].name, "CP") == 0) {
+         cp_group = &groups[i];
+         break;
+      }
+   }
+
+   if (!cp_group) {
+      mesa_loge("autotune: CP group not found");
+      result = VK_ERROR_INITIALIZATION_FAILED;
+      return;
+   } else if (cp_group->num_countables < 5) {
+      mesa_loge("autotune: CP group has too few countables");
+      result = VK_ERROR_INITIALIZATION_FAILED;
+      return;
+   }
+
+   auto get_perfcntr_countable = [](const struct fd_perfcntr_group *group,
+                                    const char *name) -> const struct fd_perfcntr_countable * {
+      for (uint32_t i = 0; i < group->num_countables; i++) {
+         if (strcmp(group->countables[i].name, name) == 0)
+            return &group->countables[i];
+      }
+
+      mesa_loge("autotune: %s not found in group %s", name, group->name);
+      return nullptr;
+   };
+
+   if (supports_preempt_latency_tracking()) {
+      auto preemption_latency_countable = get_perfcntr_countable(cp_group, "PERF_CP_PREEMPTION_REACTION_DELAY");
+
+      constexpr uint32_t PREEMPTION_LATENCY_COUNTER_INDEX = 10; /* Chosen arbitrarily within range. */
+
+      if (cp_group->num_counters <= PREEMPTION_LATENCY_COUNTER_INDEX) {
+         mesa_loge("autotune: CP group has too few counters for preemption latency tracking");
+         result = VK_ERROR_INITIALIZATION_FAILED;
+         return;
+      }
+
+      preemption_latency_selector_reg = cp_group->counters[PREEMPTION_LATENCY_COUNTER_INDEX].select_reg;
+      preemption_latency_selector = preemption_latency_countable->selector;
+      preemption_latency_counter_reg_lo = cp_group->counters[PREEMPTION_LATENCY_COUNTER_INDEX].counter_reg_lo;
+   }
 
    result = VK_SUCCESS;
    return;
@@ -1454,7 +1651,8 @@ tu_autotune::~tu_autotune()
    tu_bo_suballocator_finish(&suballoc);
 }
 
-tu_autotune::cmd_buf_ctx::cmd_buf_ctx(): batch(std::make_shared<rp_entry_batch>())
+tu_autotune::cmd_buf_ctx::cmd_buf_ctx(struct tu_autotune &autotune)
+    : batch(autotune.create_batch())
 {
 }
 
@@ -1466,10 +1664,20 @@ tu_autotune::cmd_buf_ctx::~cmd_buf_ctx()
     */
 }
 
-void
-tu_autotune::cmd_buf_ctx::reset()
+bool tu_autotune::cmd_buf_ctx::tracks_preempt_latency() const
 {
-   batch = std::make_shared<rp_entry_batch>();
+   return batch->preempt_latency.allocated;
+}
+
+void tu_autotune::cmd_buf_ctx::snapshot_preempt_data(struct tu_cs *cs)
+{
+   batch->snapshot_preempt_data(cs);
+}
+
+void
+tu_autotune::cmd_buf_ctx::reset(struct tu_autotune &autotune)
+{
+   batch = autotune.create_batch();
 }
 
 tu_autotune::rp_entry *
@@ -1483,18 +1691,29 @@ tu_autotune::cmd_buf_ctx::attach_rp_entry(struct tu_device *device,
    return new_entry.get();
 }
 
-tu_autotune::rp_entry *
-tu_autotune::cmd_buf_ctx::find_rp_entry(const rp_key &key)
+tu_autotune::rp_key
+tu_autotune::cmd_buf_ctx::generate_rp_key(const struct tu_render_pass *pass,
+                                          const struct tu_framebuffer *framebuffer,
+                                          const struct tu_cmd_buffer *cmd)
 {
-   for (auto &entry : batch->entries) {
-      if (entry->history->hash == key.hash)
-         return entry.get();
+   rp_key key(pass, framebuffer, cmd);
+   /* When nearly identical renderpasses appear multiple times within the same command buffer, we need to generate a
+    * unique hash for each instance to distinguish them. While this approach doesn't address identical renderpasses
+    * across different command buffers, it is good enough in most cases.
+    */
+   auto it = this->batch->all_renderpasses.find(key.hash);
+   if (it != this->batch->all_renderpasses.end()) {
+      key = rp_key(key, it->second);
+      it->second++;
+   } else {
+      this->batch->all_renderpasses[key.hash] = 1;
    }
-   return nullptr;
+
+   return key;
 }
 
 tu_autotune::render_mode
-tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx)
+tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx, rp_key_opt key_opt)
 {
    const struct tu_cmd_state *cmd_state = &cmd_buffer->state;
    const struct tu_render_pass *pass = cmd_state->pass;
@@ -1536,17 +1755,21 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
     */
    bool simultaneous_use = cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
+   rp_latency_info latency_info{};
+   if (key_opt && config.test(mod_flag::PREEMPT_OPTIMIZE))
+      latency_info = get_rp_latency_info(key_opt->hash);
+
    /* These smaller RPs with few draws are too difficult to create a balanced hash for that can independently identify
     * them while not being so unique to not properly identify them across CBs. They're generally insigificant outside of
     * a few edge cases such as during deferred rendering G-buffer passes, as we don't have a good way to deal with those
     * edge cases yet, we just disable the autotuner for small RPs entirely for now unless TUNE_SMALL is specified.
     */
-   bool ignore_small_rp = !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count < 5;
+   bool ignore_small_rp =
+      !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count < 5 && !latency_info.is_latency_sensitive;
 
    if (!enabled || simultaneous_use || ignore_small_rp)
       return default_mode;
 
-  
    /* We can return early with the decision based on the draw call count, instead of needing to hash the renderpass
     * instance and look up the history, which is far more expensive.
     *
@@ -1564,25 +1787,26 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    }();
 
    if (can_early_return && early_return_mode) {
-      at_log_base_h("%" PRIu32 " draw calls, using %s (early)", rp_key(pass, framebuffer, cmd_buffer).hash,
-                    rp_state->drawcall_count, render_mode_str(*early_return_mode));
+      at_log_base_h("%" PRIu32 " draw calls, using %s (early)",
+                    key_opt ? key_opt->hash : rp_key(pass, framebuffer, cmd_buffer).hash, rp_state->drawcall_count,
+                    render_mode_str(*early_return_mode));
       return *early_return_mode;
    }
 
-   rp_key key(pass, framebuffer, cmd_buffer);
+   rp_key key(0);
+   if (key_opt)
+      key = *key_opt;
+   else
+      key = cb_ctx.generate_rp_key(pass, framebuffer, cmd_buffer);
 
-   /* When nearly identical renderpasses appear multiple times within the same command buffer, we need to generate a
-    * unique hash for each instance to distinguish them. While this approach doesn't address identical renderpasses
-    * across different command buffers, it is good enough in most cases.
-    */
-   rp_entry *entry = cb_ctx.find_rp_entry(key);
-   if (entry) {
-      entry->duplicates++;
-      key = rp_key(key, entry->duplicates);
-   }
+   config_t new_config = config;
+   if (!latency_info.is_latency_sensitive && config.test(mod_flag::PREEMPT_OPTIMIZE))
+      new_config.disable(mod_flag::PREEMPT_OPTIMIZE);
 
-   *rp_ctx = cb_ctx.attach_rp_entry(device, find_or_create_rp_history(key), config, rp_state->drawcall_count);
-   rp_history &history = *((*rp_ctx)->history);
+   rp_history &history = *find_or_create_rp_history(key);
+   if (latency_info.mark_rp_as_sensitive)
+      history.preempt_optimize.mark_as_latency_sensitive();
+   *rp_ctx = cb_ctx.attach_rp_entry(device, history, new_config, rp_state->drawcall_count);
 
    if (config.test(mod_flag::PREEMPT_OPTIMIZE) && history.preempt_optimize.is_latency_sensitive()) {
       /* Try to mitigate the risk of high preemption latency by always using GMEM, which should break up any larger
@@ -1643,6 +1867,21 @@ tu_autotune::disable_preempt_optimize()
    } while (!active_config.compare_and_store(original, updated));
 }
 
+void
+tu_autotune::write_preemption_latency_to_iova(struct tu_cs *cs, uint64_t iova, bool emit_selector) const
+{
+   if (emit_selector) {
+      tu_cs_emit_pkt4(cs, preemption_latency_selector_reg, 1);
+      tu_cs_emit(cs, preemption_latency_selector);
+
+      tu_cs_emit_wfi(cs);
+   }
+
+   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
+   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(preemption_latency_counter_reg_lo) | CP_REG_TO_MEM_0_64B);
+   tu_cs_emit_qw(cs, iova);
+}
+
 /** RP-level CS emissions **/
 
 void
@@ -1686,4 +1925,172 @@ tu_autotune::end_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs, rp_ctx_t rp_c
       return;
 
    rp_ctx->emit_tile_end(cmd, cs, tile_idx);
+}
+
+/** Preemption Latency Tracking API **/
+
+uint32_t
+tu_autotune::get_switch_away_amble_size() const
+{
+   return supports_preempt_latency_tracking() ? 32 : 0;
+}
+
+uint32_t
+tu_autotune::get_switch_back_amble_size() const
+{
+   return supports_preempt_latency_tracking() ? 128 : 0;
+}
+
+void
+tu_autotune::emit_switch_away_amble(struct tu_cs *cs) const
+{
+   if (!supports_preempt_latency_tracking())
+      return;
+
+   const uint64_t mem = device->global_bo->iova;
+
+   tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) | CP_COND_REG_EXEC_0_BR);
+
+   write_preemption_latency_to_iova(cs, mem + gb_offset(new_preemption_latency), true);
+
+   /* We need to account for accumulation of PERF_CP_PREEMPTION_REACTION_DELAY, so we always has the last preemption
+    * latency stored to subtract. preemption_latency = new_preemption_latency - base_preemption_latency.
+    */
+   tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);
+   tu_cs_emit(cs, CP_MEM_TO_MEM_0_DOUBLE | CP_MEM_TO_MEM_0_NEG_B | CP_MEM_TO_MEM_0_WAIT_FOR_MEM_WRITES);
+   tu_cs_emit_qw(cs, mem + gb_offset(preemption_latency));
+   tu_cs_emit_qw(cs, mem + gb_offset(new_preemption_latency));
+   tu_cs_emit_qw(cs, mem + gb_offset(base_preemption_latency));
+   tu_cs_emit_qw(cs, mem + gb_offset(zero_64b));
+
+   tu_cond_exec_end(cs);
+}
+
+void
+tu_autotune::emit_switch_back_amble(struct tu_cs *cs) const
+{
+   if (!supports_preempt_latency_tracking())
+      return;
+
+   /* Note: Emitting WFI in PREAMBLE_AMBLE_TYPE leads to a GPU hang for some reason. */
+
+   tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) | CP_COND_REG_EXEC_0_BR);
+
+   write_preemption_latency_to_iova(
+      cs, device->global_bo->iova + gb_offset(base_preemption_latency), false);
+
+   /* Update max_preemption_latency and max_preemption_latency_rp_hash if this preemption had a longer preemption delay
+    * than the previous one in the current cmdbuffer.
+    */
+   {
+      const uint64_t mem = device->global_bo->iova;
+
+      /* scratch = max_preemption_latency - preemption_reaction_delay. */
+      tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);
+      tu_cs_emit(cs, CP_MEM_TO_MEM_0_DOUBLE | CP_MEM_TO_MEM_0_NEG_B);
+      tu_cs_emit_qw(cs, mem + gb_offset(preemption_latency_cmp_scratch));
+      tu_cs_emit_qw(cs, mem + gb_offset(max_preemption_latency));
+      tu_cs_emit_qw(cs, mem + gb_offset(preemption_latency));
+      tu_cs_emit_qw(cs, mem + gb_offset(zero_64b));
+
+      /* Wait for the mem_op to complete. */
+      tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+
+      /* Load high 32 bits of difference into scratch register. */
+      tu_cs_emit_pkt7(cs, CP_MEM_TO_REG, 3);
+      tu_cs_emit(cs, CP_MEM_TO_REG_0_REG(REG_A6XX_CP_SCRATCH(5)) | CP_MEM_TO_REG_0_CNT(1));
+      tu_cs_emit_qw(cs, mem + gb_offset(preemption_latency_cmp_scratch) + sizeof(uint32_t));
+
+      /* Test bit 31 (sign bit). */
+      tu_cs_emit_pkt7(cs, CP_REG_TEST, 1);
+      tu_cs_emit(cs, A6XX_CP_REG_TEST_0_REG(REG_A6XX_CP_SCRATCH(5)) | A6XX_CP_REG_TEST_0_BIT(31));
+
+      /* If negative (preemption_reaction_delay > max_preemption_latency), update. */
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(PRED_TEST));
+      {
+         /* max_preemption_latency = preemption_reaction_delay .*/
+         tu_cs_emit_pkt7(cs, CP_MEMCPY, 5);
+         tu_cs_emit(cs, 2);
+         tu_cs_emit_qw(cs, mem + gb_offset(preemption_latency));
+         tu_cs_emit_qw(cs, mem + gb_offset(max_preemption_latency));
+
+         /* max_preemption_latency_rp_hash = cur_rp_hash. */
+         tu_cs_emit_pkt7(cs, CP_MEMCPY, 5);
+         tu_cs_emit(cs, 2);
+         tu_cs_emit_qw(cs, mem + gb_offset(cur_rp_hash));
+         tu_cs_emit_qw(cs, mem + gb_offset(max_preemption_latency_rp_hash));
+      }
+      tu_cond_exec_end(cs);
+   }
+   tu_cond_exec_end(cs);
+}
+
+void
+tu_autotune::init_reset_rp_hash_draw_state()
+{
+   if (!supports_preempt_latency_tracking()) {
+      memset(&reset_rp_hash_draw_state, 0, sizeof(reset_rp_hash_draw_state));
+      return;
+   }
+
+   struct tu_cs cs;
+   reset_rp_hash_draw_state = tu_cs_draw_state(&device->sub_cs, &cs, 5);
+
+   tu_cs_emit_pkt7(&cs, CP_MEM_WRITE, 4);
+   tu_cs_emit_qw(&cs, device->global_bo->iova + gb_offset(cur_rp_hash));
+   tu_cs_emit_qw(&cs, 0);
+}
+
+void
+tu_autotune::emit_reset_rp_hash_draw_state(struct tu_cmd_buffer *cmd, struct tu_cs *cs) const
+{
+   if (!cmd->autotune_ctx.tracks_preempt_latency())
+      return;
+
+   assert(reset_rp_hash_draw_state.size != 0); /* init_reset_rp_hash_draw_state() not called. */
+
+   tu_cs_emit_pkt7(cs, CP_SET_DRAW_STATE, 3);
+   tu_cs_emit(cs, CP_SET_DRAW_STATE__0_COUNT(reset_rp_hash_draw_state.size) |
+                     CP_SET_DRAW_STATE__0_SYSMEM |
+                     CP_SET_DRAW_STATE__0_GROUP_ID(TU_DRAW_STATE_INPUT_ATTACHMENTS_SYSMEM));
+   tu_cs_emit_qw(cs, reset_rp_hash_draw_state.iova);
+}
+
+void
+tu_autotune::emit_preempt_latency_tracking_setup(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+{
+   if (!cmd->autotune_ctx.tracks_preempt_latency())
+      return;
+
+   tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
+   tu_cs_emit_qw(cs, global_iova(cmd, max_preemption_latency));
+   tu_cs_emit_qw(cs, 0);
+
+   tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
+   tu_cs_emit_qw(cs, global_iova(cmd, max_preemption_latency_rp_hash));
+   tu_cs_emit_qw(cs, ~0ull);
+
+   write_preemption_latency_to_iova(cs, global_iova(cmd, base_preemption_latency), true);
+}
+
+tu_autotune::rp_key_opt
+tu_autotune::emit_preempt_latency_tracking_rp_hash(struct tu_cmd_buffer *cmd)
+{
+   if (!cmd->autotune_ctx.tracks_preempt_latency())
+      return std::nullopt;
+
+   tu_autotune::rp_key rp_key =
+      cmd->autotune_ctx.generate_rp_key(cmd->state.pass, cmd->state.framebuffer, cmd);
+
+   struct tu_cs cs;
+   struct tu_draw_state ds = tu_cs_draw_state(&cmd->sub_cs, &cs, 5);
+
+   tu_cs_emit_pkt7(&cs, CP_MEM_WRITE, 4);
+   tu_cs_emit_qw(&cs, global_iova(cmd, cur_rp_hash));
+   tu_cs_emit_qw(&cs, rp_key.hash);
+
+   tu_cs_emit_pkt7(&cmd->cs, CP_SET_DRAW_STATE, 3);
+   tu_cs_emit_draw_state(&cmd->cs, TU_DRAW_STATE_AT_WRITE_RP_HASH, ds);
+
+   return rp_key;
 }
