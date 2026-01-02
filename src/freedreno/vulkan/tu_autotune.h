@@ -15,6 +15,7 @@
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
+#include <optional>
 
 #include "tu_cs.h"
 #include "tu_suballoc.h"
@@ -37,6 +38,8 @@ struct tu_autotune {
    struct PACKED config_t;
    union PACKED packed_config_t;
 
+   uint32_t supported_mod_flags;
+
    /* Allows for thread-safe access to the configurations. */
    struct atomic_config_t {
     private:
@@ -51,6 +54,7 @@ struct tu_autotune {
    } active_config;
 
    config_t get_env_config();
+   uint32_t get_supported_mod_flags(tu_device *device) const;
 
    /** Global Fence and Internal CS Management **/
 
@@ -103,7 +107,21 @@ struct tu_autotune {
 
    struct rp_gpu_data;
    struct tile_gpu_data;
+   struct rp_batch_preempt_gpu_data;
    struct rp_entry;
+
+   struct rp_batch_preempt_latency {
+      struct tu_device *device;
+
+      bool allocated;
+      struct tu_suballoc_bo bo;
+      uint8_t *map;
+
+      rp_batch_preempt_latency(struct tu_device *device, bool allocate);
+      ~rp_batch_preempt_latency();
+
+      rp_batch_preempt_gpu_data get_gpu_data();
+   };
 
    /* A wrapper over all entries associated with a single command buffer. */
    struct rp_entry_batch {
@@ -112,8 +130,11 @@ struct tu_autotune {
       uint32_t fence; /* The fence value which is used to signal the completion of the CB submission. This is used to
                          determine when the entries can be processed. */
       std::vector<std::unique_ptr<rp_entry>> entries;
+      std::unordered_map<uint64_t, uint32_t> all_renderpasses;
 
-      rp_entry_batch();
+      rp_batch_preempt_latency preempt_latency;
+
+      rp_entry_batch(struct tu_device *device, bool track_preempt_latency);
 
       /* Disable the copy/move to avoid performance hazards. */
       rp_entry_batch(const rp_entry_batch &) = delete;
@@ -121,10 +142,16 @@ struct tu_autotune {
       rp_entry_batch(rp_entry_batch &&) = delete;
       rp_entry_batch &operator=(rp_entry_batch &&) = delete;
 
+      bool requires_processing() const;
+
       void assign_fence(uint32_t new_fence);
 
       void mark_inactive();
+
+      void snapshot_preempt_data(struct tu_cs *cs);
    };
+
+   std::shared_ptr<rp_entry_batch> create_batch() const;
 
    /* A deque of entry batches that are strongly ordered by the fence value that was written by the GPU, for efficient
     * iteration and to ensure that we process the entries in the same order they were submitted.
@@ -138,11 +165,13 @@ struct tu_autotune {
     */
    void process_entries();
 
+   void process_batch_preempt_data(rp_entry_batch &batch);
+
    /** Renderpass State Tracking **/
 
    struct rp_history;
    struct rp_history_handle;
-
+   
    /* A strongly typed key which generates a hash to uniquely identify a renderpass instance. This hash is expected to
     * be stable across runs, so it can be used to identify the same renderpass instance consistently.
     *
@@ -159,6 +188,9 @@ struct tu_autotune {
 
       /* Further salt the hash to distinguish between multiple instances of the same RP within a single command buffer. */
       rp_key(const rp_key &key, uint32_t duplicates);
+
+      /* Constructor for hash-only lookup */
+      explicit constexpr rp_key(uint64_t hash) : hash(hash) {}
 
       /* Equality operator, used in unordered_map. */
       constexpr bool operator==(const rp_key &other) const noexcept
@@ -192,6 +224,36 @@ struct tu_autotune {
    rp_history_handle find_or_create_rp_history(const rp_key &key);
    void reap_old_rp_histories();
 
+   /** Preemption Latency Tracking **/
+
+   struct rp_latency_info {
+      bool is_latency_sensitive = false;
+      bool mark_rp_as_sensitive = false;
+   };
+
+   /* Tracks recent preemption latency occurrences for a specific RP hash */
+   struct rp_latency_tracker {
+      std::vector<uint64_t> recent_latency_timestamps_ns; /* Timestamps of recent latency events */
+      rp_latency_info info;
+   };
+
+   /* Global map tracking RPs that have caused preemption latency */
+   std::unordered_map<uint64_t, rp_latency_tracker> rp_latency_tracking;
+   std::mutex rp_latency_mutex; /* Protects rp_latency_tracking */
+   uint64_t last_latency_cleanup_ts = 0;
+
+   const fd_perfcntr_group *cp_group;
+   uint32_t preemption_latency_selector_reg;
+   uint32_t preemption_latency_selector;
+   uint32_t preemption_latency_counter_reg_lo;
+   
+   struct tu_draw_state reset_rp_hash_draw_state;
+
+   bool supports_preempt_latency_tracking() const;
+   void cleanup_latency_tracking();
+   const rp_latency_info get_rp_latency_info(uint64_t rp_hash);
+   void write_preemption_latency_to_iova(struct tu_cs *cs, uint64_t iova, bool emit_selector) const;
+
  public:
    tu_autotune(struct tu_device *device, VkResult &result);
 
@@ -214,16 +276,22 @@ struct tu_autotune {
       rp_entry *
       attach_rp_entry(struct tu_device *device, rp_history_handle &&history, config_t config, uint32_t draw_count);
 
-      rp_entry *find_rp_entry(const rp_key &key);
+      bool tracks_preempt_latency() const;
 
       friend struct tu_autotune;
 
     public:
-      cmd_buf_ctx();
+      cmd_buf_ctx(struct tu_autotune &autotune);
       ~cmd_buf_ctx();
 
+      rp_key generate_rp_key(const struct tu_render_pass *pass,
+                             const struct tu_framebuffer *framebuffer,
+                             const struct tu_cmd_buffer *cmd);
+
+      void snapshot_preempt_data(struct tu_cs *cs);
+
       /* Resets the internal context, should be called when tu_cmd_buffer state has been reset. */
-      void reset();
+      void reset(struct tu_autotune &autotune);
    };
 
    enum class render_mode {
@@ -231,7 +299,13 @@ struct tu_autotune {
       GMEM,
    };
 
-   render_mode get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx);
+   /* Wrapper to expose rp_key for passing around publicly. */
+   struct rp_key_opt : public std::optional<rp_key> {
+      using std::optional<rp_key>::optional;
+   };
+
+   /* Note: For preemption latency tracking to work, key_opt from emit_preempt_latency_tracking_rp_hash() must be used. */
+   render_mode get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx, rp_key_opt key_opt);
 
    /* Returns the optimal tile size divisor for the given CB state. */
    uint32_t get_tile_size_divisor(struct tu_cmd_buffer *cmd_buffer);
@@ -259,6 +333,21 @@ struct tu_autotune {
     *       function at the same time.
     */
    struct tu_cs *on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_count);
+
+   /** Preemption Latency Tracking API **/
+
+   uint32_t get_switch_away_amble_size() const;
+   uint32_t get_switch_back_amble_size() const;
+   void emit_switch_away_amble(struct tu_cs *cs) const;
+   void emit_switch_back_amble(struct tu_cs *cs) const;
+
+   /* Note: MUST be called from a single-threaded context before emit_reset_rp_hash_draw_state(). */
+   void init_reset_rp_hash_draw_state();
+   void emit_reset_rp_hash_draw_state(struct tu_cmd_buffer *cmd, struct tu_cs *cs) const;
+
+   void emit_preempt_latency_tracking_setup(struct tu_cmd_buffer *cmd, struct tu_cs *cs);
+   /* Returns the RP hash only when preemption latency tracking is enabled. */
+   rp_key_opt emit_preempt_latency_tracking_rp_hash(struct tu_cmd_buffer *cmd);
 };
 
 #endif /* TU_AUTOTUNE_H */

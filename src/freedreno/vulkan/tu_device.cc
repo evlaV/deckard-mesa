@@ -2996,6 +2996,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
    global->dbg_gmem_total_stores = 0;
    global->dbg_gmem_taken_stores = 0;
 
+   global->zero_64b = 0;
+
    /* initialize to ones so ffs can be used to find unused slots */
    BITSET_ONES(device->custom_border_color);
 
@@ -3047,6 +3049,13 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       }
    }
 
+   device->autotune = new tu_autotune(device, result);
+   if (result != VK_SUCCESS)
+      goto fail_autotune;
+
+   if (autotune_disable_preempt_optimize)
+      device->autotune->disable_preempt_optimize();
+
    result = tu_init_bin_preamble(device);
    if (result != VK_SUCCESS)
       goto fail_bin_preamble;
@@ -3082,13 +3091,6 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       goto fail_timeline_cond;
    }
    pthread_condattr_destroy(&condattr);
-
-   device->autotune = new tu_autotune(device, result);
-   if (result != VK_SUCCESS)
-      goto fail_timeline_cond;
-
-   if (autotune_disable_preempt_optimize)
-      device->autotune->disable_preempt_optimize();
 
    device->use_z24uint_s8uint =
       physical_device->info->props.has_z24uint_s8uint &&
@@ -3146,6 +3148,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
 
 fail_timeline_cond:
 fail_a725_workaround:
+fail_autotune:
+   delete device->autotune;
 fail_bin_preamble:
 fail_prepare_perfcntrs_pass_cs:
    free(device->perfcntrs_pass_cs_entries);

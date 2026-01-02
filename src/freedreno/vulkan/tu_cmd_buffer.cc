@@ -1104,7 +1104,7 @@ tu6_apply_depth_bounds_workaround(struct tu_device *device,
                      A6XX_RB_DEPTH_CNTL_ZFUNC(FUNC_ALWAYS);
 }
 
-static void
+void
 tu_cs_emit_draw_state(struct tu_cs *cs, uint32_t id, struct tu_draw_state state)
 {
    uint32_t enable_mask;
@@ -1321,7 +1321,8 @@ tu_fdm_num_layers(const struct tu_cmd_buffer *cmd)
 
 static bool
 use_sysmem_rendering(struct tu_cmd_buffer *cmd,
-                     tu_autotune::rp_ctx_t *rp_ctx)
+                     tu_autotune::rp_ctx_t *rp_ctx,
+                     tu_autotune::rp_key_opt rp_key)
 {
    if (TU_DEBUG(SYSMEM)) {
       cmd->state.rp.gmem_disable_reason = "TU_DEBUG(SYSMEM)";
@@ -1390,7 +1391,9 @@ use_sysmem_rendering(struct tu_cmd_buffer *cmd,
       return true;
    }
 
-   bool use_sysmem = cmd->device->autotune->get_optimal_mode(cmd, rp_ctx) == tu_autotune::render_mode::SYSMEM;
+   tu_autotune::render_mode optimal_mode =
+      cmd->device->autotune->get_optimal_mode(cmd, rp_ctx, rp_key);
+   bool use_sysmem = optimal_mode == tu_autotune::render_mode::SYSMEM;
    if (use_sysmem)
       cmd->state.rp.gmem_disable_reason = "Autotune selected sysmem";
 
@@ -2343,6 +2346,28 @@ tu_init_bin_preamble(struct tu_device *device)
       device->bin_preamble_bv_entry = tu_cs_end_sub_stream(&device->sub_cs, &preamble_cs);
    }
 
+   uint32_t switch_away_size = device->autotune->get_switch_away_amble_size();
+   if (switch_away_size > 0) {
+      result = tu_cs_begin_sub_stream(&device->sub_cs, switch_away_size, &preamble_cs);
+      if (result != VK_SUCCESS)
+         return vk_startup_errorf(device->instance, result, "switch away amble");
+
+      device->autotune->emit_switch_away_amble(&preamble_cs);
+      device->switch_away_amble_entry = tu_cs_end_sub_stream(&device->sub_cs, &preamble_cs);
+   }
+
+   uint32_t switch_back_size = device->autotune->get_switch_back_amble_size();
+   if (switch_back_size > 0) {
+      result = tu_cs_begin_sub_stream(&device->sub_cs, switch_back_size, &preamble_cs);
+      if (result != VK_SUCCESS)
+         return vk_startup_errorf(device->instance, result, "switch back amble");
+
+      device->autotune->emit_switch_back_amble(&preamble_cs);
+      device->switch_back_amble_entry = tu_cs_end_sub_stream(&device->sub_cs, &preamble_cs);
+   }
+
+   device->autotune->init_reset_rp_hash_draw_state();
+
    return VK_SUCCESS;
 }
 
@@ -2428,6 +2453,8 @@ tu6_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
       tu7_set_thread_br_patchpoint(cmd, cs, false);
    }
 
+   dev->autotune->emit_preempt_latency_tracking_setup(cmd, cs);
+
    tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
    tu_cs_emit_qw(cs, cmd->device->bin_preamble_entry.bo->iova +
                      cmd->device->bin_preamble_entry.offset);
@@ -2452,13 +2479,27 @@ tu6_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                             (1u << TU_PREDICATE_VTX_STATS_NOT_RUNNING));
    }
 
-   tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
-   tu_cs_emit_qw(cs, 0);
-   tu_cs_emit(cs, CP_SET_AMBLE_2_TYPE(PREAMBLE_AMBLE_TYPE));
-
-   tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
-   tu_cs_emit_qw(cs, 0);
-   tu_cs_emit(cs, CP_SET_AMBLE_2_TYPE(POSTAMBLE_AMBLE_TYPE));
+   if (dev->switch_back_amble_entry.size > 0) {
+      tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
+      tu_cs_emit_qw(cs, dev->switch_back_amble_entry.bo->iova + dev->switch_back_amble_entry.offset);
+      tu_cs_emit(cs, CP_SET_AMBLE_2_DWORDS(dev->switch_back_amble_entry.size / sizeof(uint32_t)) |
+                        CP_SET_AMBLE_2_TYPE(PREAMBLE_AMBLE_TYPE));
+   } else {
+      tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
+      tu_cs_emit_qw(cs, 0);
+      tu_cs_emit(cs, CP_SET_AMBLE_2_TYPE(PREAMBLE_AMBLE_TYPE));
+   }
+   
+   if (dev->switch_away_amble_entry.size > 0) {
+      tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
+      tu_cs_emit_qw(cs, dev->switch_away_amble_entry.bo->iova + dev->switch_away_amble_entry.offset);
+      tu_cs_emit(cs, CP_SET_AMBLE_2_DWORDS(dev->switch_away_amble_entry.size / sizeof(uint32_t)) |
+                        CP_SET_AMBLE_2_TYPE(POSTAMBLE_AMBLE_TYPE));
+   } else {
+      tu_cs_emit_pkt7(cs, CP_SET_AMBLE, 3);
+      tu_cs_emit_qw(cs, 0);
+      tu_cs_emit(cs, CP_SET_AMBLE_2_TYPE(POSTAMBLE_AMBLE_TYPE));
+   }
 
    if (CHIP >= A7XX) {
       tu7_set_thread_br_patchpoint(cmd, cs, false);
@@ -4264,8 +4305,10 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer,
    if (cmd_buffer->state.rp.has_tess)
       tu6_lazy_emit_tessfactor_addr<CHIP>(cmd_buffer);
 
+   tu_autotune::rp_key_opt rp_key = cmd_buffer->device->autotune->emit_preempt_latency_tracking_rp_hash(cmd_buffer);
+
    tu_autotune::rp_ctx_t rp_ctx = NULL;
-   if (use_sysmem_rendering(cmd_buffer, &rp_ctx))
+   if (use_sysmem_rendering(cmd_buffer, &rp_ctx, rp_key))
       tu_cmd_render_sysmem<CHIP>(cmd_buffer, rp_ctx);
    else
       tu_cmd_render_tiles<CHIP>(cmd_buffer, rp_ctx, fdm_offsets);
@@ -4342,7 +4385,7 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    u_trace_init(&cmd_buffer->rp_trace, &device->trace_context);
    cmd_buffer->trace_renderpass_start =
       u_trace_begin_iterator(&cmd_buffer->rp_trace);
-   new (&cmd_buffer->autotune_ctx) tu_autotune::cmd_buf_ctx();
+   new (&cmd_buffer->autotune_ctx) tu_autotune::cmd_buf_ctx(*device->autotune);
 
    if (TU_DEBUG_START(CHECK_CMD_BUFFER_STATUS)) {
       cmd_buffer->status_bo = tu_cmd_buffer_setup_status_tracking(device);
@@ -4469,7 +4512,7 @@ tu_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
    tu_cs_reset(&cmd_buffer->pre_chain.draw_cs);
    tu_cs_reset(&cmd_buffer->pre_chain.draw_epilogue_cs);
 
-   cmd_buffer->autotune_ctx.reset();
+   cmd_buffer->autotune_ctx.reset(*cmd_buffer->device->autotune);
 
    for (unsigned i = 0; i < MAX_BIND_POINTS; i++) {
       memset(&cmd_buffer->descriptors[i].sets, 0, sizeof(cmd_buffer->descriptors[i].sets));
@@ -5535,7 +5578,15 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
    }
 
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
-      trace_end_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs, cmd_buffer);
+      struct u_trace_address addr_preempt_latency = {};
+      addr_preempt_latency.offset = global_iova(cmd_buffer, max_preemption_latency);
+
+      struct u_trace_address addr_preempt_latency_rp_hash = {};
+      addr_preempt_latency_rp_hash.offset = global_iova(cmd_buffer, max_preemption_latency_rp_hash);
+
+      trace_end_cmd_buffer(&cmd_buffer->trace, &cmd_buffer->cs, cmd_buffer, addr_preempt_latency, addr_preempt_latency_rp_hash);
+
+      cmd_buffer->autotune_ctx.snapshot_preempt_data(&cmd_buffer->cs);
    } else {
       trace_end_secondary_cmd_buffer(
          cmd_buffer->state.pass ? &cmd_buffer->rp_trace : &cmd_buffer->trace,
@@ -9415,6 +9466,8 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
       tu_cs_emit_regs(cs, A6XX_SP_PS_INSTR_SIZE(shader->variant->instrlen));
       tu_emit_event_write<CHIP>(cmd, cs, FD_LABEL);
    }
+
+   cmd->device->autotune->emit_reset_rp_hash_draw_state(cmd, cs);
 
    /* TODO: We could probably flush less if we add a compute_flush_bits
     * bitfield.
