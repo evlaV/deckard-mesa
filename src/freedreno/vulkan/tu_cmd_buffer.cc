@@ -4240,6 +4240,18 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
 
       for (uint32_t i = 0; i < views; i++)
          util_dynarray_init(&bin_info->fdm_scales_per_view[i], mem_ctx);
+
+      bin_info->bin_offsets_per_view = NULL;
+      if (fdm_offsets && !cmd->state.rp.shared_viewport) {
+         bin_info->bin_offsets_per_view = (VkOffset2D *)
+            ralloc_array_size(mem_ctx, sizeof(*bin_info->sc_array), views);
+
+         for (uint32_t i = 0; i < views; i++) {
+            bin_info->bin_offsets_per_view[i] =
+               tu_bin_offset(fdm_offsets[i], tiling);
+         }
+      }
+
       bin_info->view_count = views;
 
       const struct vk_viewport_state *vp = &cmd->vk.dynamic_graphics_state.vp;
