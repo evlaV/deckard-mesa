@@ -76,6 +76,7 @@ struct tu_perfetto_bin_layout_info {
    VkRect2D *sc_array;
 
    uint32_t view_count;
+   VkOffset2D *bin_offsets_per_view;
    struct util_dynarray fdm_scales_per_view[];
 };
 
