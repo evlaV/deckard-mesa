@@ -698,6 +698,19 @@ trace_payload_as_extra_end_render_pass_with_bin_coordinates(
          idx++;
       }
    }
+
+   if (info->bin_offsets_per_view) {
+      for (uint32_t view = 0; view < info->view_count; view++) {
+         VkOffset2D offset = info->bin_offsets_per_view[view];
+         auto data = event->add_extra_data();
+
+         sprintf(buff, "perViewBinOffset[%" PRIu32 "]", view);
+         data->set_name(buff);
+
+         sprintf(buff, "(%" PRIi32 ", %" PRIi32 ")", offset.x, offset.y);
+         data->set_value(buff);
+      }
+   }
 }
 
 void tu_perfetto_end_render_pass(
