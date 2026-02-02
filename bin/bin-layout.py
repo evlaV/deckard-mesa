@@ -1129,6 +1129,8 @@ class UI:
         paned_window.pack(expand=True, fill=tk.BOTH)
         self.__root.protocol('WM_DELETE_WINDOW', self.close)
 
+        messagebox.showwarning("Tool Deprecation", "This tool is being deprecated.\nUse the Perfetto plugin instead.\nThere are known issues with this tool (e.g. not accounting for FDM offsets, or some stats being misleading).")
+
         if file_path:
             self.app.post_load_trace(self, file_path)
 
