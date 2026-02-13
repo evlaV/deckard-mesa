@@ -4501,7 +4501,7 @@ tu_BeginCommandBuffer(VkCommandBuffer commandBuffer,
    /* setup initial configuration into command buffer */
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
       switch (cmd_buffer->queue_family_index) {
-      case TU_QUEUE_GENERAL:
+      case TU_QF_GENERAL:
          TU_CALLX(cmd_buffer->device, tu_init_hw)(cmd_buffer, &cmd_buffer->cs);
          result = tu_cs_get_status(&cmd_buffer->cs);
          if (result != VK_SUCCESS)

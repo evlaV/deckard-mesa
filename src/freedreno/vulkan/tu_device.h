@@ -32,7 +32,8 @@
 #include "tu_util.h"
 
 /* queue types */
-#define TU_QUEUE_GENERAL 0
+#define TU_QF_GENERAL 0
+#define TU_QF_COMPUTE 1
 
 #define TU_MAX_QUEUE_FAMILIES 2
 
@@ -148,6 +149,8 @@ struct tu_physical_device
    struct fdl_ubwc_config ubwc_config;
 
    bool has_preemption;
+
+   bool has_lpac;
 
    bool expose_double_threadsize;
 
