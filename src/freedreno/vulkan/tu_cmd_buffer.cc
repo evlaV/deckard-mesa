@@ -355,10 +355,63 @@ tu_emit_rt_workaround(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 
 template <chip CHIP>
 static void
+tu6_emit_flushes_lpac(struct tu_cmd_buffer *cmd_buffer,
+                      struct tu_cs *cs,
+                      struct tu_cache_state *cache)
+{
+   BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
+   cache->flush_bits = 0;
+
+   if (TU_DEBUG(FLUSHALL))
+      flushes |= TU_CMD_FLAG_ALL_CLEAN | TU_CMD_FLAG_ALL_INVALIDATE;
+
+   if (TU_DEBUG(SYNCDRAW))
+      flushes |= TU_CMD_FLAG_WAIT_MEM_WRITES |
+                 TU_CMD_FLAG_WAIT_FOR_IDLE |
+                 TU_CMD_FLAG_WAIT_FOR_ME;
+
+   /* Experiments show that invalidating CCU while it still has data in it
+    * doesn't work, so make sure to always flush before invalidating in case
+    * any data remains that hasn't yet been made available through a barrier.
+    * However it does seem to work for UCHE.
+    */
+   if (flushes & TU_CMD_FLAG_CACHE_CLEAN)
+      tu_emit_event_write<CHIP>(cmd_buffer, cs, FD_CACHE_CLEAN);
+   if (flushes & TU_CMD_FLAG_CACHE_INVALIDATE)
+      tu_emit_event_write<CHIP>(cmd_buffer, cs, FD_CACHE_INVALIDATE);
+   if (flushes & TU_CMD_FLAG_BINDLESS_DESCRIPTOR_INVALIDATE) {
+      tu_cs_emit_regs(cs, SP_UPDATE_CNTL(CHIP,
+            .cs_bindless = CHIP == A6XX ? 0x1f : 0xff,
+            .gfx_bindless = CHIP == A6XX ? 0x1f : 0xff,
+      ));
+   }
+   if (CHIP >= A7XX && (flushes & TU_CMD_FLAG_CCHE_INVALIDATE) &&
+       /* Invalidating UCHE seems to also invalidate CCHE */
+       !(flushes & TU_CMD_FLAG_CACHE_INVALIDATE)) {
+      /* CP_CCHE_INVALIDATE is just a plain register write underneath, so
+       * it needs WFI before it, in order to invalidate at the right point.
+       */
+      tu_cs_emit_wfi(cs);
+      tu_cs_emit_pkt7(cs, CP_CCHE_INVALIDATE, 0);
+   }
+   if (CHIP == A7XX && (flushes & TU_CMD_FLAG_RTU_INVALIDATE) &&
+       cmd_buffer->device->physical_device->info->props.has_rt_workaround)
+      tu_emit_rt_workaround<CHIP>(cmd_buffer, cs);
+   if (flushes & TU_CMD_FLAG_WAIT_MEM_WRITES)
+      tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+   if (flushes & TU_CMD_FLAG_WAIT_FOR_IDLE)
+      tu_cs_emit_wfi(cs);
+   if (flushes & TU_CMD_FLAG_WAIT_FOR_ME)
+      tu_cs_emit_pkt7(cs, CP_WAIT_FOR_ME, 0);
+}
+
+template <chip CHIP>
+static void
 tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
                  struct tu_cs *cs,
                  struct tu_cache_state *cache)
 {
+   assert(cmd_buffer->queue_family_index == TU_QF_GENERAL);
    BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
    cache->flush_bits = 0;
 
@@ -507,7 +560,12 @@ tu_emit_cache_flush(struct tu_cmd_buffer *cmd_buffer)
    struct tu_cache_state *cache = &cmd_buffer->state.cache;
    BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
 
-   tu6_emit_flushes<CHIP>(cmd_buffer, cs, cache);
+   if (cmd_buffer->queue_family_index == TU_QF_GENERAL)
+      tu6_emit_flushes<CHIP>(cmd_buffer, cs, cache);
+   else {
+      tu6_emit_flushes_lpac<CHIP>(cmd_buffer, cs, cache);
+      return;
+   }
 
    if ((flushes & TU_CMD_FLAG_WAIT_FOR_BR) && CHIP >= A7XX &&
        !(cmd_buffer->state.pass && cmd_buffer->state.renderpass_cb_disabled) &&
@@ -2333,6 +2391,66 @@ tu6_init_static_regs(struct tu_device *dev, struct tu_cs *cs)
    ));
 }
 
+template <chip CHIP>
+static void
+tu6_init_static_regs_lpac(struct tu_device *dev, struct tu_cs *cs)
+{
+   const struct tu_physical_device *phys_dev = dev->physical_device;
+
+   for (size_t i = 0; i < ARRAY_SIZE(phys_dev->info->magic_raw); i++) {
+      auto magic_reg = phys_dev->info->magic_raw[i];
+      if (!magic_reg.reg)
+         break;
+
+      uint32_t value = magic_reg.value;
+      if (magic_reg.reg == REG_A6XX_UCHE_CACHE_WAYS)
+            tu_cs_emit_write_reg(cs, magic_reg.reg, value);
+   }
+
+   tu_cs_emit_regs(cs, A6XX_SP_MODE_CNTL(.constant_demotion_enable = true,
+                                            .isammode = ISAMMODE_GL,
+                                            .shared_consts_enable = false));
+
+   tu_cs_emit_regs(cs, TPL1_MODE_CNTL(CHIP, .isammode = ISAMMODE_GL,
+                                            .texcoordroundmode = dev->instance->drirc.misc.use_tex_coord_round_nearest_even_mode
+                                               ? COORD_ROUND_NEAREST_EVEN
+                                               : COORD_TRUNCATE,
+                                            .nearestmipsnap = CLAMP_ROUND_TRUNCATE,
+                                            .destdatatypeoverride = true));
+
+   tu_cs_emit_regs(cs, A6XX_TPL1_GFX_BORDER_COLOR_BASE(.qword = dev->global_bo->iova + gb_offset(bcolor_builtin)));
+   tu_cs_emit_regs(cs, A6XX_TPL1_CS_BORDER_COLOR_BASE(.qword = dev->global_bo->iova + gb_offset(bcolor_builtin)));
+
+   /* unk lpac regs */
+   tu_cs_emit_pkt7(cs, CP_NON_CONTEXT_REG_BUNCH, 26);
+   tu_cs_emit(cs, 0x233f251c);
+   tu_cs_emit(cs, 00000000);
+   tu_cs_emit(cs, 0xaf80);
+   tu_cs_emit(cs, 0x10000000);
+   tu_cs_emit(cs, 0xaf8a);
+   tu_cs_emit(cs, 0x0);
+   tu_cs_emit(cs, 0xaf8b);
+   tu_cs_emit(cs, 0x0);
+   tu_cs_emit(cs, 0xaf81);
+   tu_cs_emit(cs, 0x10000400);
+   tu_cs_emit(cs, 0xaf83);
+   tu_cs_emit(cs, 0x0);
+   tu_cs_emit(cs, 0xaf84);
+   tu_cs_emit(cs, 0x0);
+   tu_cs_emit(cs, 0xaf85);
+   tu_cs_emit(cs, 0x0);
+   tu_cs_emit(cs, 0xb780);
+   tu_cs_emit(cs, 0x13100000);
+   tu_cs_emit(cs, REG_A6XX_SP_CHICKEN_BITS);
+   tu_cs_emit(cs, 0);
+   tu_cs_emit(cs, 0xAE0A);
+   tu_cs_emit(cs, BIT(23) | BIT(10));
+   tu_cs_emit(cs, 0xAE08);
+   tu_cs_emit(cs, BIT(22));
+   tu_cs_emit(cs, REG_A6XX_RB_CMP_DBG_ECO_CNTL);
+   tu_cs_emit(cs, BIT(19));
+}
+
 /* Emit the bin restore preamble, which runs in between bins when L1
  * preemption with skipsaverestore happens and we switch back to this context.
  * We need to restore static registers normally programmed at cmdbuf start
@@ -2481,9 +2599,6 @@ tu_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    }
 
    if (CHIP >= A7XX) {
-      if (cmd->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
-         tu_cs_set_writeable(cs, true);
-
       /* This sets the amount BV is allowed to be ahead of BR when we do
        * BV_WAIT_FOR_BR. By setting it based on the vis stream count we
        * prevent write-after-read races with the vis stream.
@@ -2496,9 +2611,6 @@ tu_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
       patchpoint->data = cs->cur;
       patchpoint->iova = tu_cs_get_cur_iova(cs);
       tu_cs_emit(cs, 1);
-
-      if (cmd->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
-         tu_cs_set_writeable(cs, false);
 
       tu7_set_thread_br_patchpoint(cmd, cs, false);
    }
@@ -2553,6 +2665,51 @@ tu_init_hw(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 
    if (CHIP >= A7XX) {
       tu7_set_thread_br_patchpoint(cmd, cs, false);
+   }
+
+   tu_cs_sanity_check(cs);
+}
+
+template <chip CHIP>
+static void
+tu6_init_hw_lpac(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+{
+   struct tu_device *dev = cmd->device;
+   const struct tu_physical_device *phys_dev = dev->physical_device;
+
+   tu_emit_event_write<CHIP>(cmd, cs, FD_CACHE_INVALIDATE);
+   tu_cs_emit_wfi(cs);
+
+   tu_cs_emit_regs(cs, SP_UPDATE_CNTL(CHIP,
+         .vs_state = true,
+         .hs_state = true,
+         .ds_state = true,
+         .gs_state = true,
+         .fs_state = true,
+         .cs_state = true,
+         .cs_uav = true,
+         .gfx_uav = true,
+         .cs_shared_const = true,
+         .gfx_shared_const = true,
+         .cs_bindless = CHIP == A6XX ? 0x1f : 0xff,
+         .gfx_bindless = CHIP == A6XX ? 0x1f : 0xff,));
+
+   tu_cs_emit_wfi(cs);
+
+   cmd->state.cache.pending_flush_bits &=
+      ~(TU_CMD_FLAG_WAIT_FOR_IDLE | TU_CMD_FLAG_CACHE_INVALIDATE);
+
+   tu6_init_static_regs_lpac<CHIP>(cmd->device, cs);
+
+   tu_disable_draw_states(cmd, cs);
+
+   if (phys_dev->info->props.cmdbuf_start_a725_quirk) {
+      tu_cs_reserve(cs, 3 + 4);
+      tu_cs_emit_pkt7(cs, CP_COND_REG_EXEC, 2);
+      tu_cs_emit(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
+                     CP_COND_REG_EXEC_0_BR | CP_COND_REG_EXEC_0_LPAC);
+      tu_cs_emit(cs, RENDER_MODE_CP_COND_REG_EXEC_1_DWORDS(4));
+      tu_cs_emit_ib(cs, &dev->cmdbuf_start_a725_quirk_entry);
    }
 
    tu_cs_sanity_check(cs);
@@ -4216,6 +4373,7 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    struct tu_device *device =
       container_of(pool->base.device, struct tu_device, vk);
    struct tu_cmd_buffer *cmd_buffer;
+   enum tu_queue_type type;
 
    cmd_buffer = (struct tu_cmd_buffer *) vk_zalloc(
       &pool->alloc, sizeof(*cmd_buffer), 8,
@@ -4232,6 +4390,21 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
    }
 
    cmd_buffer->device = device;
+
+   type = device->physical_device->queue_families[pool->queue_family_index].type;
+   switch (type) {
+      case TU_QUEUE_GFX:
+         cmd_buffer->queue_family_index = TU_QF_GENERAL;
+         break;
+      case TU_QUEUE_COMPUTE:
+         cmd_buffer->queue_family_index = TU_QF_COMPUTE;
+         break;
+      default:
+         /* Vulkan doesn't disallow creating command buffers on sparse queues
+          * so just pretend it's GFX in that case */
+         cmd_buffer->queue_family_index = TU_QF_GENERAL;
+         break;
+   }
 
    u_trace_init(&cmd_buffer->trace, &device->trace_context);
    u_trace_init(&cmd_buffer->rp_trace, &device->trace_context);
@@ -4500,16 +4673,25 @@ tu_BeginCommandBuffer(VkCommandBuffer commandBuffer,
 
    /* setup initial configuration into command buffer */
    if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
-      switch (cmd_buffer->queue_family_index) {
-      case TU_QF_GENERAL:
-         TU_CALLX(cmd_buffer->device, tu_init_hw)(cmd_buffer, &cmd_buffer->cs);
-         result = tu_cs_get_status(&cmd_buffer->cs);
-         if (result != VK_SUCCESS)
-            return vk_command_buffer_set_error(&cmd_buffer->vk, result);
-         break;
-      default:
-         break;
-      }
+      tu_cond_exec_start(&cmd_buffer->cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
+                                          CP_COND_REG_EXEC_0_LPAC);
+      TU_CALLX(cmd_buffer->device, tu6_init_hw_lpac)(cmd_buffer, &cmd_buffer->cs);
+      tu_cond_exec_end(&cmd_buffer->cs);
+
+      if (cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
+         tu_cs_set_writeable(&cmd_buffer->cs, true);
+
+      tu_cond_exec_start(&cmd_buffer->cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
+                                          CP_COND_REG_EXEC_0_BR |
+                                          CP_COND_REG_EXEC_0_BV);
+      TU_CALLX(cmd_buffer->device, tu_init_hw)(cmd_buffer, &cmd_buffer->cs);
+      result = tu_cs_get_status(&cmd_buffer->cs);
+      if (result != VK_SUCCESS)
+         return vk_command_buffer_set_error(&cmd_buffer->vk, result);
+      tu_cond_exec_end(&cmd_buffer->cs);
+
+      if (cmd_buffer->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)
+         tu_cs_set_writeable(&cmd_buffer->cs, false);
    } else if (cmd_buffer->vk.level == VK_COMMAND_BUFFER_LEVEL_SECONDARY) {
       const bool pass_continue =
          pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
@@ -5445,9 +5627,10 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
       tu_emit_cache_flush_renderpass<CHIP>(cmd_buffer);
    } else {
       tu_clean_all_pending(&cmd_buffer->state.cache);
-      cmd_buffer->state.cache.flush_bits |=
-         TU_CMD_FLAG_CCU_CLEAN_COLOR |
-         TU_CMD_FLAG_CCU_CLEAN_DEPTH;
+      if (cmd_buffer->queue_family_index == TU_QF_GENERAL)
+         cmd_buffer->state.cache.flush_bits |=
+            TU_CMD_FLAG_CCU_CLEAN_COLOR |
+            TU_CMD_FLAG_CCU_CLEAN_DEPTH;
       tu_emit_cache_flush<CHIP>(cmd_buffer);
    }
 
