@@ -59,6 +59,8 @@ enum global_shader {
    GLOBAL_SH_FS_RESOLVE_MS8,
    GLOBAL_SH_FS_CLEAR0,
    GLOBAL_SH_FS_CLEAR_MAX = GLOBAL_SH_FS_CLEAR0 + MAX_RTS,
+   GLOBAL_SH_CS_BLIT,
+   GLOBAL_SH_CS_CLEAR,
    GLOBAL_SH_COUNT,
 };
 
@@ -225,6 +227,8 @@ struct tu6_global
 {
    /* clear/blit shaders */
    uint32_t shaders[TU_BLIT_SHADER_SIZE];
+
+   uint32_t cs_state[128];
 
    uint32_t seqno_dummy;          /* dummy seqno for CP_EVENT_WRITE */
    uint32_t _pad0;
