@@ -292,6 +292,24 @@ msm_common_has_preemption(int fd, uint32_t priority)
    return true;
 }
 
+static bool
+msm_common_has_lpac(int fd)
+{
+   struct drm_msm_submitqueue req = {
+      .flags = MSM_SUBMITQUEUE_LPAC,
+      .prio = 0,
+   };
+
+   int ret = drmCommandWriteRead(fd,
+                                 DRM_MSM_SUBMITQUEUE_NEW, &req, sizeof(req));
+   if (ret)
+      return false;
+
+   drmCommandWrite(fd, DRM_MSM_SUBMITQUEUE_CLOSE, &req.id,
+                   sizeof(req.id));
+   return true;
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -16,6 +16,7 @@ enum tu_queue_type
 {
    TU_QUEUE_GFX,
    TU_QUEUE_SPARSE,
+   TU_QUEUE_COMPUTE,
 };
 
 struct tu_queue

@@ -150,7 +150,7 @@ msm_submitqueue_new(struct tu_device *dev, struct tu_queue *queue)
 {
    int ret = 0;
 
-   if (queue->type == TU_QUEUE_GFX) {
+   if (queue->type == TU_QUEUE_GFX || queue->type == TU_QUEUE_COMPUTE) {
       assert(queue->priority >= 0 &&
              queue->priority < dev->physical_device->submitqueue_priority_count);
       struct drm_msm_submitqueue req = {
@@ -159,6 +159,9 @@ msm_submitqueue_new(struct tu_device *dev, struct tu_queue *queue)
                    MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0),
          .prio = queue->priority,
       };
+
+      if (queue->type == TU_QUEUE_COMPUTE)
+         req.flags |= MSM_SUBMITQUEUE_LPAC;
 
       ret = drmCommandWriteRead(dev->fd,
                                 DRM_MSM_SUBMITQUEUE_NEW, &req, sizeof(req));
@@ -1405,6 +1408,8 @@ tu_knl_drm_msm_load(struct tu_instance *instance,
    device->has_sparse_prr = tu_drm_get_param_or(fd, MSM_PARAM_HAS_PRR, &val, false);
 
    device->has_preemption = msm_common_has_preemption(device->local_fd, device->submitqueue_priority_count / 2);
+
+   device->has_lpac = msm_common_has_lpac(device->local_fd);
 
    device->is_perf_cntr_selectable = true;
 
