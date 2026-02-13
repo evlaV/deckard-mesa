@@ -41,7 +41,8 @@ tu_get_submitqueue_priority(const struct tu_physical_device *pdevice,
    }
 
    /* drm/msm requires a priority of 0 */
-   if (type == TU_QUEUE_SPARSE)
+   //HACK LPAC can support more than one priority
+   if (type == TU_QUEUE_SPARSE || type == TU_QUEUE_COMPUTE)
       return 0;
 
    /* Valid values are from 0 to (pdevice->submitqueue_priority_count - 1),

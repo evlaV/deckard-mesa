@@ -1718,6 +1718,22 @@ static const VkQueueFamilyProperties tu_gfx_sparse_queue_family_properties = {
    .minImageTransferGranularity = { 1, 1, 1 },
 };
 
+static const VkQueueFamilyProperties tu_compute_queue_family_properties = {
+   .queueFlags =
+      VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
+   .queueCount = 1,
+   .timestampValidBits = 48,
+   .minImageTransferGranularity = { 1, 1, 1 },
+};
+
+static const VkQueueFamilyProperties tu_compute_sparse_queue_family_properties = {
+   .queueFlags =
+      VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT | VK_QUEUE_SPARSE_BINDING_BIT,
+   .queueCount = 1,
+   .timestampValidBits = 48,
+   .minImageTransferGranularity = { 1, 1, 1 },
+};
+
 static const VkQueueFamilyProperties tu_sparse_queue_family_properties = {
    .queueFlags = VK_QUEUE_SPARSE_BINDING_BIT,
    .queueCount = 1,
@@ -1884,6 +1900,16 @@ tu_physical_device_init(struct tu_physical_device *device,
             &tu_gfx_sparse_queue_family_properties :
             &tu_gfx_queue_family_properties,
       };
+
+   if (device->has_lpac) {
+      device->queue_families[device->num_queue_families++] =
+         (struct tu_queue_family) {
+            .type = TU_QUEUE_COMPUTE,
+            .properties = device->has_sparse ?
+               &tu_compute_sparse_queue_family_properties :
+               &tu_compute_queue_family_properties,
+         };
+   }
 
    if (device->has_sparse) {
       device->queue_families[device->num_queue_families++] =
@@ -2065,6 +2091,13 @@ tu_physical_device_get_global_priority_properties(const struct tu_physical_devic
 {
    /* drm/msm only supports one priority for VM_BIND queues */
    if (type == TU_QUEUE_SPARSE) {
+      props->priorityCount = 1;
+      props->priorities[0] = VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_KHR;
+      return;
+   }
+
+   /* HACK: technically we do support more priorities */
+   if (type == TU_QUEUE_COMPUTE) {
       props->priorityCount = 1;
       props->priorities[0] = VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_KHR;
       return;
