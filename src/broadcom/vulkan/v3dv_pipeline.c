@@ -2095,7 +2095,8 @@ pipeline_populate_graphics_key(struct v3dv_pipeline *pipeline,
       }
    }
 
-   key->has_multiview = ri->view_mask != 0;
+   struct vk_multiview_state *mv = &pipeline->multiview_info;
+   key->has_multiview = mv->view_mask != 0;
 }
 
 static void
@@ -2147,7 +2148,7 @@ v3dv_pipeline_shared_data_new_empty(const unsigned char sha1_key[SHA1_DIGEST_LEN
       if (stage == BROADCOM_SHADER_GEOMETRY &&
           !pipeline->stages[BROADCOM_SHADER_GEOMETRY]) {
          /* We always inject a custom GS if we have multiview */
-         if (!pipeline->rendering_info.view_mask)
+         if (!pipeline->multiview_info.view_mask)
             continue;
       }
 
@@ -2521,7 +2522,7 @@ pipeline_compile_graphics(struct v3dv_pipeline *pipeline,
    /* If multiview is enabled, we inject a custom passthrough geometry shader
     * to broadcast draw calls to the appropriate views.
     */
-   const uint32_t view_mask = pipeline->rendering_info.view_mask;
+   const uint32_t view_mask = pipeline->multiview_info.view_mask;
    assert(!view_mask ||
           (!pipeline->has_gs && !pipeline->stages[BROADCOM_SHADER_GEOMETRY]));
    if (view_mask) {
@@ -2787,6 +2788,7 @@ pipeline_setup_rendering_info(struct v3dv_device *device,
                               const VkAllocationCallbacks *alloc)
 {
    struct vk_render_pass_state *rp = &pipeline->rendering_info;
+   struct vk_multiview_state *mv = &pipeline->multiview_info;
 
    if (pipeline->pass) {
       assert(pipeline->subpass);
@@ -2794,7 +2796,7 @@ pipeline_setup_rendering_info(struct v3dv_device *device,
       struct v3dv_subpass *subpass = pipeline->subpass;
       const uint32_t attachment_idx = subpass->ds_attachment.attachment;
 
-      rp->view_mask = subpass->view_mask;
+      mv->view_mask = subpass->view_mask;
 
       rp->depth_attachment_format = VK_FORMAT_UNDEFINED;
       rp->stencil_attachment_format = VK_FORMAT_UNDEFINED;
@@ -2829,7 +2831,7 @@ pipeline_setup_rendering_info(struct v3dv_device *device,
       vk_find_struct_const(pCreateInfo->pNext,
                            PIPELINE_RENDERING_CREATE_INFO);
    if (ri) {
-      rp->view_mask = ri->viewMask;
+      mv->view_mask = ri->viewMask;
 
       rp->color_attachment_count = ri->colorAttachmentCount;
       for (int i = 0; i < ri->colorAttachmentCount; i++) {
@@ -2858,11 +2860,13 @@ pipeline_setup_rendering_info(struct v3dv_device *device,
     *     VK_FORMAT_UNDEFINED.
     */
    pipeline->rendering_info = (struct vk_render_pass_state) {
-      .view_mask = 0,
       .attachments = 0,
       .color_attachment_count = 0,
       .depth_attachment_format = VK_FORMAT_UNDEFINED,
       .stencil_attachment_format = VK_FORMAT_UNDEFINED,
+   };
+   pipeline->multiview_info = (struct vk_multiview_state) {
+      .view_mask = 0,
    };
 }
 
@@ -2875,7 +2879,9 @@ pipeline_init_dynamic_state(struct v3dv_device *device,
 {
    VkResult result = VK_SUCCESS;
    result = vk_graphics_pipeline_state_fill(&pipeline->device->vk, pipeline_state,
-                                            pCreateInfo, &pipeline->rendering_info, 0,
+                                            pCreateInfo,
+                                            &pipeline->multiview_info,
+                                            &pipeline->rendering_info, 0,
                                             pipeline_all_state, NULL, 0, NULL);
    if (result != VK_SUCCESS)
       return result;
