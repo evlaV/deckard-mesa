@@ -575,6 +575,9 @@ vtn_mediump_upconvert_value(struct vtn_builder *b, struct vtn_ssa_value *value)
 {
    enum glsl_base_type base_type = glsl_get_base_type(value->type);
 
+   if (value->transposed)
+      vtn_mediump_upconvert_value(b, value->transposed);
+
    if (glsl_type_is_vector_or_scalar(value->type)) {
       value->def = vtn_mediump_upconvert(b, base_type, value->def);
    } else {
