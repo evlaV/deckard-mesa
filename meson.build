@@ -1818,6 +1818,11 @@ if dep_libdrm.found()
   endif
 endif
 
+dep_dbus = dependency(
+  'dbus-1',
+  required : true,
+)
+
 # Then get each libdrm module
 foreach d : _libdrm_checks
   if d[1]
