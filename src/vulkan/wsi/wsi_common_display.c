@@ -2097,7 +2097,7 @@ wsi_display_wait_thread(void *data)
 {
    struct sched_param p;
    memset(&p, 0, sizeof(p));
-   p.sched_priority = 3;
+   p.sched_priority = 80;
    if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &p) < 0 && errno == EPERM) {
       DBusError err;
       DBusConnection *system_bus = dbus_bus_get(DBUS_BUS_SYSTEM, &err);
