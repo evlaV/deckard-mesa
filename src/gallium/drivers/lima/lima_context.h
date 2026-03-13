@@ -57,11 +57,11 @@ struct lima_fs_compiled_shader {
 
 struct lima_fs_uncompiled_shader {
    struct pipe_shader_state base;
-   unsigned char nir_sha1[SHA1_DIGEST_LENGTH];
+   unsigned char nir_sha1[BLAKE3_KEY_LEN];
 };
 
 struct lima_fs_key {
-   unsigned char nir_sha1[SHA1_DIGEST_LENGTH];
+   unsigned char nir_sha1[BLAKE3_KEY_LEN];
    struct {
       uint8_t swizzle[4];
    } tex[PIPE_MAX_SAMPLERS];
@@ -95,11 +95,11 @@ struct lima_vs_compiled_shader {
 
 struct lima_vs_uncompiled_shader {
    struct pipe_shader_state base;
-   unsigned char nir_sha1[SHA1_DIGEST_LENGTH];
+   unsigned char nir_sha1[BLAKE3_KEY_LEN];
 };
 
 struct lima_vs_key {
-   unsigned char nir_sha1[SHA1_DIGEST_LENGTH];
+   unsigned char nir_sha1[BLAKE3_KEY_LEN];
 };
 
 struct lima_rasterizer_state {
