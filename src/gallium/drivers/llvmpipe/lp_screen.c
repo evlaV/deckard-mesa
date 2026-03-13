@@ -832,7 +832,7 @@ llvmpipe_fence_finish(struct pipe_screen *screen,
 
 
 static void
-update_cache_sha1_cpu(struct mesa_sha1 *ctx)
+update_cache_sha1_cpu(blake3_hasher *ctx)
 {
    const struct util_cpu_caps_t *cpu_caps = util_get_cpu_caps();
    /*
@@ -848,7 +848,7 @@ update_cache_sha1_cpu(struct mesa_sha1 *ctx)
 static void
 lp_disk_cache_create(struct llvmpipe_screen *screen)
 {
-   struct mesa_sha1 ctx;
+   blake3_hasher ctx;
    unsigned gallivm_perf = gallivm_get_perf_flags();
    unsigned char sha1[BLAKE3_KEY_LEN];
    char cache_id[BLAKE3_HEX_LEN];
