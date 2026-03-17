@@ -98,7 +98,15 @@
 #include "libdisplay-info/cta.h"
 #endif
 
+#include "util/detect_arch.h"
+#include "util/detect_os.h"
+#if DETECT_OS_LINUX && !DETECT_OS_ANDROID && DETECT_ARCH_AARCH64
+#define HAVE_RTKIT_PRIO
+#endif
+
+#if defined(HAVE_RTKIT_PRIO)
 #include "rtkit.h"
+#endif
 
 #if 0
 #define wsi_display_debug(...) fprintf(stderr, __VA_ARGS__)
@@ -2095,6 +2103,7 @@ static drmEventContext event_context = {
 static void *
 wsi_display_wait_thread(void *data)
 {
+#if defined(HAVE_RTKIT_PRIO)
    struct sched_param p;
    memset(&p, 0, sizeof(p));
    p.sched_priority = 80;
@@ -2104,6 +2113,7 @@ wsi_display_wait_thread(void *data)
       assert(system_bus);
       rtkit_make_realtime(system_bus, 0, p.sched_priority);
    }
+#endif
 
    struct wsi_display *wsi = data;
    struct pollfd pollfd = {

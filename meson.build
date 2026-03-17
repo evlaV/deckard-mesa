@@ -1818,10 +1818,10 @@ if dep_libdrm.found()
   endif
 endif
 
-dep_dbus = dependency(
-  'dbus-1',
-  required : true,
-)
+dep_dbus = disabler()
+if host_machine.system() == 'linux' and host_machine.cpu_family() == 'aarch64'
+  dep_dbus = dependency('dbus-1', required : true)
+endif
 
 # Then get each libdrm module
 foreach d : _libdrm_checks
