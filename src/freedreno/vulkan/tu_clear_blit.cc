@@ -2286,6 +2286,9 @@ tu6_clear_lrz(struct tu_cmd_buffer *cmd,
 {
    const struct blit_ops *ops = &r2d_ops<CHIP>;
 
+   trace_start_slow_clear_lrz(&cmd->trace, &cmd->cs, cmd, image->vk.format,
+                              image->vk.extent.width, image->vk.extent.height);
+
    /* It is assumed that LRZ cache is invalidated at this point for
     * the writes here to become visible to LRZ.
     *
@@ -2318,6 +2321,8 @@ tu6_clear_lrz(struct tu_cmd_buffer *cmd,
    cmd->state.cache.flush_bits |=
       TU_CMD_FLAG_CCU_CLEAN_COLOR | TU_CMD_FLAG_CACHE_INVALIDATE |
       TU_CMD_FLAG_WAIT_FOR_IDLE;
+
+   trace_end_slow_clear_lrz(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu6_clear_lrz);
 
@@ -2484,11 +2489,8 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
       src_image->vk.format, info->srcSubresource.aspectMask);
    enum pipe_format dst_format = tu_aspects_to_plane(
       dst_image->vk.format, info->dstSubresource.aspectMask);
-   trace_start_blit(&cmd->trace, cs, cmd,
-                  ops == &r3d_ops<CHIP>,
-                  src_image->vk.format,
-                  dst_image->vk.format,
-                  layers);
+   trace_start_blit_image(&cmd->trace, cs, cmd, ops == &r3d_ops<CHIP>,
+                          src_image->vk.format, dst_image->vk.format, layers);
 
    ops->setup(cmd, cs, src_format, dst_format, info->dstSubresource.aspectMask,
               blit_param, false, dst_image->layout[0].ubwc,
@@ -2540,7 +2542,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
 
    ops->teardown(cmd, cs);
 
-   trace_end_blit(&cmd->trace, cs);
+   trace_end_blit_image(&cmd->trace, cs);
 }
 
 template <chip CHIP>
@@ -2735,6 +2737,8 @@ tu_CmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_image, dst_image, pCopyBufferToImageInfo->dstImage);
    VK_FROM_HANDLE(tu_buffer, src_buffer, pCopyBufferToImageInfo->srcBuffer);
 
+   trace_start_copy_buffer_to_image(&cmd->trace, &cmd->cs, cmd, dst_image->vk.format);
+
    for (unsigned i = 0; i < pCopyBufferToImageInfo->regionCount; ++i)
       tu_copy_buffer_to_image<CHIP>(cmd, src_buffer, dst_image,
                               pCopyBufferToImageInfo->pRegions + i);
@@ -2742,6 +2746,8 @@ tu_CmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
    if (dst_image->lrz_layout.lrz_total_size) {
       tu_disable_lrz<CHIP>(cmd, &cmd->cs, dst_image);
    }
+
+   trace_end_copy_buffer_to_image(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdCopyBufferToImage2);
 
@@ -2940,6 +2946,8 @@ tu_CmdCopyImageToBuffer2(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_image, src_image, pCopyImageToBufferInfo->srcImage);
    VK_FROM_HANDLE(tu_buffer, dst_buffer, pCopyImageToBufferInfo->dstBuffer);
 
+   trace_start_copy_image_to_buffer(&cmd->trace, &cmd->cs, cmd, src_image->vk.format);
+
    bool unaligned_store = false;
    for (unsigned i = 0; i < pCopyImageToBufferInfo->regionCount; ++i)
       tu_copy_image_to_buffer<CHIP>(cmd, src_image, dst_buffer,
@@ -2947,6 +2955,8 @@ tu_CmdCopyImageToBuffer2(VkCommandBuffer commandBuffer,
                               &unaligned_store);
 
    after_buffer_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
+
+   trace_end_copy_image_to_buffer(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdCopyImageToBuffer2);
 
@@ -3298,6 +3308,9 @@ tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_image, src_image, pCopyImageInfo->srcImage);
    VK_FROM_HANDLE(tu_image, dst_image, pCopyImageInfo->dstImage);
 
+   trace_start_copy_image(&cmd->trace, &cmd->cs, cmd, src_image->vk.format,
+                          dst_image->vk.format);
+
    for (uint32_t i = 0; i < pCopyImageInfo->regionCount; ++i) {
       if (src_image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT &&
           dst_image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
@@ -3317,6 +3330,8 @@ tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
    if (dst_image->lrz_layout.lrz_total_size) {
       tu_disable_lrz<CHIP>(cmd, &cmd->cs, dst_image);
    }
+
+   trace_end_copy_image(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdCopyImage2);
 
@@ -3566,6 +3581,8 @@ tu_CmdCopyBuffer2(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_buffer, src_buffer, pCopyBufferInfo->srcBuffer);
    VK_FROM_HANDLE(tu_buffer, dst_buffer, pCopyBufferInfo->dstBuffer);
 
+   trace_start_copy_buffer(&cmd->trace, &cmd->cs, cmd);
+
    /* Choose the largest common block size for all copy regions
     * to prevent WaW hazards when potentially performing non-overlapping
     * unaligned stores through CCU. See handle_buffer_unaligned_store.
@@ -3587,8 +3604,10 @@ tu_CmdCopyBuffer2(VkCommandBuffer commandBuffer,
    }
 
    bool unaligned_store = false;
+   uint32_t total_size = 0;
    for (unsigned i = 0; i < pCopyBufferInfo->regionCount; ++i) {
       const VkBufferCopy2 *region = &pCopyBufferInfo->pRegions[i];
+      total_size += region->size;
       copy_buffer<CHIP>(cmd,
                         vk_buffer_address(&dst_buffer->vk, region->dstOffset),
                         vk_buffer_address(&src_buffer->vk, region->srcOffset),
@@ -3596,6 +3615,8 @@ tu_CmdCopyBuffer2(VkCommandBuffer commandBuffer,
    }
 
    after_buffer_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
+
+   trace_end_copy_buffer(&cmd->trace, &cmd->cs, total_size, unaligned_store);
 }
 TU_GENX(tu_CmdCopyBuffer2);
 
@@ -3617,6 +3638,8 @@ tu_CmdUpdateBuffer(VkCommandBuffer commandBuffer,
       return;
    }
 
+   trace_start_update_buffer(&cmd->trace, &cmd->cs, cmd);
+
    /* As in tu_CmdCopyBuffer2(), the largest viable block size is used. */
    uint64_t alignment_target = dataSize | vk_buffer_address(&buffer->vk, dstOffset);
    uint32_t block_size = 1;
@@ -3631,6 +3654,8 @@ tu_CmdUpdateBuffer(VkCommandBuffer commandBuffer,
                      tmp.iova, dataSize, block_size, &unaligned_store);
 
    after_buffer_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
+
+   trace_end_update_buffer(&cmd->trace, &cmd->cs, dataSize, unaligned_store);
 }
 TU_GENX(tu_CmdUpdateBuffer);
 
@@ -3644,6 +3669,8 @@ tu_cmd_fill_buffer(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    const struct blit_ops *ops = &r2d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
+
+   trace_start_fill_buffer(&cmd->trace, &cmd->cs, cmd);
 
    uint32_t blocks = fillSize / 4;
 
@@ -3673,6 +3700,8 @@ tu_cmd_fill_buffer(VkCommandBuffer commandBuffer,
    ops->teardown(cmd, cs);
 
    after_buffer_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
+
+   trace_end_fill_buffer(&cmd->trace, &cmd->cs, fillSize, unaligned_store);
 }
 
 void
@@ -3716,6 +3745,9 @@ tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
    const struct blit_ops *ops = &r2d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
 
+   trace_start_resolve_image(&cmd->trace, &cmd->cs, cmd, src_image->vk.format,
+                             dst_image->vk.format);
+
    enum pipe_format src_format =
       vk_format_to_pipe_format(src_image->vk.format);
    enum pipe_format dst_format =
@@ -3746,6 +3778,8 @@ tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
    }
 
    ops->teardown(cmd, cs);
+
+   trace_end_resolve_image(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdResolveImage2);
 
@@ -4101,6 +4135,8 @@ tu_CmdClearColorImage(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_image, image, image_h);
 
+   trace_start_clear_color_image(&cmd->trace, &cmd->cs, cmd, image->vk.format);
+
    bool use_generic_clear = use_generic_clear_for_image_clear(cmd, image);
    if (use_generic_clear) {
       /* Generic clear doesn't go through CCU (or other caches). */
@@ -4124,6 +4160,8 @@ tu_CmdClearColorImage(VkCommandBuffer commandBuffer,
       cmd->state.cache.flush_bits |= TU_CMD_FLAG_BLIT_CACHE_CLEAN;
       tu_emit_cache_flush<CHIP>(cmd);
    }
+
+   trace_end_clear_color_image(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdClearColorImage);
 
@@ -4138,6 +4176,9 @@ tu_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer,
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_image, image, image_h);
+
+   trace_start_clear_depth_stencil_image(&cmd->trace, &cmd->cs, cmd,
+                                         image->vk.format);
 
    bool use_generic_clear = use_generic_clear_for_image_clear(cmd, image);
    if (use_generic_clear) {
@@ -4181,6 +4222,8 @@ tu_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer,
    }
 
    tu_lrz_clear_depth_image<CHIP>(cmd, image, pDepthStencil, rangeCount, pRanges);
+
+   trace_end_clear_depth_stencil_image(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_CmdClearDepthStencilImage);
 
