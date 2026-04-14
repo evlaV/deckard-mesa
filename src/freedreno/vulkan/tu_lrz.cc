@@ -9,6 +9,7 @@
 #include "tu_cmd_buffer.h"
 #include "tu_cs.h"
 #include "tu_image.h"
+#include "tu_tracepoints.h"
 
 #include "common/freedreno_gpu_event.h"
 #include "common/freedreno_lrz.h"
@@ -544,7 +545,10 @@ tu_lrz_tiling_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    }
 
    if (!lrz->fast_clear) {
+      trace_start_slow_clear_lrz(&cmd->trace, &cmd->cs, cmd, lrz->image_view->image->vk.format,
+                                 lrz->image_view->image->vk.extent.width, lrz->image_view->image->vk.extent.height);
       tu6_clear_lrz<CHIP>(cmd, cs, lrz->image_view->image, &lrz->depth_clear_value);
+      trace_end_slow_clear_lrz(&cmd->trace, &cmd->cs);
       /* Even though we disable fast-clear we still have to dirty
        * fast-clear buffer because both secondary cmdbufs and following
        * renderpasses won't know that fast-clear is disabled.
@@ -883,6 +887,9 @@ tu_disable_lrz(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    if (!image->lrz_layout.lrz_total_size)
       return;
 
+   trace_start_disable_lrz(&cmd->trace, &cmd->cs, cmd, image->vk.format,
+                           image->vk.extent.width, image->vk.extent.height);
+
    uint64_t lrz_iova = image->iova + image->lrz_layout.lrz_offset;
 
    /* Synchronize writes in BV with subsequent render passes against this
@@ -928,6 +935,8 @@ tu_disable_lrz(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_cs_emit_qw(cs, TU_ONCHIP_CB_RESLIST_OVERFLOW);
       tu_cs_emit(cs, 0); /* value */
    }
+
+   trace_end_disable_lrz(&cmd->trace, &cmd->cs);
 }
 TU_GENX(tu_disable_lrz);
 
