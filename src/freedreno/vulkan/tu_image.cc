@@ -622,8 +622,7 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
        * LRZ fast clears.
        */
       struct fdl_lrz_fdm_extra_size extra_size = { 0, 0 };
-      if (image->vk.create_flags &
-          VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT) {
+      if (true) {
          extra_size = fdl6_lrz_get_max_fdm_extra_size<CHIP>(
             device->physical_device->info, image->layout[0].width0,
             image->layout[0].height0, image->vk.samples,
