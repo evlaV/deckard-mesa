@@ -2403,8 +2403,38 @@ tu6_init_static_regs_lpac(struct tu_device *dev, struct tu_cs *cs)
          break;
 
       uint32_t value = magic_reg.value;
-      if (magic_reg.reg == REG_A6XX_UCHE_CACHE_WAYS)
+      switch (magic_reg.reg) {
+         case REG_A6XX_UCHE_CACHE_WAYS:
+         case REG_A7XX_UCHE_UNKNOWN_0E10:
+         case REG_A7XX_UCHE_UNKNOWN_0E11:
+         case REG_A6XX_SP_CHICKEN_BITS:
+         case REG_A7XX_SP_CHICKEN_BITS_1:           
+         case REG_A7XX_SP_CHICKEN_BITS_2:
+         case REG_A7XX_SP_CHICKEN_BITS_3:
+         case REG_A7XX_SP_HLSQ_DBG_ECO_CNTL:
+         case REG_A6XX_SP_DBG_ECO_CNTL:
+         case REG_A7XX_VFD_DBG_ECO_CNTL:
+            
+         // case REG_A7XX_SP_ISDB_CNTL:
+         // case REG_A7XX_SP_UNKNOWN_AE6A:
+         // case REG_A7XX_SP_HLSQ_TIMEOUT_THRESHOLD_DP:
+         // case REG_A7XX_SP_HLSQ_DBG_ECO_CNTL_1:
+         // case REG_A7XX_SP_HLSQ_MODE_CNTL:
+         // case REG_A7XX_SP_UNKNOWN_AB01:
+         // case REG_A7XX_SP_UNKNOWN_AB22:
+         // case REG_A7XX_SP_UNKNOWN_B310:
+         // case REG_A7XX_SP_UNKNOWN_0CE2:
+         // case 0x0CE3:
+         // case REG_A7XX_SP_UNKNOWN_0CE4:
+         // case 0x0CE5:
+         // case REG_A7XX_SP_UNKNOWN_0CE6:
+         // case 0x0CE7:
+         // case REG_A7XX_PC_UNKNOWN_9E24:
             tu_cs_emit_write_reg(cs, magic_reg.reg, value);
+            break;
+         default:
+            break;
+      }
    }
 
    tu_cs_emit_regs(cs, A6XX_SP_MODE_CNTL(.constant_demotion_enable = true,
