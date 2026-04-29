@@ -806,6 +806,7 @@ struct tu_cmd_buffer
    bool vsc_initialized;
 
    bool prev_fsr_is_null;
+   bool requires_gfx;
 };
 
 struct vk_device_dispatch_table;
@@ -847,6 +848,18 @@ tu_attachment_gmem_offset_stencil(struct tu_cmd_buffer *cmd,
 
 VkResult tu_cmd_buffer_begin(struct tu_cmd_buffer *cmd_buffer,
                              const VkCommandBufferBeginInfo *pBeginInfo);
+
+static inline bool
+tu_cmd_is_on_lpac_queue(const struct tu_cmd_buffer *cmd)
+{
+   return cmd->queue_family_index == TU_QF_COMPUTE && !cmd->requires_gfx;
+}
+
+static inline bool
+tu_cmd_is_on_gfx_queue(const struct tu_cmd_buffer *cmd)
+{
+   return !tu_cmd_is_on_lpac_queue(cmd);
+}
 
 template <chip CHIP>
 void

@@ -416,7 +416,7 @@ tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
                  struct tu_cs *cs,
                  struct tu_cache_state *cache)
 {
-   assert(cmd_buffer->queue_family_index == TU_QF_GENERAL);
+   assert(tu_cmd_is_on_gfx_queue(cmd_buffer));
    BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
    cache->flush_bits = 0;
 
@@ -610,7 +610,7 @@ tu_emit_cache_flush(struct tu_cmd_buffer *cmd_buffer)
    struct tu_cache_state *cache = &cmd_buffer->state.cache;
    BITMASK_ENUM(tu_cmd_flush_bits) flushes = cache->flush_bits;
 
-   if (cmd_buffer->queue_family_index == TU_QF_GENERAL)
+   if (tu_cmd_is_on_gfx_queue(cmd_buffer))
       tu6_emit_flushes<CHIP>(cmd_buffer, cs, cache);
    else {
       tu6_emit_flushes_lpac<CHIP>(cmd_buffer, cs, cache);
@@ -4639,6 +4639,7 @@ tu_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
 
    cmd_buffer->vsc_initialized = false;
    cmd_buffer->prev_fsr_is_null = false;
+   cmd_buffer->requires_gfx = false;
 
    ralloc_free(cmd_buffer->patchpoints_ctx);
    ralloc_free(cmd_buffer->pre_chain.patchpoints_ctx);
@@ -5706,7 +5707,7 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
       tu_emit_cache_flush_renderpass<CHIP>(cmd_buffer);
    } else {
       tu_clean_all_pending(&cmd_buffer->state.cache);
-      if (cmd_buffer->queue_family_index == TU_QF_GENERAL)
+      if (tu_cmd_is_on_gfx_queue(cmd_buffer))
          cmd_buffer->state.cache.flush_bits |=
             TU_CMD_FLAG_CCU_CLEAN_COLOR |
             TU_CMD_FLAG_CCU_CLEAN_DEPTH;
@@ -6941,6 +6942,10 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
 
          cmd->state.total_renderpasses += secondary->state.total_renderpasses;
          cmd->state.total_dispatches += secondary->state.total_dispatches;
+
+         /* Propagate gfx fallback */
+         if (secondary->requires_gfx)
+            cmd->requires_gfx = true;
       }
 
       cmd->state.index_size = secondary->state.index_size; /* for restart index update */
