@@ -6843,6 +6843,10 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
 
          cmd->state.total_renderpasses += secondary->state.total_renderpasses;
          cmd->state.total_dispatches += secondary->state.total_dispatches;
+
+         /* Propagate gfx fallback */
+         if (secondary->requires_gfx)
+            cmd->requires_gfx = true;
       }
 
       cmd->state.index_size = secondary->state.index_size; /* for restart index update */

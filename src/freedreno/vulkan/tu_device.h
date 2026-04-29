@@ -435,6 +435,11 @@ struct tu_device
     */
    struct u_vector zombie_vmas;
 
+
+   struct tu_cs init_cs;
+
+   struct tu_cs init_lpac_cs;
+
    struct tu_cs sub_cs;
 
    /* Command streams to set pass index to a scratch reg */

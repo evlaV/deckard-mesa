@@ -774,6 +774,7 @@ struct tu_cmd_buffer
    bool vsc_initialized;
 
    bool prev_fsr_is_null;
+   bool requires_gfx;
 };
 VK_DEFINE_HANDLE_CASTS(tu_cmd_buffer, vk.base, VkCommandBuffer,
                        VK_OBJECT_TYPE_COMMAND_BUFFER)

@@ -419,6 +419,7 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
    bool u_trace_enabled = u_trace_should_process(&queue->device->trace_context);
    struct util_dynarray dump_cmds;
    struct tu_cs *autotune_cs = NULL;
+   bool fallback_to_gfx = false;
 
    if (vk_submit->buffer_bind_count ||
        vk_submit->image_bind_count ||
@@ -477,6 +478,9 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
    for (uint32_t i = 0; i < cmdbuf_count; i++) {
       struct tu_cmd_buffer *cmd_buffer = cmd_buffers[i];
       struct tu_cs *cs = &cmd_buffer->cs;
+
+      if (cmd_buffer->requires_gfx)
+         fallback_to_gfx = true;
 
       if (perf_pass_index != ~0) {
          struct tu_cs_entry *perf_cs_entry =
@@ -554,7 +558,8 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
 #endif
 
    result =
-      tu_queue_submit(queue, submit, vk_submit->waits, vk_submit->wait_count,
+      tu_queue_submit(fallback_to_gfx ? queue->fallback_gfx : queue, submit,
+                      vk_submit->waits, vk_submit->wait_count,
                       vk_submit->signals, vk_submit->signal_count,
                       u_trace_submission_data);
 
@@ -603,27 +608,13 @@ fail_create_submit:
    return result;
 }
 
-VkResult
-tu_queue_init(struct tu_device *device,
-              struct tu_queue *queue,
-              enum tu_queue_type type,
-              const VkQueueGlobalPriorityKHR global_priority,
-              int idx,
-              const VkDeviceQueueCreateInfo *create_info,
-              struct tu_queue *shared_queue)
+static VkResult
+tu_queue_init_inner(struct tu_device *device,
+                    struct tu_queue *queue,
+                    enum tu_queue_type type,
+                    int priority,
+		    struct tu_queue *shared_queue)
 {
-   const int priority = tu_get_submitqueue_priority(
-         device->physical_device, global_priority, type,
-         device->vk.enabled_features.globalPriorityQuery);
-   if (priority < 0) {
-      return vk_startup_errorf(device->instance, VK_ERROR_INITIALIZATION_FAILED,
-                               "invalid global priority");
-   }
-
-   VkResult result = vk_queue_init(&queue->vk, &device->vk, create_info, idx);
-   if (result != VK_SUCCESS)
-      return result;
-
    queue->device = device;
    queue->type = type;
    queue->fence = -1;
@@ -651,6 +642,44 @@ tu_queue_init(struct tu_device *device,
       vk_queue_finish(&queue->vk);
       return vk_startup_errorf(device->instance, VK_ERROR_INITIALIZATION_FAILED,
                                "submitqueue create failed");
+   }
+
+   return VK_SUCCESS;
+}
+
+VkResult
+tu_queue_init(struct tu_device *device,
+              struct tu_queue *queue,
+              enum tu_queue_type type,
+              const VkQueueGlobalPriorityKHR global_priority,
+              int idx,
+              const VkDeviceQueueCreateInfo *create_info,
+              struct tu_queue *shared_queue)
+{
+   const int priority = tu_get_submitqueue_priority(
+         device->physical_device, global_priority, type,
+         device->vk.enabled_features.globalPriorityQuery);
+   if (priority < 0) {
+      return vk_startup_errorf(device->instance, VK_ERROR_INITIALIZATION_FAILED,
+                               "invalid global priority");
+   }
+
+   VkResult result = vk_queue_init(&queue->vk, &device->vk, create_info, idx);
+   if (result != VK_SUCCESS)
+      return result;
+
+   VkResult ret = tu_queue_init_inner(device, queue, type, priority, shared_queue);
+
+   if (ret)
+      return ret;
+
+   if (type == TU_QUEUE_COMPUTE) {
+      queue->fallback_gfx = (struct tu_queue*) calloc(1, sizeof(struct tu_queue));
+
+      VkResult ret = tu_queue_init_inner(device, queue->fallback_gfx, TU_QUEUE_GFX, priority, NULL);
+
+      if (ret)
+         return ret;
    }
 
    return VK_SUCCESS;
