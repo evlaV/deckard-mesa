@@ -12,6 +12,7 @@
 
 #include "tu_common.h"
 
+#include "vk_semaphore.h"
 enum tu_queue_type
 {
    TU_QUEUE_GFX,
@@ -34,9 +35,15 @@ struct tu_queue
    uint32_t sparse_syncobj, gfx_syncobj;
    uint64_t sparse_timepoint, gfx_timepoint;
 
+   struct vk_sync *gfx_semaphore;
+   uint64_t gfx_semaphore_timepoint;
+
    unsigned render_pass_idx;
 
    int fence;           /* timestamp/fence of the last queue submission */
+
+   struct tu_queue *fallback_gfx;
+   bool is_fallback;
 };
 VK_DEFINE_HANDLE_CASTS(tu_queue, vk.base, VkQueue, VK_OBJECT_TYPE_QUEUE)
 
