@@ -273,6 +273,8 @@ struct tu_instance
 
    int32_t override_graphics_shader_version;
    int32_t override_compute_shader_version;
+
+   bool allow_concurrent_binning;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)
