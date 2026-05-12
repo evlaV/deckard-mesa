@@ -404,6 +404,7 @@ a6xx_gen3 = GPUProps(
         # HW seem to support this, but prop driver doesn't enable it,
         # Be safe and don't enable it either.
         # supports_linear_mipmap_threshold_in_blocks = True,
+        round_robin_errata = True,
     )
 
 a6xx_gen4 = GPUProps(
@@ -445,6 +446,7 @@ a6xx_gen4 = GPUProps(
         # HW seem to support this, but prop driver doesn't enable it,
         # Be safe and don't enable it either.
         # supports_linear_mipmap_threshold_in_blocks = True,
+        round_robin_errata = True,
     )
 
 add_gpus([
@@ -994,6 +996,8 @@ a7xx_base = GPUProps(
         has_pred_bit = True,
         has_pc_dgen_so_cntl = True,
         has_eolm_eogm = True,
+
+        round_robin_errata = True,
     )
 
 a7xx_gen1 = GPUProps(
@@ -1440,6 +1444,7 @@ a8xx_base = GPUProps(
         has_rt_workaround = False,
         supports_double_threadsize = False,
         has_dual_wave_dispatch = True,
+        round_robin_errata = False,
     )
 
 # For a8xx, the chicken bit and most other non-ctx reg
