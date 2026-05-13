@@ -63,7 +63,8 @@ tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
     * shader hash instead, since the compiler is only created with the logical
     * device.
     */
-   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS);
+   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS) |
+      (TU_DEBUG(COMPUTE_ROUND_ROBIN) << 1u);
    uint16_t family = fd_dev_gpu_id(&device->dev_id);
 
    memset(uuid, 0, VK_UUID_SIZE);
