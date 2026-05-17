@@ -72,6 +72,10 @@ NO_ENQUEUE_COMMANDS = [
     'CmdSetPerformanceOverrideINTEL',
 
     'CmdBuildAccelerationStructuresIndirectKHR',
+
+    'CmdBeginGpaSessionAMD',
+    'CmdEndGpaSessionAMD',
+    'CmdBeginGpaSampleAMD',
 ]
 
 TEMPLATE_H = Template(COPYRIGHT + """\
