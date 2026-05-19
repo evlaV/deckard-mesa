@@ -6522,6 +6522,32 @@ tu_CmdExecuteCommands(VkCommandBuffer commandBuffer,
          cmd->state.total_dispatches += secondary->state.total_dispatches;
       }
 
+#ifdef HAVE_PERFETTO
+      /* Propagate viewport/scissor state so that we can emit the correct
+       * state for Perfetto's binInfo. Avoid setting dirty flags to prevent
+       * unnecessary GPU command re-emission.
+       */
+      if (BITSET_TEST(secondary->vk.dynamic_graphics_state.set,
+                      MESA_VK_DYNAMIC_VP_VIEWPORT_COUNT)) {
+         const struct vk_dynamic_graphics_state *sec =
+            &secondary->vk.dynamic_graphics_state;
+         cmd->vk.dynamic_graphics_state.vp.viewport_count =
+            sec->vp.viewport_count;
+         typed_memcpy(cmd->vk.dynamic_graphics_state.vp.viewports,
+               sec->vp.viewports, sec->vp.viewport_count);
+      }
+
+      if (BITSET_TEST(secondary->vk.dynamic_graphics_state.set,
+                      MESA_VK_DYNAMIC_VP_SCISSOR_COUNT)) {
+         const struct vk_dynamic_graphics_state *sec =
+            &secondary->vk.dynamic_graphics_state;
+         cmd->vk.dynamic_graphics_state.vp.scissor_count =
+            sec->vp.scissor_count;
+         typed_memcpy(cmd->vk.dynamic_graphics_state.vp.scissors,
+               sec->vp.scissors, sec->vp.scissor_count);
+      }
+#endif
+
       cmd->state.index_size = secondary->state.index_size; /* for restart index update */
    }
    cmd->state.dirty = ~0u; /* TODO: set dirty only what needs to be */
