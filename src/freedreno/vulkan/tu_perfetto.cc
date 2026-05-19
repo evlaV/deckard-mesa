@@ -659,11 +659,17 @@ trace_payload_as_extra_end_render_pass_with_bin_coordinates(
       sprintf(buff, "viewports[%" PRIu32 "]", i);
       data->set_name(buff);
 
+      float y;
+      if (viewport.height >= 0)
+         y = viewport.y;
+      else
+         y = viewport.y + viewport.height;
+
       // TODO: Convert to uint32_t ?
       sprintf(buff, "((%f, %f), (%f, %f))",
-              viewport.x, viewport.y, 
+              viewport.x, y, 
               viewport.x + viewport.width - 1,
-              viewport.y + fabs(viewport.height) - 1);
+              y + fabs(viewport.height) - 1);
       data->set_value(buff);
    }
 
