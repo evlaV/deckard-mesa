@@ -210,6 +210,18 @@ unsigned ir3_nir_max_offset_shift(nir_intrinsic_instr *intr, const void *data);
 gl_system_value
 ir3_nir_intrinsic_barycentric_sysval(nir_intrinsic_instr *intr);
 
+/* Returns true if an intrinsic reading memory can be safely moved into the
+ * preamble. It's assumed the intrinsic is already reorderable. Either it must
+ * be always executed, or it must be safe to execute even if the original shader
+ * never executed it (i.e. it must be speculatable).
+ */
+static inline bool
+ir3_nir_is_prefetchable(nir_intrinsic_instr *intr)
+{
+   return intr->instr.block->cf_node.parent->type == nir_cf_node_function ||
+      (nir_intrinsic_access(intr) & ACCESS_CAN_SPECULATE);
+}
+
 ENDC;
 
 #endif /* IR3_NIR_H_ */
