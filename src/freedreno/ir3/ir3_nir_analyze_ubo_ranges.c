@@ -69,6 +69,7 @@ get_ubo_info(nir_intrinsic_instr *instr, struct ir3_ubo_info *ubo)
          return true;
       }
    }
+   ubo->can_speculate = nir_intrinsic_access(instr) & ACCESS_CAN_SPECULATE;
    return false;
 }
 
@@ -409,6 +410,7 @@ copy_global_to_uniform(nir_shader *nir, struct ir3_ubo_analysis_state *state)
          unsigned const_offset = range->offset / 4 + offset / 4;
          if (const_offset < 256) {
             nir_copy_global_to_uniform_ir3(b, base,
+                                           .access = range->ubo.can_speculate ? ACCESS_CAN_SPECULATE : 0,
                                            .base = start + offset,
                                            .range_base = const_offset,
                                            .range = 1);
@@ -418,7 +420,8 @@ copy_global_to_uniform(nir_shader *nir, struct ir3_ubo_analysis_state *state)
              */
             nir_def *load =
                nir_load_global_ir3(b, 4, 32, base,
-                                   nir_imm_int(b, (start + offset) / 4));
+                                   nir_imm_int(b, (start + offset) / 4),
+                                   .access = range->ubo.can_speculate ? ACCESS_CAN_SPECULATE : 0);
             nir_store_const_ir3(b, load, .base = const_offset);
          }
       }
@@ -455,6 +458,8 @@ copy_ubo_to_uniform(nir_shader *nir, const struct ir3_const_state *const_state)
       for (unsigned offset = 0; offset < size; offset += 256) {
          nir_copy_ubo_to_uniform_ir3(b, ubo, nir_imm_int(b, range->start / 16 +
                                                          offset),
+                                     .access = range->ubo.can_speculate ?
+                                     ACCESS_CAN_SPECULATE : 0,
                                      .base = range->offset / 4 + offset * 4,
                                      .range = MIN2(size - offset, 256));
       }
@@ -474,7 +479,12 @@ instr_is_load_ubo(nir_instr *instr)
    /* nir_lower_ubo_vec4 happens after this pass. */
    assert(op != nir_intrinsic_load_ubo_vec4);
 
-   return op == nir_intrinsic_load_ubo;
+   if (op != nir_intrinsic_load_ubo)
+      return false;
+
+   return instr->block->cf_node.parent->type == nir_cf_node_function ||
+      (nir_intrinsic_access(nir_instr_as_intrinsic(instr)) &
+       ACCESS_CAN_SPECULATE);
 }
 
 static bool
