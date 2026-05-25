@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 
+#include "util/perf/cpu_trace.h"
 #include "util/rand_xor.h"
 
 #define XXH_INLINE_ALL
@@ -1043,15 +1044,25 @@ struct tu_autotune::rp_history {
          render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;
 
          const VkExtent2D &extent = cmd_state->render_areas[0].extent;
+         float draw_bandwidth_per_sample =
+            rp_state->drawcall_count ? (float) rp_state->drawcall_bandwidth_per_sample_sum / rp_state->drawcall_count
+                                     : 0.0f;
+         MESA_TRACE_SCOPE(
+            "tu_autotune bandwidth hash=%016" PRIx64 " draws=%" PRIu32 " selecting=%s "
+            "mean_samples=%" PRIu64 " draw_bandwidth_per_sample=%.2f "
+            "total_draw_call_bandwidth=%" PRIu64 " render_area=%" PRIu32 "x%" PRIu32 " sysmem_bpp=%" PRIu32
+            " gmem_bpp=%" PRIu32 " sysmem_bandwidth=%" PRIu64 " gmem_bandwidth=%" PRIu64,
+            history.hash, rp_state->drawcall_count, render_mode_str(mode), mean_samples, draw_bandwidth_per_sample,
+            total_draw_call_bandwidth, extent.width, extent.height, pass->sysmem_bandwidth_per_pixel,
+            pass->gmem_bandwidth_per_pixel, sysmem_bandwidth, gmem_bandwidth);
          at_log_bandwidth_h(
             "%" PRIu32 " selecting %s\n"
             "   mean_samples=%" PRIu64 ", draw_bandwidth_per_sample=%.2f, total_draw_call_bandwidth=%" PRIu64
             ", render_areas[0]=%" PRIu32 "x%" PRIu32 ", sysmem_bandwidth_per_pixel=%" PRIu32
             ", gmem_bandwidth_per_pixel=%" PRIu32 ", sysmem_bandwidth=%" PRIu64 ", gmem_bandwidth=%" PRIu64,
-            history.hash, rp_state->drawcall_count, render_mode_str(mode), mean_samples,
-            (float) rp_state->drawcall_bandwidth_per_sample_sum / rp_state->drawcall_count, total_draw_call_bandwidth,
-            extent.width, extent.height, pass->sysmem_bandwidth_per_pixel, pass->gmem_bandwidth_per_pixel,
-            sysmem_bandwidth, gmem_bandwidth);
+            history.hash, rp_state->drawcall_count, render_mode_str(mode), mean_samples, draw_bandwidth_per_sample,
+            total_draw_call_bandwidth, extent.width, extent.height, pass->sysmem_bandwidth_per_pixel,
+            pass->gmem_bandwidth_per_pixel, sysmem_bandwidth, gmem_bandwidth);
 
          return mode;
       }
@@ -1086,6 +1097,9 @@ struct tu_autotune::rp_history {
          auto &sysmem_ema = history.sysmem_rp_average;
          auto &gmem_ema = history.gmem_rp_average;
          uint32_t sysmem_prob = sysmem_probability.load(std::memory_order_relaxed);
+         uint32_t old_sysmem_prob = sysmem_prob;
+         bool old_locked = locked;
+         bool old_should_reset = should_reset;
          if (immediate) {
             /* Try to immediately resolve the probability, this is useful for CI running a single trace of frames where
              * the probabilites aren't expected to change from run to run. This environment also gives us a best case
@@ -1168,6 +1182,16 @@ struct tu_autotune::rp_history {
 
          sysmem_probability.store(sysmem_prob, std::memory_order_relaxed);
 
+         bool reset_to_normal = old_should_reset && !should_reset;
+         if (sysmem_prob != old_sysmem_prob || locked != old_locked || reset_to_normal) {
+            MESA_TRACE_SCOPE("tu_autotune profiled hash=%016" PRIx64 " immediate=%u avg_gmem=%" PRIu64
+                             "us gmem_samples=%zu avg_sysmem=%" PRIu64 "us sysmem_samples=%zu"
+                             " probability=%" PRIu32 " old_probability=%" PRIu32 " locked=%u reset=%u",
+                             history.hash, immediate, ticks_to_us(gmem_ema.get()), gmem_ema.count,
+                             ticks_to_us(sysmem_ema.get()), sysmem_ema.count, sysmem_prob, old_sysmem_prob, locked,
+                             reset_to_normal);
+         }
+
          at_log_profiled_h("update%s avg_gmem: %" PRIu64 " us (%" PRIu64 " samples) avg_sysmem: %" PRIu64
                            " us (%" PRIu64 " samples) = sysmem_probability: %" PRIu32 " locked: %u",
                            history.hash, immediate ? "-imm" : "", ticks_to_us(gmem_ema.get()), gmem_ema.count,
@@ -1183,6 +1207,11 @@ struct tu_autotune::rp_history {
 
          at_log_profiled_h("%" PRIu32 "%% sysmem chance, using %s", history.hash, l_sysmem_probability,
                            render_mode_str(mode));
+
+         if (locked || l_sysmem_probability == 0 || l_sysmem_probability == PROBABILITY_MAX) {
+            MESA_TRACE_SCOPE("tu_autotune profiled hash=%016" PRIx64 " probability=%" PRIu32 " locked=%u selecting=%s",
+                             history.hash, l_sysmem_probability, locked, render_mode_str(mode));
+         }
 
          return mode;
       }
@@ -1237,6 +1266,9 @@ struct tu_autotune::rp_history {
 
                   at_log_preempt_h("high gmem tile duration %" PRIu64 ", marking as latency sensitive", history.hash,
                                    avg_gmem_tile);
+                  MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64
+                                   " event=tile_latency_sensitive avg_gmem_tile=%" PRIu64 "us threshold=%" PRIu64 "us",
+                                   history.hash, ticks_to_us(avg_gmem_tile), ticks_to_us(TARGET_THRESHOLD));
                }
             } else {
                uint32_t l_tile_size_divisor = tile_size_divisor.load(std::memory_order_relaxed);
@@ -1270,6 +1302,9 @@ struct tu_autotune::rp_history {
                    * can switch it back to non-latency sensitive.
                    */
                   latency_risk.store(false, std::memory_order_relaxed);
+                  MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64
+                                   " event=tile_latency_cleared avg_gmem_tile=%" PRIu64 "us threshold=%" PRIu64 "us",
+                                   history.hash, ticks_to_us(avg_gmem_tile), ticks_to_us(TARGET_THRESHOLD));
                }
 
                if (delta != 0) {
@@ -1279,6 +1314,10 @@ struct tu_autotune::rp_history {
                   uint32_t new_tile_size_divisor = l_tile_size_divisor + delta;
                   at_log_preempt_h("updating tile size divisor: %" PRIu32 " -> %" PRIu32, history.hash,
                                    l_tile_size_divisor, new_tile_size_divisor);
+                  MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " event=divisor old=%" PRIu32 " new=%" PRIu32
+                                   " avg_gmem_tile=%" PRIu64 "us threshold=%" PRIu64 "us",
+                                   history.hash, l_tile_size_divisor, new_tile_size_divisor, ticks_to_us(avg_gmem_tile),
+                                   ticks_to_us(TARGET_THRESHOLD));
 
                   tile_size_divisor.store(new_tile_size_divisor, std::memory_order_relaxed);
 
@@ -1374,6 +1413,7 @@ tu_autotune::find_or_create_rp_history(const rp_key &key)
    if (it != rp_histories.end())
       return it->second; /* Another thread created the history while we were waiting for the lock. */
    auto history = rp_histories.emplace(std::make_pair(key, key.hash));
+   MESA_TRACE_SCOPE("tu_autotune history event=create hash=%016" PRIx64, key.hash);
    return rp_history_handle(history.first->second);
 }
 
@@ -1431,6 +1471,8 @@ tu_autotune::reap_old_rp_histories()
    }
 
    at_log_base("reaped old RP histories %zu -> %zu", og_size, rp_histories.size());
+   MESA_TRACE_SCOPE("tu_autotune history event=reap old_size=%zu new_size=%zu purged=%zu", og_size, rp_histories.size(),
+                    og_size - rp_histories.size());
 }
 
 std::shared_ptr<tu_autotune::rp_entry_batch>
@@ -1469,10 +1511,17 @@ tu_autotune::cleanup_latency_tracking()
       /* Check if corresponding rp_history has cleared its latency_risk flag. */
       if (tracker.info.seen_latency_spike) {
          auto history_it = rp_histories.find(rp_key { rp_hash });
-         if (history_it == rp_histories.end() || !history_it->second.preempt_optimize.is_latency_sensitive() ||
-             history_it->second.last_use_ts.load(std::memory_order_relaxed) + FORGET_ABOUT_DELAY_AFTER_NS < now) {
+         bool missing_history = history_it == rp_histories.end();
+         bool no_longer_sensitive = !missing_history && !history_it->second.preempt_optimize.is_latency_sensitive();
+         bool stale =
+            !missing_history &&
+            history_it->second.last_use_ts.load(std::memory_order_relaxed) + FORGET_ABOUT_DELAY_AFTER_NS < now;
+         if (missing_history || no_longer_sensitive || stale) {
             tracker.info.seen_latency_spike = false;
             at_log_preempt_h("clearing latency-sensitive flag", rp_hash);
+            MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64
+                             " event=clear missing_history=%u no_longer_sensitive=%u stale=%u",
+                             rp_hash, missing_history, no_longer_sensitive, stale);
          }
       }
 
@@ -1512,10 +1561,20 @@ tu_autotune::process_entries()
          break; /* Entries are allocated in sequence, next will be newer and
                    also fail so we can just directly break out of the loop. */
 
+      size_t processed_entries = batch->entries.size();
+      uint32_t batch_fence = batch->fence;
+      size_t active_batch_count = active_batches.size();
+
       process_batch_preempt_data(*batch);
 
       for (auto &entry : batch->entries)
          entry->history->process(*entry, *this);
+
+      if (processed_entries) {
+         MESA_TRACE_SCOPE("tu_autotune history event=process_entries current_fence=%" PRIu32 " batch_fence=%" PRIu32
+                          " entries=%zu active_batches=%zu",
+                          current_fence, batch_fence, processed_entries, active_batch_count);
+      }
 
       batch->mark_inactive();
       active_batches.pop_front();
@@ -1563,6 +1622,12 @@ tu_autotune::process_batch_preempt_data(rp_entry_batch &batch)
                     gpu_data.preemption_latency_rp_hash, delay_us, gpu_data.always_count_delta, gpu_data.aon_delta,
                     delay_aon_ticks, gpu_data.preemption_latency,
                     (gpu_data.always_count_delta * ALWAYS_ON_FREQUENCY_HZ) / gpu_data.aon_delta / 1'000'000);
+   uint64_t estimated_cp_mhz = (gpu_data.always_count_delta * ALWAYS_ON_FREQUENCY_HZ) / gpu_data.aon_delta / 1'000'000;
+   MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " event=spike delay=%" PRIu64
+                    "us preemption_latency=%" PRIu64 " always_count_delta=%" PRIu64 " aon_delta=%" PRIu64
+                    " estimated_cp_mhz=%" PRIu64,
+                    gpu_data.preemption_latency_rp_hash, delay_us, gpu_data.preemption_latency,
+                    gpu_data.always_count_delta, gpu_data.aon_delta, estimated_cp_mhz);
 
    std::scoped_lock lock(rp_latency_mutex);
    uint64_t now = os_time_get_nano();
@@ -1582,6 +1647,8 @@ tu_autotune::process_batch_preempt_data(rp_entry_batch &batch)
       tracker.info.mark_rp_as_sensitive = true;
       at_log_preempt_h("marking RP as latency-sensitive after %zu long preemption events",
                        gpu_data.preemption_latency_rp_hash, tracker.recent_latency_timestamps_ns.size());
+      MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " event=promote latency_events=%zu delay=%" PRIu64 "us",
+                       gpu_data.preemption_latency_rp_hash, tracker.recent_latency_timestamps_ns.size(), delay_us);
    } else {
       tracker.info.seen_latency_spike = true;
       at_log_preempt_h("RP preemption latency spike seen, but not marking as sensitive yet at %zu events",
@@ -1790,16 +1857,23 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
     * SINGLE_PRIM_MODE(FLUSH_PER_OVERLAP_AND_OVERWRITE) or even SINGLE_PRIM_MODE(FLUSH), then that should cause
     * significantly increased SYSMEM bandwidth (though we haven't quantified it).
     */
-   if (rp_state->sysmem_single_prim_mode)
+   if (rp_state->sysmem_single_prim_mode) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=GMEM "
+                       "reason=sysmem_single_prim_mode",
+                       key_opt ? key_opt->hash : 0, rp_state->drawcall_count);
       return render_mode::GMEM;
+   }
 
    /* If the user is using a fragment density map, then this will cause less FS invocations with GMEM, which has a
     * hard-to-measure impact on performance because it depends on how heavy the FS is in addition to how many
     * invocations there were and the density. Let's assume the user knows what they're doing when they added the map,
     * because if SYSMEM is actually faster then they could've just not used the fragment density map.
     */
-   if (pass->has_fdm)
+   if (pass->has_fdm) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=GMEM reason=fdm",
+                       key_opt ? key_opt->hash : 0, rp_state->drawcall_count);
       return render_mode::GMEM;
+   }
 
    /* SYSMEM is always a safe default mode when we can't fully engage the autotuner. From testing, we know that for an
     * incorrect decision towards SYSMEM tends to be far less impactful than an incorrect decision towards GMEM, which
@@ -1830,8 +1904,24 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    bool ignore_small_rp = !config.test(mod_flag::TUNE_SMALL) && rp_state->drawcall_count < 5 &&
                           (!latency_info || !latency_info->seen_latency_spike);
 
-   if (!enabled || simultaneous_use || ignore_small_rp)
+   if (!enabled) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=SYSMEM reason=disabled",
+                       key_opt ? key_opt->hash : 0, rp_state->drawcall_count);
       return default_mode;
+   }
+
+   if (simultaneous_use) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32
+                       " selecting=SYSMEM reason=simultaneous_use",
+                       key_opt ? key_opt->hash : 0, rp_state->drawcall_count);
+      return default_mode;
+   }
+
+   if (ignore_small_rp) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=SYSMEM reason=ignore_small_rp",
+                       key_opt ? key_opt->hash : 0, rp_state->drawcall_count);
+      return default_mode;
+   }
 
    /* We can return early with the decision based on the draw call count, instead of needing to hash the renderpass
     * instance and look up the history, which is far more expensive.
@@ -1852,9 +1942,11 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    }();
 
    if (can_early_return && early_return_mode) {
-      at_log_base_h("%" PRIu32 " draw calls, using %s (early)",
-                    key_opt ? key_opt->hash : rp_key(pass, framebuffer, cmd_buffer).hash, rp_state->drawcall_count,
+      uint64_t hash = key_opt ? key_opt->hash : rp_key(pass, framebuffer, cmd_buffer).hash;
+      at_log_base_h("%" PRIu32 " draw calls, using %s (early)", hash, rp_state->drawcall_count,
                     render_mode_str(*early_return_mode));
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=%s reason=early_forced", hash,
+                       rp_state->drawcall_count, render_mode_str(*early_return_mode));
       return *early_return_mode;
    }
 
@@ -1876,12 +1968,16 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
           * haven't seen any real latency spikes.
           */
          at_log_base_h("no latency spike seen for RP, disabling preempt optimization", key.hash);
+         MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " draws=%" PRIu32 " event=disable_no_spike", key.hash,
+                          rp_state->drawcall_count);
          config.disable(mod_flag::PREEMPT_OPTIMIZE);
       }
 
       if (latency_info->mark_rp_as_sensitive) {
          at_log_base_h("marking RP as latency sensitive based on latency tracking", key.hash);
          history.preempt_optimize.mark_as_latency_sensitive();
+         MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " draws=%" PRIu32 " event=mark_sensitive", key.hash,
+                          rp_state->drawcall_count);
       }
    }
    *rp_ctx = cb_ctx.attach_rp_entry(device, history, config, rp_state->drawcall_count);
@@ -1891,12 +1987,17 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
        * draws into smaller ones with tiling.
        */
       at_log_base_h("high preemption latency risk, using GMEM", key.hash);
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32
+                       " selecting=GMEM reason=preempt_latency_risk",
+                       key.hash, rp_state->drawcall_count);
       return render_mode::GMEM;
    }
 
    if (early_return_mode) {
       at_log_base_h("%" PRIu32 " draw calls, using %s (late)", key.hash, rp_state->drawcall_count,
                     render_mode_str(*early_return_mode));
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32 " selecting=%s reason=late_forced",
+                       key.hash, rp_state->drawcall_count, render_mode_str(*early_return_mode));
       return *early_return_mode;
    }
 
@@ -1906,8 +2007,12 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    if (config.is_enabled(algorithm::BANDWIDTH))
       return history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state);
 
-   if (config.is_enabled(algorithm::PREFER_GMEM))
+   if (config.is_enabled(algorithm::PREFER_GMEM)) {
+      MESA_TRACE_SCOPE("tu_autotune mode hash=%016" PRIx64 " draws=%" PRIu32
+                       " selecting=GMEM reason=prefer_gmem_fallback",
+                       key.hash, rp_state->drawcall_count);
       return render_mode::GMEM;
+   }
 
    return default_mode;
 }
@@ -1929,16 +2034,24 @@ tu_autotune::get_tile_size_divisor(struct tu_cmd_buffer *cmd_buffer)
    rp_latency_info latency_info = get_rp_latency_info(key.hash, false);
    if (!latency_info.seen_latency_spike) {
       at_log_base_h("no RP latency spike seen, using tile_size_divisor=1", key.hash);
+      MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " event=tile_divisor_fallback reason=no_spike divisor=1",
+                       key.hash);
       return 1;
    }
 
    tu_autotune::rp_history_handle history = find_rp_history(key);
    if (!history) {
       at_log_base_h("no RP history found, using tile_size_divisor=1", key.hash);
+      MESA_TRACE_SCOPE(
+         "tu_autotune preempt hash=%016" PRIx64 " event=tile_divisor_fallback reason=no_history divisor=1", key.hash);
       return 1;
    }
 
    uint32_t tile_size_divisor = history->preempt_optimize.get_tile_size_divisor();
+   if (tile_size_divisor != 1) {
+      MESA_TRACE_SCOPE("tu_autotune preempt hash=%016" PRIx64 " event=tile_divisor divisor=%" PRIu32, key.hash,
+                       tile_size_divisor);
+   }
 
    return tile_size_divisor;
 }
