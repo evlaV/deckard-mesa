@@ -131,6 +131,9 @@ struct tu_shader_key {
    bool custom_resolve;
    bool emulate_alpha_to_coverage;
    enum ir3_wavesize_option api_wavesize, real_wavesize;
+
+   /* Shader version to force recompilation when TU_BUILD_ID_OVERRIDE is used. */
+   uint8_t version;
 };
 
 extern const struct vk_pipeline_cache_object_ops tu_shader_ops;
