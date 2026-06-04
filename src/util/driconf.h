@@ -712,6 +712,15 @@
 #define DRI_CONF_TU_OVERRIDE_UNCACHED_AS_CACHE_COHERENT(def) \
    DRI_CONF_OPT_B(tu_override_uncached_as_cache_coherent, def, \
                   "Replaces uncached-host allocations with cached-coherent-host when possible. Only useful under x86 emulation where memory accesses tend to be atomic")
+
+#define DRI_CONF_TU_OVERRIDE_GRAPHICS_SHADER_VERSION(def) \
+   DRI_CONF_OPT_I(tu_override_graphics_shader_version, def, 0, 255, \
+                  "Override graphics shader version to force recompilation when TU_BUILD_ID_OVERRIDE is enabled.")
+
+#define DRI_CONF_TU_OVERRIDE_COMPUTE_SHADER_VERSION(def) \
+   DRI_CONF_OPT_I("tu_override_compute_shader_version", def, 0, 255, \
+                  "Override compute shader version to force recompilation when TU_BUILD_ID_OVERRIDE is enabled.")
+
 /**
  * \brief Honeykrisp specific configuration options
  */

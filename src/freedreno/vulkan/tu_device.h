@@ -270,6 +270,9 @@ struct tu_instance
     * with cached+coherent+host_visible when the hardware supports it.
     */
    bool override_uncached_as_cache_coherent;
+
+   int32_t override_graphics_shader_version;
+   int32_t override_compute_shader_version;
 };
 VK_DEFINE_HANDLE_CASTS(tu_instance, vk.base, VkInstance,
                        VK_OBJECT_TYPE_INSTANCE)
