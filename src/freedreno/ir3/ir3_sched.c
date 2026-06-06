@@ -340,7 +340,7 @@ schedule(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
       ctx->ss_delay = soft_ss_delay(instr);
       n->ss_index = ctx->ss_index++;
    } else if (!is_meta(instr) &&
-              sched_check_src_cond(instr, is_outstanding_ss, ctx)) {
+              sched_check_src_cond(instr, _is_outstanding_ss, ctx)) {
       ctx->ss_delay = 0;
       ctx->first_outstanding_ss_index = ctx->ss_index;
    } else if (ctx->ss_delay > 0) {
@@ -358,7 +358,7 @@ schedule(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
       ctx->remaining_tex--;
       n->sy_index = ctx->sy_index++;
    } else if (!is_meta(instr) &&
-              sched_check_src_cond(instr, is_outstanding_sy, ctx)) {
+              sched_check_src_cond(instr, _is_outstanding_sy, ctx)) {
       ctx->sy_delay = 0;
       ctx->first_outstanding_sy_index = ctx->sy_index;
    } else if (ctx->sy_delay > 0) {
@@ -619,7 +619,7 @@ static bool
 should_defer(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
 {
    if (ctx->ss_delay) {
-      if (sched_check_src_cond(instr, is_outstanding_ss, ctx))
+      if (sched_check_src_cond(instr, _is_outstanding_ss, ctx))
          return true;
    }
 
@@ -629,7 +629,7 @@ should_defer(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
     * fetches
     */
    if (ctx->sy_delay && ctx->remaining_tex) {
-      if (sched_check_src_cond(instr, is_outstanding_sy, ctx))
+      if (sched_check_src_cond(instr, _is_outstanding_sy, ctx))
          return true;
    }
 
