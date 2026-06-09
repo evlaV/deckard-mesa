@@ -11,6 +11,16 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <cstdio>
+#include <cstring>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#ifndef MESA_DEBUG_SOCKET_PATH
+#define MESA_DEBUG_SOCKET_PATH "/tmp/mesalog.sock"
+#endif
 
 #include "util/perf/cpu_trace.h"
 #include "util/rand_xor.h"
@@ -530,6 +540,9 @@ struct tu_autotune::rp_entry {
    bool sysmem;
    uint32_t tile_count;
    uint32_t draw_count;
+   sockaddr_un mesa_debug_addr;
+   bool mesa_debug_socket_init = false;
+   char tbs[6000];
 
    rp_entry(struct tu_device *device, rp_history_handle &&history, config_t config, uint32_t draw_count)
        : device(device), map(nullptr), history(std::move(history)), config(config), draw_count(draw_count)
@@ -652,10 +665,46 @@ struct tu_autotune::rp_entry {
       return gpu.ts_end - gpu.ts_start;
    }
 
+   void mesa_debug_socket_print(const char *fmt, ...)
+   {
+      char buf[4096];
+
+      va_list ap;
+      va_start(ap, fmt);
+      int len = vsnprintf(buf, sizeof(buf), fmt, ap);
+      va_end(ap);
+
+      if (len < 0) return;
+
+      if (static_cast<size_t>(len) >= sizeof(buf)) len = sizeof(buf) - 1;
+
+      int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+      if (fd < 0) return;
+
+      if( ! mesa_debug_socket_init )
+      {
+         mesa_debug_addr.sun_family = AF_UNIX;
+         const char *path = MESA_DEBUG_SOCKET_PATH;
+         size_t path_len = strlen(path);
+
+         if (path_len >= sizeof(mesa_debug_addr.sun_path)) {
+            close(fd);
+            return;
+         }
+         memcpy(mesa_debug_addr.sun_path, path, path_len + 1);
+
+         mesa_debug_socket_init = true;
+      }
+
+      sendto(fd, buf, static_cast<size_t>(len), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&mesa_debug_addr), sizeof(mesa_debug_addr));
+
+      close(fd);
+   }
+   
    /* The amount of cycles spent in the longest tile. This is used to calculate the average draw duration for
     * determining the largest non-preemptible duration for GMEM rendering.
     */
-   uint64_t get_max_tile_duration()
+   uint64_t get_max_tile_duration(uint64_t rphash)
    {
       assert(config.test(metric_flag::TS_TILE));
       uint64_t max_duration = 0;
@@ -663,6 +712,26 @@ struct tu_autotune::rp_entry {
          tile_gpu_data &tile = get_tile_gpu_data(i);
          max_duration = MAX2(max_duration, tile.ts_end - tile.ts_start);
       }
+
+      tbs[0]='\0';
+      for (uint32_t i = 0; i < tile_count; i++) {
+         tile_gpu_data &tile = get_tile_gpu_data(i);
+         char tb[12];
+         snprintf(tb,11,"%ld,", ticks_to_us(tile.ts_end - tile.ts_start));
+         strncat(tbs,tb,12);
+         if(i >= 512) 
+         {
+            //dont print more than 512 entries
+            break;
+         }
+      }
+      
+      MESA_TRACE_SCOPE("get_max_tile_duration tile_num=%" PRIu32 " max_tile_us=%" PRIu64 " [%s]",
+                                                     tile_count, ticks_to_us(max_duration), tbs );
+
+      //gabe
+      mesa_debug_socket_print("[%" PRIu64 "] tile_num=%" PRIu32 " max_tile_us=%" PRIu64 " [%s]",
+                              rphash, tile_count, ticks_to_us(max_duration), tbs );
       return max_duration;
    }
 
@@ -1363,7 +1432,7 @@ struct tu_autotune::rp_history {
             gmem_rp_average.add(entry.get_rp_duration());
 
             if (entry_config.test(metric_flag::TS_TILE) && at_config.test(mod_flag::PREEMPT_OPTIMIZE))
-               preempt_optimize.update_gmem(*this, entry.get_max_tile_duration());
+               preempt_optimize.update_gmem(*this, entry.get_max_tile_duration(entry.history.history->hash));
          }
 
          if (at_config.is_enabled(algorithm::PROFILED) || at_config.is_enabled(algorithm::PROFILED_IMM)) {
