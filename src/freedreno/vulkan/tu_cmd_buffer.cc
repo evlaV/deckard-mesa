@@ -3631,7 +3631,16 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
       tu_trace_start_render_pass(cmd);
 
    uint32_t tile_count = vsc->tile_count.width * vsc->tile_count.height;
-   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, false, tile_count);
+   tu_autotune::rp_debug_layout debug_layout;
+   debug_layout.grid_w = vsc->tile_count.width;
+   debug_layout.grid_h = vsc->tile_count.height;
+   debug_layout.fb_w = cmd->state.framebuffer->width;
+   debug_layout.fb_h = cmd->state.framebuffer->height;
+   debug_layout.tile0_w = cmd->state.tiling->tile0.width;
+   debug_layout.tile0_h = cmd->state.tiling->tile0.height;
+   debug_layout.layers = MAX2(cmd->state.framebuffer->layers, cmd->state.pass->num_views);
+   debug_layout.divisor = cmd->state.gmem_layout_divisor;
+   cmd->device->autotune->begin_renderpass(cmd, cs, rp_ctx, false, tile_count, debug_layout);
 
    tu_cs_sanity_check(cs);
 }
