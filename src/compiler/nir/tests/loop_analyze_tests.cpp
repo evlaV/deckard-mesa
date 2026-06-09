@@ -215,7 +215,7 @@ TEST_F(nir_loop_analyze_test, one_iteration_fneu)
    nir_loop *loop =
       loop_builder(&b, {.init_value = 0xe7000000, .cond_value = 0xe7000000,
                         .incr_value = 0x5b000000,
-                        .cond_instr = nir_fneu, .incr_instr = nir_fadd,
+                        .cond_instr = _nir_fneu, .incr_instr = _nir_fadd,
                         .use_unknown_init_value = false,
                         .invert_exit_condition_and_continue_branch = false});
 
@@ -283,7 +283,7 @@ TEST_F(nir_loop_analyze_test, one_iteration_fneu)
 
 #define COMPARE_REVERSE(comp)                                           \
    static nir_def *                                                 \
-   nir_ ## comp ## _rev(nir_builder *b, nir_def *x, nir_def *y) \
+   _nir_ ## comp ## _rev(nir_builder *b, nir_def *x, nir_def *y) \
    {                                                                    \
       return nir_ ## comp (b, y, x);                                    \
    }
@@ -296,9 +296,9 @@ COMPARE_REVERSE(ishl)
 
 #define INOT_COMPARE(comp)                                              \
    static nir_def *                                                 \
-   nir_inot_ ## comp (nir_builder *b, nir_def *x, nir_def *y)   \
+   _nir_inot_ ## comp (nir_builder *b, nir_def *x, nir_def *y)   \
    {                                                                    \
-      return nir_inot(b, nir_ ## comp (b, x, y));                       \
+      return nir_inot(b, _nir_ ## comp (b, x, y));                       \
    }
 
 INOT_COMPARE(ilt_rev)
@@ -306,14 +306,14 @@ INOT_COMPARE(ine)
 INOT_COMPARE(uge_rev)
 
 #define CMP_MIN(cmp, min)                                               \
-   static nir_def *nir_##cmp##_##min(nir_builder *b, nir_def *counter, nir_def *limit) \
+   static nir_def *_nir_##cmp##_##min(nir_builder *b, nir_def *counter, nir_def *limit) \
    {                                                                    \
       nir_def *unk = nir_load_vertex_id(b);                             \
       return nir_##cmp(b, counter, nir_##min(b, limit, unk));           \
    }
 
 #define CMP_MIN_REV(cmp, min)                                           \
-   static nir_def *nir_##cmp##_##min##_rev(nir_builder *b, nir_def *counter, nir_def *limit) \
+   static nir_def *_nir_##cmp##_##min##_rev(nir_builder *b, nir_def *counter, nir_def *limit) \
    {                                                                    \
       nir_def *unk = nir_load_vertex_id(b);                             \
       return nir_##cmp(b, nir_##min(b, limit, unk), counter);           \
@@ -336,8 +336,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder(&b, { .init_value = _init_value,                                   \
                             .cond_value = _cond_value,                                   \
                             .incr_value = _incr_value,                                   \
-                            .cond_instr = nir_##cond,                                    \
-                            .incr_instr = nir_##incr,                                    \
+                            .cond_instr = _nir_##cond,                                   \
+                            .incr_instr = _nir_##incr,                                   \
                             .use_unknown_init_value = false,                             \
                             .invert_exit_condition_and_continue_branch = false });       \
                                                                                          \
@@ -371,8 +371,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder(&b, { .init_value = 0,                                                 \
                             .cond_value = _cond_value,                                       \
                             .incr_value = _incr_value,                                       \
-                            .cond_instr = nir_##cond,                                        \
-                            .incr_instr = nir_##incr,                                        \
+                            .cond_instr = _nir_##cond,                                        \
+                            .incr_instr = _nir_##incr,                                        \
                             .use_unknown_init_value = true,                                  \
                             .invert_exit_condition_and_continue_branch = invert });          \
                                                                                              \
@@ -406,8 +406,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder(&b, { .init_value = _init_value,                                   \
                             .cond_value = _cond_value,                                   \
                             .incr_value = _incr_value,                                   \
-                            .cond_instr = nir_##cond,                                    \
-                            .incr_instr = nir_##incr,                                    \
+                            .cond_instr = _nir_##cond,                                   \
+                            .incr_instr = _nir_##incr,                                   \
                             .use_unknown_init_value = false,                             \
                             .invert_exit_condition_and_continue_branch = false });       \
                                                                                          \
@@ -441,8 +441,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder(&b, {.init_value = _init_value,                   \
                            .cond_value = _cond_value,                   \
                            .incr_value = _incr_value,                   \
-                           .cond_instr = nir_ ## cond,                  \
-                           .incr_instr = nir_ ## incr,                  \
+                           .cond_instr = _nir_ ## cond,                 \
+                           .incr_instr = _nir_ ## incr,                 \
                            .use_unknown_init_value = false,             \
                            .invert_exit_condition_and_continue_branch = false}); \
                                                                         \
@@ -463,8 +463,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder(&b, {.init_value = _init_value,                   \
                            .cond_value = _cond_value,                   \
                            .incr_value = _incr_value,                   \
-                           .cond_instr = nir_ ## cond,                  \
-                           .incr_instr = nir_ ## incr,                  \
+                           .cond_instr = _nir_ ## cond,                 \
+                           .incr_instr = _nir_ ## incr,                 \
                            .use_unknown_init_value = false,             \
                            .invert_exit_condition_and_continue_branch = false}); \
                                                                         \
@@ -485,8 +485,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder_invert(&b, { .init_value = _init_value,                             \
                                    .incr_value = _incr_value,                             \
                                    .cond_value = _cond_value,                             \
-                                   .cond_instr = nir_##cond,                              \
-                                   .incr_instr = nir_##incr });                           \
+                                   .cond_instr = _nir_##cond,                             \
+                                   .incr_instr = _nir_##incr });                          \
                                                                                           \
       nir_validate_shader(b.shader, "input");                                             \
                                                                                           \
@@ -538,8 +538,8 @@ INOT_COMPARE(ilt_imin_rev)
          loop_builder_invert(&b, {.init_value = _init_value,            \
                                   .incr_value = _incr_value,            \
                                   .cond_value = _cond_value,            \
-                                  .cond_instr = nir_ ## cond,           \
-                                  .incr_instr = nir_ ## incr});         \
+                                  .cond_instr = _nir_ ## cond,          \
+                                  .incr_instr = _nir_ ## incr});        \
                                                                         \
       nir_validate_shader(b.shader, "input");                           \
                                                                         \
