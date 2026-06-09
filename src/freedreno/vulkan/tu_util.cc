@@ -558,8 +558,7 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
    struct tu_tiling_config *tiling = &fb->tiling[(TU_GMEM_LAYOUT_COUNT * (divisor - 1)) + gmem_layout];
 
    if (divisor > fb->initd_divisor) {
-      const struct tu_tiling_config *base_tiling =
-         tu_framebuffer_get_tiling_config(fb, device, pass, gmem_layout, divisor - 1);
+      const struct tu_tiling_config *base_tiling = &fb->tiling[gmem_layout];
       tu_tiling_config_divide_tile(device, pass, fb, base_tiling, tiling, divisor);
 
       struct tu_vsc_config *vsc = &tiling->vsc;
@@ -577,7 +576,9 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
           (vsc->tile_count.width * vsc->tile_count.height > 100) /* 100 tiles are too many, even with HW binning.   */
       ) {
          /* Revert to the previous level's tiling configuration. */
-         *tiling = *base_tiling;
+         const struct tu_tiling_config *prev_tiling =
+            tu_framebuffer_get_tiling_config(fb, device, pass, gmem_layout, divisor - 1);
+         *tiling = *prev_tiling;
       }
 
       fb->initd_divisor = divisor;
