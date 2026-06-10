@@ -2047,3 +2047,66 @@ ir3_nir_intrinsic_barycentric_sysval(nir_intrinsic_instr *intr)
 
    return sysval;
 }
+
+/* Early preamble may execute even if the shader doesn't. In order for this to
+ * be safe, every instruction must be speculatable, i.e. it cannot cause faults
+ * no matter what data the user throws at it. Generally this means descriptors
+ * are in-bounds and (if loading from descriptors) they contain valid data. Note
+ * that we only have to handle loads that can be executed by early preamble
+ * here, so things like texture accesses may not be speculatable but we don't
+ * have to handle them since they disable early preamble anyway.
+ */
+static bool
+is_intrinsic_speculatable(nir_intrinsic_instr *intrin)
+{
+   switch (intrin->intrinsic) {
+   case nir_intrinsic_load_ubo:
+   case nir_intrinsic_load_ubo_vec4:
+   case nir_intrinsic_copy_ubo_to_uniform_ir3:
+   case nir_intrinsic_copy_global_to_uniform_ir3:
+   case nir_intrinsic_load_ssbo:
+   case nir_intrinsic_load_ssbo_ir3:
+   case nir_intrinsic_load_global:
+   case nir_intrinsic_load_global_ir3:
+   case nir_intrinsic_prefetch_sam_ir3:
+   case nir_intrinsic_prefetch_tex_ir3:
+   case nir_intrinsic_prefetch_ubo_ir3:
+      return nir_intrinsic_access(intrin) & ACCESS_CAN_SPECULATE;
+   default:
+      return true;
+   }
+}
+
+bool
+ir3_nir_is_preamble_speculatable(nir_shader *s)
+{
+   nir_function_impl *entrypoint = nir_shader_get_entrypoint(s);
+
+   bool in_preamble = false;
+   nir_foreach_block (block, entrypoint) {
+      nir_foreach_instr (instr, block) {
+         if (instr->type != nir_instr_type_intrinsic)
+            continue;
+
+         nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+
+         /* Ignore anything outside the preamble. */
+         if (!in_preamble) {
+            if (intrin->intrinsic == nir_intrinsic_preamble_start_ir3)
+               in_preamble = true;
+            continue;
+         }
+
+         /* We've reached the end of the preamble without finding a
+          * non-speculatable instruction.
+          */
+         if (intrin->intrinsic == nir_intrinsic_preamble_end_ir3)
+            return true;
+
+         if (!is_intrinsic_speculatable(intrin))
+            return false;
+      }
+   }
+
+   return true;
+}

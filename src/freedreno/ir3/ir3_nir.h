@@ -210,6 +210,8 @@ unsigned ir3_nir_max_offset_shift(nir_intrinsic_instr *intr, const void *data);
 gl_system_value
 ir3_nir_intrinsic_barycentric_sysval(nir_intrinsic_instr *intr);
 
+bool ir3_nir_is_preamble_speculatable(nir_shader *s);
+
 ENDC;
 
 #endif /* IR3_NIR_H_ */
