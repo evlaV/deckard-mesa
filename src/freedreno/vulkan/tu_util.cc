@@ -7,6 +7,11 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <stdio.h>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include "common/freedreno_rd_output.h"
 #include "util/u_math.h"
@@ -545,6 +550,42 @@ tu_framebuffer_init_tiling_config(struct tu_framebuffer *fb,
    fb->initd_divisor = 1;
 }
 
+#ifndef MESA_DEBUG_SOCKET_PATH
+#define MESA_DEBUG_SOCKET_PATH "/tmp/mesalog.sock"
+#endif
+
+/* Same debug-socket sink as tu_autotune's per-RP logging; used here to trace
+ * tile-divisor decisions (which only happen once per framebuffer, lazily).
+ */
+static void
+tu_debug_socket_printf(const char *fmt, ...) PRINTFLIKE(1, 2);
+
+static void
+tu_debug_socket_printf(const char *fmt, ...)
+{
+   static const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+   static const sockaddr_un addr = [] {
+      sockaddr_un a = {};
+      a.sun_family = AF_UNIX;
+      static_assert(sizeof(MESA_DEBUG_SOCKET_PATH) <= sizeof(a.sun_path));
+      memcpy(a.sun_path, MESA_DEBUG_SOCKET_PATH, sizeof(MESA_DEBUG_SOCKET_PATH));
+      return a;
+   }();
+
+   if (fd < 0)
+      return;
+
+   char buf[512];
+   va_list ap;
+   va_start(ap, fmt);
+   int len = vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
+   if (len <= 0)
+      return;
+   len = MIN2(len, (int) sizeof(buf) - 1);
+   sendto(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
+}
+
 const struct tu_tiling_config *
 tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
                                  const struct tu_device *device,
@@ -572,10 +613,24 @@ tu_framebuffer_get_tiling_config(struct tu_framebuffer *fb,
          fdm_offset_vsc->tile_count = (VkExtent2D) { ~1, ~1 };
       }
 
-      if (!tiling->possible ||                               /* If tiling is no longer possible, this is pointless. */
-          (vsc->binning_useful && !vsc->binning_possible) || /* Dividing further without HW binning is a bad idea.  */
-          (vsc->tile_count.width * vsc->tile_count.height > 100) /* 100 tiles are too many, even with HW binning.   */
-      ) {
+      const VkExtent2D try_tile = tiling->tile0;
+      const VkExtent2D try_grid = vsc->tile_count;
+      const bool revert =
+         !tiling->possible ||                               /* If tiling is no longer possible, this is pointless. */
+         (vsc->binning_useful && !vsc->binning_possible) || /* Dividing further without HW binning is a bad idea.  */
+         (vsc->tile_count.width * vsc->tile_count.height > 100); /* 100 tiles are too many, even with HW binning.  */
+
+      tu_debug_socket_printf("tiling fb=%ux%u layout=%d div=%u align=%ux%u base_tile=%ux%u base_grid=%ux%u "
+                             "try_tile=%ux%u try_grid=%ux%u possible=%d binning_useful=%d binning_possible=%d "
+                             "verdict=%s",
+                             fb->width, fb->height, gmem_layout, divisor, pass->tile_align_w,
+                             device->physical_device->info->tile_align_h, base_tiling->tile0.width,
+                             base_tiling->tile0.height, base_tiling->vsc.tile_count.width,
+                             base_tiling->vsc.tile_count.height, try_tile.width, try_tile.height, try_grid.width,
+                             try_grid.height, tiling->possible, vsc->binning_useful, vsc->binning_possible,
+                             revert ? "revert" : "kept");
+
+      if (revert) {
          /* Revert to the previous level's tiling configuration. */
          *tiling = *base_tiling;
       }
