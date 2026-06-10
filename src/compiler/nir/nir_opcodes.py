@@ -364,14 +364,19 @@ for src_t in [tint, tuint, tfloat, tbool]:
               # an uint.", but we define the NIR opcodes the SPIRV way.
               if dst_t == tuint:
                    min = "0.0"
-                   max = "u_uintN_max({})".format(dst_bit_size)
+                   max_exclusive = "{}.0".format(1 << dst_bit_size)
               else:
-                   min = "u_intN_min({})".format(dst_bit_size)
-                   max = "u_intN_max({})".format(dst_bit_size)
+                   min = "{}.0".format(-(1 << (dst_bit_size - 1)))
+                   max_exclusive = "{}.0".format(1 << (dst_bit_size - 1))
               conv_expr = f"""
-                dst = src0;
-                if (src0 < {min} || src0 > {max}) {{
+                if (isnan(src0)) {{
+                   dst = 0;
+                }} else if ((double)src0 < {min} ||
+                           (double)src0 >= {max_exclusive}) {{
                    poison = true;
+                   dst = 0;
+                }} else {{
+                   dst = src0;
                 }}
               """
               unop_numeric_convert("{0}2{1}{2}".format(src_t[0], dst_t[0],
@@ -409,7 +414,8 @@ unop_numeric_convert_mp("f2u", tuint16, tfloat32, exact)
 unop_numeric_convert_mp("i2f", tfloat16, tint32, preserve_sz + preserve_inf + exact)
 unop_numeric_convert_mp("u2f", tfloat16, tuint32, preserve_sz + preserve_inf + exact)
 
-unop_numeric_convert("f2i32_rtne", tint32, tfloat32, "(int32_t)_mesa_roundevenf(src0)", valid_fp_math_ctrl = exact)
+unop_numeric_convert("f2i32_rtne", tint32, tfloat32,
+                     "constant_f2i32_rtne(src0)", valid_fp_math_ctrl = exact)
 
 # Note: 64-bit integers are intentionally not supported. Casting u_uintN_max
 # (and related signed values) to double is precisely representable for upto
