@@ -504,8 +504,9 @@ split_cmat_muladd(nir_builder *b,
    return true;
 }
 
+#define call_reduce(...) MESA_CALL_WITH_LTR_ARGS(_call_reduce, __VA_ARGS__)
 static void
-call_reduce(nir_builder *b,
+_call_reduce(nir_builder *b,
             nir_cmat_call_instr *call,
             nir_cmat_reduce reduce,
             nir_def *dst, nir_def *src0)
@@ -517,8 +518,9 @@ call_reduce(nir_builder *b,
    nir_builder_instr_insert(b, &ncall->instr);
 }
 
+#define call_reduce_finish(...) MESA_CALL_WITH_LTR_ARGS(_call_reduce_finish, __VA_ARGS__)
 static void
-call_reduce_finish(nir_builder *b,
+_call_reduce_finish(nir_builder *b,
                    nir_cmat_call_instr *call,
                    nir_cmat_reduce reduce,
                    nir_def *dst, nir_def *src0, nir_def *src1)
@@ -531,8 +533,9 @@ call_reduce_finish(nir_builder *b,
    nir_builder_instr_insert(b, &ncall->instr);
 }
 
+#define call_reduce_2x2(...) MESA_CALL_WITH_LTR_ARGS(_call_reduce_2x2, __VA_ARGS__)
 static void
-call_reduce_2x2(nir_builder *b,
+_call_reduce_2x2(nir_builder *b,
                 nir_cmat_call_instr *call,
                 nir_def *dst,
                 nir_def *src0, nir_def *src1,

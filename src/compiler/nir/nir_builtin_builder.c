@@ -29,7 +29,7 @@
 #include "nir_builtin_builder.h"
 
 nir_def *
-nir_cross3(nir_builder *b, nir_def *x, nir_def *y)
+_nir_cross3(nir_builder *b, nir_def *x, nir_def *y)
 {
    unsigned yzx[3] = { 1, 2, 0 };
    unsigned zxy[3] = { 2, 0, 1 };
@@ -41,7 +41,7 @@ nir_cross3(nir_builder *b, nir_def *x, nir_def *y)
 }
 
 nir_def *
-nir_cross4(nir_builder *b, nir_def *x, nir_def *y)
+_nir_cross4(nir_builder *b, nir_def *x, nir_def *y)
 {
    nir_def *cross = nir_cross3(b, x, y);
 
@@ -59,7 +59,7 @@ nir_fast_length(nir_builder *b, nir_def *vec)
 }
 
 nir_def *
-nir_nextafter(nir_builder *b, nir_def *x, nir_def *y)
+_nir_nextafter(nir_builder *b, nir_def *x, nir_def *y)
 {
    nir_def *zero = nir_imm_intN_t(b, 0, x->bit_size);
    nir_def *one = nir_imm_intN_t(b, 1, x->bit_size);
@@ -130,7 +130,7 @@ nir_normalize(nir_builder *b, nir_def *vec)
 }
 
 nir_def *
-nir_smoothstep(nir_builder *b, nir_def *edge0, nir_def *edge1, nir_def *x)
+_nir_smoothstep(nir_builder *b, nir_def *edge0, nir_def *edge1, nir_def *x)
 {
    nir_def *f2 = nir_imm_floatN_t(b, 2.0, x->bit_size);
    nir_def *f3 = nir_imm_floatN_t(b, 3.0, x->bit_size);
@@ -145,7 +145,7 @@ nir_smoothstep(nir_builder *b, nir_def *edge0, nir_def *edge1, nir_def *x)
 }
 
 nir_def *
-nir_upsample(nir_builder *b, nir_def *hi, nir_def *lo)
+_nir_upsample(nir_builder *b, nir_def *hi, nir_def *lo)
 {
    assert(lo->num_components == hi->num_components);
    assert(lo->bit_size == hi->bit_size);
@@ -210,7 +210,7 @@ nir_atan(nir_builder *b, nir_def *y_over_x)
 }
 
 nir_def *
-nir_atan2(nir_builder *b, nir_def *y, nir_def *x)
+_nir_atan2(nir_builder *b, nir_def *y, nir_def *x)
 {
    assert(y->bit_size == x->bit_size);
    const uint32_t bit_size = x->bit_size;
