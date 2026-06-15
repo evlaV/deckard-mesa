@@ -51,7 +51,7 @@ ir3_src_read_delay(struct ir3_compiler *compiler, struct ir3_instruction *instr,
  * assigns a value and the one that consumes
  */
 int
-ir3_delayslots(struct ir3_compiler *compiler,
+_ir3_delayslots(struct ir3_compiler *compiler,
                struct ir3_instruction *assigner,
                struct ir3_instruction *consumer, unsigned n, bool soft)
 {
@@ -115,7 +115,7 @@ ir3_delayslots(struct ir3_compiler *compiler,
 }
 
 unsigned
-ir3_delayslots_with_repeat(struct ir3_compiler *compiler,
+_ir3_delayslots_with_repeat(struct ir3_compiler *compiler,
                            struct ir3_instruction *assigner,
                            struct ir3_instruction *consumer,
                            unsigned assigner_n, unsigned consumer_n)

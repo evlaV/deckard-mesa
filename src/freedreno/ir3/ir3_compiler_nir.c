@@ -1724,8 +1724,9 @@ get_image_ssbo_samp_tex_src(struct ir3_context *ctx, nir_src *src, bool image)
    return info;
 }
 
+#define emit_sam(...) MESA_CALL_WITH_LTR_ARGS(_emit_sam, __VA_ARGS__)
 static struct ir3_instruction *
-emit_sam(struct ir3_context *ctx, opc_t opc, struct tex_src_info info,
+_emit_sam(struct ir3_context *ctx, opc_t opc, struct tex_src_info info,
          type_t type, unsigned wrmask, struct ir3_instruction *src0,
          struct ir3_instruction *src1)
 {
@@ -2662,8 +2663,9 @@ emit_ray_intersection(struct ir3_context *ctx, nir_intrinsic_instr *intr,
 static void setup_input(struct ir3_context *ctx, nir_intrinsic_instr *intr);
 static void setup_output(struct ir3_context *ctx, nir_intrinsic_instr *intr);
 
+#define apply_mov_half_shared_quirk(...) MESA_CALL_WITH_LTR_ARGS(_apply_mov_half_shared_quirk, __VA_ARGS__)
 static struct ir3_instruction *
-apply_mov_half_shared_quirk(struct ir3_context *ctx,
+_apply_mov_half_shared_quirk(struct ir3_context *ctx,
                             struct ir3_instruction *src,
                             struct ir3_instruction *dst)
 {
