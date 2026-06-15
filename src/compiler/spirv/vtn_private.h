@@ -936,7 +936,8 @@ struct vtn_ssa_value *
 vtn_local_load(struct vtn_builder *b, nir_deref_instr *src,
                enum gl_access_qualifier access);
 
-void vtn_local_store(struct vtn_builder *b, struct vtn_ssa_value *src,
+#define vtn_local_store(...) MESA_CALL_WITH_LTR_ARGS(_vtn_local_store, __VA_ARGS__)
+void _vtn_local_store(struct vtn_builder *b, struct vtn_ssa_value *src,
                      nir_deref_instr *dest,
                      enum gl_access_qualifier access);
 
@@ -1099,7 +1100,9 @@ void vtn_handle_cooperative_alu(struct vtn_builder *b, struct vtn_value *dest_va
                                 const uint32_t *w, unsigned count);
 struct vtn_ssa_value *vtn_cooperative_matrix_extract(struct vtn_builder *b, struct vtn_ssa_value *mat,
                                                      const uint32_t *indices, unsigned num_indices);
-struct vtn_ssa_value *vtn_cooperative_matrix_insert(struct vtn_builder *b, struct vtn_ssa_value *mat,
+
+#define vtn_cooperative_matrix_insert(...) MESA_CALL_WITH_LTR_ARGS(_vtn_cooperative_matrix_insert, __VA_ARGS__)
+struct vtn_ssa_value *_vtn_cooperative_matrix_insert(struct vtn_builder *b, struct vtn_ssa_value *mat,
                                                     struct vtn_ssa_value *insert,
                                                     const uint32_t *indices, unsigned num_indices);
 nir_deref_instr *vtn_create_cmat_temporary(struct vtn_builder *b,
