@@ -106,8 +106,10 @@ class nir_algebraic_pattern_test : public nir_test {
  * having a defined dest size (3 or 4 components, independent of src args).
  * Just pick 4 and get some coverage.
  */
+
+#define nir_fdot_replicated(...) MESA_CALL_WITH_LTR_ARGS(_nir_fdot_replicated, __VA_ARGS__)
 static inline nir_def *
-nir_fdot_replicated(nir_builder *b, nir_op op, nir_def *x, nir_def *y)
+_nir_fdot_replicated(nir_builder *b, nir_op op, nir_def *x, nir_def *y)
 {
    nir_alu_instr *alu = nir_alu_instr_create(b->shader, op);
    alu->src[0].src = nir_src_for_ssa(x);
@@ -119,26 +121,30 @@ nir_fdot_replicated(nir_builder *b, nir_op op, nir_def *x, nir_def *y)
    return &alu->def;
 }
 
+#define nir_fdot2_replicated(...) MESA_CALL_WITH_LTR_ARGS(_nir_fdot2_replicated, __VA_ARGS__)
 static inline nir_def *
-nir_fdot2_replicated(nir_builder *b, nir_def *x, nir_def *y)
+_nir_fdot2_replicated(nir_builder *b, nir_def *x, nir_def *y)
 {
    return nir_fdot_replicated(b, nir_op_fdot2_replicated, x, y);
 }
 
+#define nir_fdot3_replicated(...) MESA_CALL_WITH_LTR_ARGS(_nir_fdot3_replicated, __VA_ARGS__)
 static inline nir_def *
-nir_fdot3_replicated(nir_builder *b, nir_def *x, nir_def *y)
+_nir_fdot3_replicated(nir_builder *b, nir_def *x, nir_def *y)
 {
    return nir_fdot_replicated(b, nir_op_fdot3_replicated, x, y);
 }
 
+#define nir_fdot4_replicated(...) MESA_CALL_WITH_LTR_ARGS(_nir_fdot4_replicated, __VA_ARGS__)
 static inline nir_def *
-nir_fdot4_replicated(nir_builder *b, nir_def *x, nir_def *y)
+_nir_fdot4_replicated(nir_builder *b, nir_def *x, nir_def *y)
 {
    return nir_fdot_replicated(b, nir_op_fdot4_replicated, x, y);
 }
 
+#define nir_fdph_replicated(...) MESA_CALL_WITH_LTR_ARGS(_nir_fdph_replicated, __VA_ARGS__)
 static inline nir_def *
-nir_fdph_replicated(nir_builder *b, nir_def *x, nir_def *y)
+_nir_fdph_replicated(nir_builder *b, nir_def *x, nir_def *y)
 {
    return nir_fdot_replicated(b, nir_op_fdph_replicated, x, y);
 }

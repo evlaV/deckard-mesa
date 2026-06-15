@@ -116,8 +116,9 @@ nir_loop_unroll_test::count_loops(void)
    return count;
 }
 
+#define loop_unroll_test_helper(...) MESA_CALL_WITH_LTR_ARGS(_loop_unroll_test_helper, __VA_ARGS__)
 void
-loop_unroll_test_helper(nir_builder *bld, nir_def *init,
+_loop_unroll_test_helper(nir_builder *bld, nir_def *init,
                         nir_def *limit, nir_def *step,
                         nir_def* (*cond_instr)(nir_builder*,
                                                    nir_def*,

@@ -194,8 +194,9 @@ nir_load_var_volatile(nir_builder *b, nir_variable *var)
                                      ACCESS_VOLATILE);
 }
 
+#define nir_store_var_volatile(...) MESA_CALL_WITH_LTR_ARGS(_nir_store_var_volatile, __VA_ARGS__)
 static void
-nir_store_var_volatile(nir_builder *b, nir_variable *var,
+_nir_store_var_volatile(nir_builder *b, nir_variable *var,
                        nir_def *value, nir_component_mask_t writemask)
 {
    nir_store_deref_with_access(b, nir_build_deref_var(b, var),
