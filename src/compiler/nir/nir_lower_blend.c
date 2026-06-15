@@ -1109,7 +1109,7 @@ nir_lower_blend_instr(nir_builder *b, nir_intrinsic_instr *store, void *data)
    }
 
    /* Apply a colormask if necessary */
-   blended = nir_color_mask(b, blended, dst, options->rt[rt].colormask);
+   blended = nir_color_mask(b, blended, dst, (unsigned)options->rt[rt].colormask);
 
    /* Shave off any components we don't want to store */
    const unsigned num_components = util_format_get_nr_components(format);
