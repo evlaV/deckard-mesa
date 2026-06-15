@@ -247,8 +247,10 @@ get_uav_index(nir_instr *cur_instr, struct hash_table *ht)
  * UAV descriptor when available, via "uav_index" which should be obtained
  * from get_uav_index().
  */
+
+#define load_tlas(...) MESA_CALL_WITH_LTR_ARGS(_load_tlas, __VA_ARGS__)
 static nir_def *
-load_tlas(nir_builder *b, nir_def *tlas,
+_load_tlas(nir_builder *b, nir_def *tlas,
           nir_def *uav_index, nir_def *index,
           unsigned offset, unsigned components)
 {
@@ -321,7 +323,7 @@ lower_rq_initialize(nir_builder *b, struct hash_table *ht,
 
    nir_def *tlas_base;
    if (uav_index) {
-      tlas_base = load_tlas(b, NULL, uav_index, nir_imm_int(b, 0),
+      tlas_base = load_tlas(b, nullptr, uav_index, nir_imm_int(b, 0),
                             offsetof(struct tu_accel_struct_header,
                                      self_ptr), 2);
    } else {
@@ -540,8 +542,9 @@ nir_build_vec3_mat_mult(nir_builder *b, nir_def *vec, nir_def *matrix[], bool tr
    return nir_vec(b, result_components, 3);
 }
 
+#define fetch_parent_node(...) MESA_CALL_WITH_LTR_ARGS(_fetch_parent_node, __VA_ARGS__)
 static nir_def *
-fetch_parent_node(nir_builder *b, nir_def *bvh, nir_def *node)
+_fetch_parent_node(nir_builder *b, nir_def *bvh, nir_def *node)
 {
    nir_def *offset = nir_iadd_imm(b, nir_imul_imm(b, node, 4), 4);
 
@@ -550,8 +553,9 @@ fetch_parent_node(nir_builder *b, nir_def *bvh, nir_def *node)
       .align_mul = 4);
 }
 
+#define build_ray_traversal(...) MESA_CALL_WITH_LTR_ARGS(_build_ray_traversal, __VA_ARGS__)
 static nir_def *
-build_ray_traversal(nir_builder *b, nir_deref_instr *rq,
+_build_ray_traversal(nir_builder *b, nir_deref_instr *rq,
                     nir_def *tlas, nir_def *uav_index)
 {
    nir_deref_instr *candidate = rq_deref(b, rq, candidate);
