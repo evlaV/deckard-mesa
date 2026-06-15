@@ -762,7 +762,7 @@ lower_compute_system_value_instr(nir_builder *b,
                                           nir_u2uN(b, num_workgroups, bit_size),
                                           bit_size,
                                           options->num_workgroups,
-                                          options->shortcut_1d_workgroup_id);
+                                          (bool)options->shortcut_1d_workgroup_id);
       }
 
       return NULL;
