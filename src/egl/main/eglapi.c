@@ -684,7 +684,9 @@ eglInitialize(EGLDisplay dpy, EGLint *major, EGLint *minor)
                  "Found 'LIBGL_ALWAYS_SOFTWARE' set, will use a CPU renderer");
 
       const char *env = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
-      disp->Options.Zink = env && !strcmp(env, "zink");
+      bool use_zink_as_default = false;
+      if(!env) use_zink_as_default = true;
+      disp->Options.Zink = env && !strcmp(env, "zink") || use_zink_as_default;
 
       const char *gallium_hud_env = os_get_option("GALLIUM_HUD");
       disp->Options.GalliumHudWarn =

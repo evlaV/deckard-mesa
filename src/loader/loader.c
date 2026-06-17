@@ -772,6 +772,9 @@ loader_get_driver_for_fd(int fd)
       const char *override = os_get_option("MESA_LOADER_DRIVER_OVERRIDE");
       if (override && strlen(override))
          return strdup(override);
+
+      //if MESA_LOADER_DRIVER_OVERRIDE is unset, default to zink
+      if( !override ) return "zink";
    }
 
 #if defined(USE_DRICONF)
