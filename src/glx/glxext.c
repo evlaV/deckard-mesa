@@ -993,7 +993,9 @@ __glXInitialize(Display * dpy)
    Bool glx_accel = !debug_get_bool_option("LIBGL_ALWAYS_SOFTWARE", false);
    Bool kopper = !debug_get_bool_option("LIBGL_KOPPER_DISABLE", false);
 
-   if (env && !strcmp(env, "zink"))
+   bool use_zink_as_default = false;
+   if(!env) use_zink_as_default = true;
+   if ((env && !strcmp(env, "zink")) || use_zink_as_default)
       glx_driver |= GLX_DRIVER_ZINK_YES;
 
    dpyPriv->drawHash = __glxHashCreate();
