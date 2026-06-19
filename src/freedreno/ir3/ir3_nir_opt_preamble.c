@@ -626,6 +626,25 @@ struct prefetch_state {
 };
 
 static bool
+should_prefetch_sam(nir_def **descs)
+{
+   assert(descs[0] && descs[1]);
+
+   nir_intrinsic_instr *bindless0 =
+      ir3_bindless_resource(nir_src_for_ssa(descs[0]));
+   nir_intrinsic_instr *bindless1 =
+      ir3_bindless_resource(nir_src_for_ssa(descs[1]));
+   assert(bindless0 && bindless1);
+
+   /* There seems to be a HW bug where prefetches using different
+    * texture/sampler bases sometimes cause a fault. Disable them to work around
+    * this.
+    */
+   return nir_intrinsic_desc_set(bindless0) ==
+          nir_intrinsic_desc_set(bindless1);
+}
+
+static bool
 emit_descriptor_prefetch(nir_builder *b, nir_instr *instr, nir_def **descs,
                          struct prefetch_state *state)
 {
@@ -663,7 +682,7 @@ emit_descriptor_prefetch(nir_builder *b, nir_instr *instr, nir_def **descs,
          return false;
 
       assert(texture_index >= 0);
-      if (sampler_index >= 0) {
+      if (sampler_index >= 0 && should_prefetch_sam(descs)) {
          bool sampler_already_prefetched =
             is_already_prefetched(&state->sampler, descs[1]);
 
