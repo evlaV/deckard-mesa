@@ -710,7 +710,7 @@
                   "Override graphics shader version to force recompilation when TU_BUILD_ID_OVERRIDE is enabled.")
 
 #define DRI_CONF_TU_OVERRIDE_COMPUTE_SHADER_VERSION(def) \
-   DRI_CONF_OPT_I("tu_override_compute_shader_version", def, 0, 255, \
+   DRI_CONF_OPT_I(tu_override_compute_shader_version, def, 0, 255, \
                   "Override compute shader version to force recompilation when TU_BUILD_ID_OVERRIDE is enabled.")
 
 #define DRI_CONF_TU_ALLOW_CONCURRENT_BINNING(def) \
