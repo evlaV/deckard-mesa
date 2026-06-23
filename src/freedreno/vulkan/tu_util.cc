@@ -85,6 +85,72 @@ const uint64_t tu_runtime_debug_flags =
 os_file_notifier_t tu_debug_notifier;
 struct tu_env tu_env;
 
+struct tu_draw_bisect_config
+{
+   bool enabled;
+   uint64_t start;
+   uint64_t end;
+};
+
+static const struct tu_draw_bisect_config &
+tu_draw_bisect_config(void)
+{
+   static const struct tu_draw_bisect_config config = [] {
+      const char *range = debug_get_option("TU_DRAW_BISECT", NULL);
+      struct tu_draw_bisect_config config = {
+         .enabled = range != NULL,
+         .start = 0,
+         .end = UINT64_MAX,
+      };
+
+      if (!config.enabled)
+         return config;
+
+      const char *dash = strchr(range, '-');
+      if (!dash) {
+         mesa_loge("Incorrect TU_DRAW_BISECT, expected start-end");
+         config.enabled = false;
+         return config;
+      }
+
+      int64_t start = debug_parse_num_option(range, 0);
+      int64_t end = debug_parse_num_option(dash + 1, INT64_MAX);
+
+      config.start = MAX2(start, 0);
+      config.end = MAX2(end, 0);
+
+      mesa_logi("TU_DRAW_BISECT=%" PRIu64 "-%" PRIu64,
+                config.start, config.end);
+      return config;
+   }();
+
+   return config;
+}
+
+bool
+tu_draw_bisect_next(const char *name, const char *fmt, ...)
+{
+   const struct tu_draw_bisect_config &config = tu_draw_bisect_config();
+   static uint64_t draw_idx = 0;
+
+   if (!config.enabled)
+      return true;
+
+   uint64_t idx = p_atomic_inc_return(&draw_idx) - 1;
+   bool record = idx >= config.start && idx <= config.end;
+   char params[512];
+   va_list ap;
+
+   va_start(ap, fmt);
+   vsnprintf(params, sizeof(params), fmt, ap);
+   va_end(ap);
+
+   mesa_logi("TU_DRAW_BISECT idx=%" PRIu64 " %s %s(%s)",
+             idx, record ? "record" : "skip", name, params);
+
+   return record;
+}
+
 static uint64_t
 tu_env_get_file_flags(const char *path)
 {

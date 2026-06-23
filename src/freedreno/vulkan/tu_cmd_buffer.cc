@@ -8787,6 +8787,13 @@ tu_CmdDraw(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
+   if (!tu_draw_bisect_next(__func__,
+                            "vertexCount=%u instanceCount=%u "
+                            "firstVertex=%u firstInstance=%u",
+                            vertexCount, instanceCount, firstVertex,
+                            firstInstance))
+      return;
+
    tu6_emit_vs_params(cmd, 0, firstVertex, firstInstance);
 
    tu6_draw_common<CHIP>(cmd, cs, false, vertexCount);
@@ -8813,6 +8820,15 @@ tu_CmdDrawMultiEXT(VkCommandBuffer commandBuffer,
    struct tu_cs *cs = &cmd->draw_cs;
 
    if (!drawCount)
+      return;
+
+   if (!tu_draw_bisect_next(__func__,
+                            "drawCount=%u pVertexInfo=%p "
+                            "instanceCount=%u firstInstance=%u stride=%u "
+                            "first.vertexCount=%u first.firstVertex=%u",
+                            drawCount, pVertexInfo, instanceCount,
+                            firstInstance, stride, pVertexInfo->vertexCount,
+                            pVertexInfo->firstVertex))
       return;
 
    bool has_tess = cmd->state.shaders[MESA_SHADER_TESS_CTRL]->variant;
@@ -8861,6 +8877,13 @@ tu_CmdDrawIndexed(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
+   if (!tu_draw_bisect_next(__func__,
+                            "indexCount=%u instanceCount=%u firstIndex=%u "
+                            "vertexOffset=%d firstInstance=%u",
+                            indexCount, instanceCount, firstIndex,
+                            vertexOffset, firstInstance))
+      return;
+
    tu6_emit_vs_params(cmd, 0, vertexOffset, firstInstance);
 
    tu6_draw_common<CHIP>(cmd, cs, true, indexCount);
@@ -8891,6 +8914,19 @@ tu_CmdDrawMultiIndexedEXT(VkCommandBuffer commandBuffer,
    struct tu_cs *cs = &cmd->draw_cs;
 
    if (!drawCount)
+      return;
+
+   int32_t first_vertex_offset =
+      pVertexOffset ? *pVertexOffset : pIndexInfo->vertexOffset;
+   if (!tu_draw_bisect_next(__func__,
+                            "drawCount=%u pIndexInfo=%p instanceCount=%u "
+                            "firstInstance=%u stride=%u pVertexOffset=%p "
+                            "first.indexCount=%u first.firstIndex=%u "
+                            "first.vertexOffset=%d",
+                            drawCount, pIndexInfo, instanceCount,
+                            firstInstance, stride, pVertexOffset,
+                            pIndexInfo->indexCount, pIndexInfo->firstIndex,
+                            first_vertex_offset))
       return;
 
    bool has_tess = cmd->state.shaders[MESA_SHADER_TESS_CTRL]->variant;
@@ -8954,6 +8990,11 @@ tu_CmdDrawIndirect(VkCommandBuffer commandBuffer,
                    uint32_t stride)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   if (!tu_draw_bisect_next(__func__,
+                            "offset=%" PRIu64 " drawCount=%u stride=%u",
+                            (uint64_t) offset, drawCount, stride))
+      return;
+
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
@@ -8985,6 +9026,11 @@ tu_CmdDrawIndexedIndirect(VkCommandBuffer commandBuffer,
                           uint32_t stride)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   if (!tu_draw_bisect_next(__func__,
+                            "offset=%" PRIu64 " drawCount=%u stride=%u",
+                            (uint64_t) offset, drawCount, stride))
+      return;
+
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
@@ -9020,6 +9066,13 @@ tu_CmdDrawIndirectCount(VkCommandBuffer commandBuffer,
                         uint32_t stride)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   if (!tu_draw_bisect_next(__func__,
+                            "offset=%" PRIu64 " countBufferOffset=%" PRIu64
+                            " drawCount=%u stride=%u",
+                            (uint64_t) offset,
+                            (uint64_t) countBufferOffset, drawCount, stride))
+      return;
+
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    VK_FROM_HANDLE(tu_buffer, count_buf, countBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
@@ -9059,6 +9112,13 @@ tu_CmdDrawIndexedIndirectCount(VkCommandBuffer commandBuffer,
                                uint32_t stride)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   if (!tu_draw_bisect_next(__func__,
+                            "offset=%" PRIu64 " countBufferOffset=%" PRIu64
+                            " drawCount=%u stride=%u",
+                            (uint64_t) offset,
+                            (uint64_t) countBufferOffset, drawCount, stride))
+      return;
+
    VK_FROM_HANDLE(tu_buffer, buf, _buffer);
    VK_FROM_HANDLE(tu_buffer, count_buf, countBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
@@ -9095,6 +9155,15 @@ tu_CmdDrawIndirectByteCountEXT(VkCommandBuffer commandBuffer,
                                uint32_t vertexStride)
 {
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   if (!tu_draw_bisect_next(__func__,
+                            "instanceCount=%u firstInstance=%u "
+                            "counterBufferOffset=%" PRIu64 " "
+                            "counterOffset=%u vertexStride=%u",
+                            instanceCount, firstInstance,
+                            (uint64_t) counterBufferOffset, counterOffset,
+                            vertexStride))
+      return;
+
    VK_FROM_HANDLE(tu_buffer, buf, _counterBuffer);
    struct tu_cs *cs = &cmd->draw_cs;
 
@@ -9363,6 +9432,15 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
 {
    if (!info->indirect &&
        (info->blocks[0] == 0 || info->blocks[1] == 0 || info->blocks[2] == 0))
+      return;
+
+   if (!tu_draw_bisect_next(__func__,
+                            "base=(%u,%u,%u) blocks=(%u,%u,%u) "
+                            "unaligned=%u indirect=0x%" PRIx64,
+                            info->offsets[0], info->offsets[1],
+                            info->offsets[2], info->blocks[0],
+                            info->blocks[1], info->blocks[2],
+                            info->unaligned, info->indirect))
       return;
 
    struct tu_cs *cs = &cmd->cs;

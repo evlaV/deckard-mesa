@@ -569,6 +569,9 @@ r2d_teardown(struct tu_cmd_buffer *cmd,
 static void
 r2d_run(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
+   if (!tu_draw_bisect_next(__func__, "op=BLIT_OP_SCALE"))
+      return;
+
    if (cmd->device->physical_device->info->magic.RB_DBG_ECO_CNTL_blit !=
        cmd->device->physical_device->info->magic.RB_DBG_ECO_CNTL) {
       /* This a non-context register, so we have to WFI before changing. */
@@ -1826,6 +1829,10 @@ r3d_setup(struct tu_cmd_buffer *cmd,
 static void
 r3d_run(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "instanceCount=1 vertexCount=2 vis_cull=ignore"))
+      return;
+
    tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
    tu_cs_emit(cs, CP_DRAW_INDX_OFFSET_0_PRIM_TYPE(DI_PT_RECTLIST) |
                   CP_DRAW_INDX_OFFSET_0_SOURCE_SELECT(DI_SRC_SEL_AUTO_INDEX) |
@@ -1837,6 +1844,10 @@ r3d_run(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 static void
 r3d_run_vis(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "instanceCount=1 vertexCount=2 vis_cull=use"))
+      return;
+
    tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
    tu_cs_emit(cs, CP_DRAW_INDX_OFFSET_0_PRIM_TYPE(DI_PT_RECTLIST) |
                   CP_DRAW_INDX_OFFSET_0_SOURCE_SELECT(DI_SRC_SEL_AUTO_INDEX) |
@@ -1848,6 +1859,11 @@ r3d_run_vis(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 static void
 r3d_run_multi(struct tu_cmd_buffer *cmd, struct tu_cs *cs, unsigned count)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "instanceCount=1 vertexCount=%u count=%u",
+                            count * 2, count))
+      return;
+
    tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
    tu_cs_emit(cs, CP_DRAW_INDX_OFFSET_0_PRIM_TYPE(DI_PT_RECTLIST) |
                   CP_DRAW_INDX_OFFSET_0_SOURCE_SELECT(DI_SRC_SEL_AUTO_INDEX) |
@@ -2211,6 +2227,13 @@ tu7_generic_layer_clear(struct tu_cmd_buffer *cmd,
                         const VkClearValue *value,
                         uint32_t a)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "attachment=%u buffer_id=%u format=%u "
+                            "clear_mask=0x%x separate_stencil=%u layer=%u",
+                            a, buffer_id, format, clear_mask,
+                            separate_stencil, layer))
+      return;
+
    const struct tu_render_pass_attachment *att =
       &cmd->state.pass->attachments[a];
    const struct tu_image_view *iview = cmd->state.attachments[a];
@@ -2284,6 +2307,12 @@ tu6_clear_lrz(struct tu_cmd_buffer *cmd,
               struct tu_image *image,
               const VkClearValue *value)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "format=%u width=%u height=%u layers=%u",
+                            image->vk.format, image->vk.extent.width,
+                            image->vk.extent.height, image->vk.array_layers))
+      return;
+
    const struct blit_ops *ops = &r2d_ops<CHIP>;
 
    trace_start_slow_clear_lrz(&cmd->trace, &cmd->cs, cmd, image->vk.format,
@@ -4004,6 +4033,15 @@ clear_image_event_blit(struct tu_cmd_buffer *cmd,
 {
    uint32_t level_count = vk_image_subresource_level_count(&image->vk, range);
    uint32_t layer_count = vk_image_subresource_layer_count(&image->vk, range);
+   if (!tu_draw_bisect_next(__func__,
+                            "format=%u buffer_id=%u aspect=0x%x "
+                            "baseMipLevel=%u levelCount=%u "
+                            "baseArrayLayer=%u layerCount=%u",
+                            image->vk.format, buffer_id, aspect_mask,
+                            range->baseMipLevel, level_count,
+                            range->baseArrayLayer, layer_count))
+      return;
+
    VkFormat vk_format = image->vk.format;
    if (vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
       if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT)
@@ -4524,6 +4562,12 @@ clear_gmem_attachment(struct tu_cmd_buffer *cmd,
                       uint32_t gmem_offset,
                       const VkClearValue *value)
 {
+   if (!tu_draw_bisect_next(__func__,
+                            "buffer_id=%u format=%u clear_mask=0x%x "
+                            "gmem_offset=%u",
+                            buffer_id, format, clear_mask, gmem_offset))
+      return;
+
    tu_cs_emit_pkt4(cs, REG_A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO, 1);
    tu_cs_emit(cs, A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_COLOR_FORMAT(
             blit_base_format<CHIP>(format, false, true)));
@@ -5283,6 +5327,14 @@ tu_emit_blit(struct tu_cmd_buffer *cmd,
              bool separate_stencil)
 {
    assert(blit_event_type != BLIT_EVENT_CLEAR);
+   if (!tu_draw_bisect_next(__func__,
+                            "event=%u format=%u used_views=%u "
+                            "clear=%u separate_stencil=%u",
+                            blit_event_type, attachment->format,
+                            attachment->used_views, clear_value != NULL,
+                            separate_stencil))
+      return;
+
    uint32_t clear_mask = 0;
 
    /* BLIT_EVENT_STORE_AND_CLEAR would presumably swallow the
@@ -6283,4 +6335,3 @@ tu_blit_subsampled_apron(struct tu_cmd_buffer *cmd,
    }
 }
 TU_GENX(tu_blit_subsampled_apron);
-

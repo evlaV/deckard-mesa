@@ -97,6 +97,9 @@ tu_env_init(void);
 const char *
 tu_env_debug_as_string(void);
 
+bool
+tu_draw_bisect_next(const char *name, const char *format, ...) PRINTFLIKE(2, 3);
+
 /* Whenever we generate an error, pass it through this function. Useful for
  * debugging, where we can break on it. Only call at error site, not when
  * propagating errors. Might be useful to plug in a stack trace here.
