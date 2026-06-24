@@ -2444,6 +2444,8 @@ typedef enum nir_texop {
    nir_texop_tex_prefetch,
    /** Returns the sampler's LOD bias (if sampler LOD bias is lowered) */
    nir_texop_lod_bias,
+   /** Fragment density query */
+   nir_texop_frag_size,
    /** Multisample fragment color texture fetch */
    nir_texop_fragment_fetch_amd,
    /** Multisample fragment mask texture fetch */

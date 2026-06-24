@@ -3410,6 +3410,7 @@ nir_tex_instr_result_size(const nir_tex_instr *instr)
    }
 
    case nir_texop_lod:
+   case nir_texop_frag_size:
       return 2;
 
    case nir_texop_texture_samples:
@@ -3466,6 +3467,7 @@ nir_tex_instr_is_query(const nir_tex_instr *instr)
    case nir_texop_hdr_dim_nv:
    case nir_texop_tex_type_nv:
    case nir_texop_sample_pos_nv:
+   case nir_texop_frag_size:
       return true;
    case nir_texop_tex:
    case nir_texop_txb:
