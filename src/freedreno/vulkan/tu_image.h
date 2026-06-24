@@ -35,6 +35,7 @@ struct tu_image
 
    struct fdl_layout layout[3];
    uint64_t subsampled_metadata_offset;
+   uint64_t frag_size_query_metadata_offset;
    uint64_t total_size;
 
    /* Set when bound */

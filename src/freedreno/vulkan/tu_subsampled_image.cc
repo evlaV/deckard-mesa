@@ -18,6 +18,37 @@ get_effective_frag_area(const struct tu_tile_config *tile, unsigned view)
       tile->frag_areas[view] : (VkExtent2D) {1, 1};
 }
 
+static void
+emit_trivial_subsampled_header(struct tu_subsampled_header *header)
+{
+   header->scale_x = 1.0;
+   header->scale_y = 1.0;
+   header->offset_x = 0.0;
+   header->offset_y = 0.0;
+   header->bin_stride = 1;
+   header->pad0[0] = header->pad0[1] = header->pad0[2] = 0;
+}
+
+static void
+emit_subsampled_header(struct tu_cmd_buffer *cmd,
+                       const struct tu_image_view *iview,
+                       const struct tu_tiling_config *tiling,
+                       const struct tu_vsc_config *vsc,
+                       const VkOffset2D *fdm_offsets,
+                       unsigned view,
+                       struct tu_subsampled_header *header)
+{
+      VkOffset2D bin_offset = {};
+      if (fdm_offsets)
+         bin_offset = tu_bin_offset(fdm_offsets[view], tiling);
+      header->scale_x = (float)iview->vk.extent.width / tiling->tile0.width;
+      header->scale_y = (float)iview->vk.extent.height / tiling->tile0.height;
+      header->offset_x = (float)bin_offset.x / tiling->tile0.width;
+      header->offset_y = (float)bin_offset.y / tiling->tile0.height;
+      header->bin_stride = vsc->tile_count.width;
+      header->pad0[0] = header->pad0[1] = header->pad0[2] = 0;
+}
+
 void
 tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
                             struct tu_cs *cs,
@@ -38,17 +69,11 @@ tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
                    fb->layers) {
       struct tu_subsampled_metadata metadata;
 
-      metadata.hdr.pad0[0] = metadata.hdr.pad0[1] = metadata.hdr.pad0[2] = 0;
-
       unsigned tile_count;
       if (!tiles || vsc->tile_count.width * vsc->tile_count.height >
           TU_SUBSAMPLED_MAX_BINS) {
          tile_count = 1;
-         metadata.hdr.scale_x = 1.0;
-         metadata.hdr.scale_y = 1.0;
-         metadata.hdr.offset_x = 0.0;
-         metadata.hdr.offset_y = 0.0;
-         metadata.hdr.bin_stride = 1;
+         emit_trivial_subsampled_header(&metadata.hdr);
          metadata.bins[0].scale_x = size_ratio_x;
          metadata.bins[0].scale_y = size_ratio_y;
          metadata.bins[0].offset_x = 0.0;
@@ -59,11 +84,8 @@ tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
          if (fdm_offsets)
             bin_offset = tu_bin_offset(fdm_offsets[view], tiling);
          tile_count = vsc->tile_count.width * vsc->tile_count.height;
-         metadata.hdr.scale_x = (float)iview->vk.extent.width / tiling->tile0.width;
-         metadata.hdr.scale_y = (float)iview->vk.extent.height / tiling->tile0.height;
-         metadata.hdr.offset_x = (float)bin_offset.x / tiling->tile0.width;
-         metadata.hdr.offset_y = (float)bin_offset.y / tiling->tile0.height;
-         metadata.hdr.bin_stride = vsc->tile_count.width;
+         emit_subsampled_header(cmd, iview, tiling, vsc, fdm_offsets, view,
+                                &metadata.hdr);
 
          for (unsigned j = 0; j < tile_count; j++) {
             const struct tu_tile_config *tile = &tiles[j];
@@ -119,11 +141,81 @@ tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
       TU_CMD_FLAG_WAIT_MEM_WRITES;
 }
 
-nir_def *
-_tu_get_subsampled_coordinates(nir_builder *b,
-                              nir_def *coords,
-                              nir_def *descriptor,
-                              bool can_speculate)
+void
+tu_emit_query_metadata(struct tu_cmd_buffer *cmd,
+                       struct tu_cs *cs,
+                       unsigned a,
+                       const struct tu_tile_config *tiles,
+                       const struct tu_tiling_config *tiling,
+                       const struct tu_vsc_config *vsc,
+                       const struct tu_framebuffer *fb,
+                       const VkOffset2D *fdm_offsets)
+{
+   const struct tu_image_view *iview = cmd->state.attachments[a];
+
+   if (!iview->image->frag_size_query_metadata_offset)
+      return;
+
+   for_each_layer (i, cmd->state.pass->attachments[a].used_views |
+                      cmd->state.pass->attachments[a].resolve_views,
+                   fb->layers) {
+      struct tu_query_metadata metadata;
+
+      unsigned tile_count;
+      if (!tiles || vsc->tile_count.width * vsc->tile_count.height >
+          TU_SUBSAMPLED_MAX_BINS) {
+         tile_count = 1;
+         emit_trivial_subsampled_header(&metadata.hdr);
+         metadata.bins[0].frag_size_x = 1;
+         metadata.bins[0].frag_size_y = 1;
+         metadata.bins[0].pad0 = metadata.bins[0].pad1 = 0;
+      } else {
+         unsigned view = MIN2(i, tu_fdm_num_layers(cmd) - 1);
+         tile_count = vsc->tile_count.width * vsc->tile_count.height;
+         emit_subsampled_header(cmd, iview, tiling, vsc, fdm_offsets, view,
+                                &metadata.hdr);
+
+         for (unsigned j = 0; j < tile_count; j++) {
+            const struct tu_tile_config *tile = &tiles[j];
+
+            while (tile->merged_tile)
+               tile = tile->merged_tile;
+
+            metadata.bins[j].pad0 = metadata.bins[j].pad1 = 0;
+
+            if (!(tile->visible_views & (1u << view))) {
+               metadata.bins[j].frag_size_x = metadata.bins[j].frag_size_y = 0;
+               continue;
+            }
+
+            VkExtent2D frag_area = tile->frag_areas[view];
+            metadata.bins[j].frag_size_x = frag_area.width;
+            metadata.bins[j].frag_size_y = frag_area.height;
+         }
+      }
+
+      uint64_t iova = iview->image->iova +
+         iview->image->frag_size_query_metadata_offset +
+         sizeof(struct tu_query_metadata) *
+         (iview->vk.base_array_layer + i);
+
+      tu_cs_emit_pkt7(cs, CP_MEM_WRITE,
+                      2 + (sizeof(struct tu_subsampled_header) +
+                           tile_count * sizeof(struct tu_query_bin)) / 4);
+      tu_cs_emit_qw(cs, iova);
+      tu_cs_emit_array(cs, (const uint32_t *)&metadata.hdr,
+                       sizeof(struct tu_subsampled_header) / 4);
+      tu_cs_emit_array(cs, (const uint32_t *)&metadata.bins,
+                       sizeof(struct tu_query_bin) * tile_count / 4);
+   }
+
+   cmd->state.cache.pending_flush_bits |=
+      TU_CMD_FLAG_WAIT_MEM_WRITES;
+}
+
+static nir_def *
+get_bin_data(nir_builder *b, nir_def *coords, nir_def *descriptor,
+             bool can_speculate)
 {
    gl_access_qualifier access = can_speculate ? ACCESS_CAN_SPECULATE : (gl_access_qualifier)0;
    nir_def *layer;
@@ -173,17 +265,34 @@ _tu_get_subsampled_coordinates(nir_builder *b,
    bin_idx = nir_iadd_imm(b, nir_iadd(b, bin_idx, layer_offset),
                           sizeof(struct tu_subsampled_header) / 16);
 
-   nir_def *bin_data =
-      nir_load_ubo(b, 4, 32, descriptor, nir_ishl_imm(b, nir_u2u32(b, bin_idx), 4),
-                   .access = access,
-                   .align_mul = 16,
-                   .align_offset = 0,
-                   .range = TU_SUBSAMPLED_MAX_LAYERS * sizeof(struct tu_subsampled_metadata));
+   return nir_load_ubo(b, 4, 32, descriptor, nir_ishl_imm(b, nir_u2u32(b, bin_idx), 4),
+                       .access = access,
+                       .align_mul = 16,
+                       .align_offset = 0,
+                       .range = TU_SUBSAMPLED_MAX_LAYERS * sizeof(struct tu_subsampled_metadata));
+}
+
+nir_def *
+_tu_get_subsampled_coordinates(nir_builder *b,
+                              nir_def *coords,
+                              nir_def *descriptor,
+                              bool can_speculate)
+{
+   nir_def *bin_data = get_bin_data(b, coords, descriptor, can_speculate);
 
    nir_def *bin_scale = nir_channels(b, bin_data, 0x3);
    nir_def *bin_offset = nir_channels(b, bin_data, 0xc);
 
    return nir_ffma(b, coords, bin_scale, bin_offset);
+}
+
+nir_def *
+_tu_get_frag_size(nir_builder *b, nir_def *coords, nir_def *descriptor,
+                  bool can_speculate)
+{
+   nir_def *bin_data = get_bin_data(b, coords, descriptor, can_speculate);
+
+   return nir_channels(b, bin_data, 0x3);
 }
 
 /* Calculate the y coordinate in subsampled space of a given number of tiles
@@ -340,6 +449,7 @@ handle_horizontal_corners(const struct tu_tile_config *tile,
       other_src->x_end += other_apron_width;
    }
 }
+
 unsigned
 tu_calc_subsampled_aprons(VkRect2D *dst,
                           struct tu_rect2d_float *src,

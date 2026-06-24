@@ -3302,15 +3302,18 @@ tu6_sysmem_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    tu_cs_emit_pkt7(cs, CP_SKIP_IB2_ENABLE_GLOBAL, 1);
    tu_cs_emit(cs, 0x0);
 
-   if (cmd->state.fdm_subsampled) {
-      for (unsigned i = 0; i < cmd->state.pass->attachment_count; i++) {
-         if (i != cmd->state.pass->fragment_density_map.attachment &&
-             cmd->state.pass->attachments[i].store) {
+   for (unsigned i = 0; i < cmd->state.pass->attachment_count; i++) {
+      if (i != cmd->state.pass->fragment_density_map.attachment &&
+          cmd->state.pass->attachments[i].store) {
+         if (cmd->state.fdm_subsampled) {
             /* emit dummy subsampled metadata since we didn't use FDM */
             tu_emit_subsampled_metadata(cmd, &cmd->cs, i,
                                         NULL, NULL, NULL,
                                         cmd->state.framebuffer, NULL);
          }
+         /* emit dummy frag size query metadata */
+         tu_emit_query_metadata(cmd, &cmd->cs, i, NULL, NULL, NULL,
+                                cmd->state.framebuffer, NULL);
       }
    }
 
@@ -4070,6 +4073,14 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
    if (cmd->state.fdm_subsampled) {
       tu_emit_subsampled<CHIP>(cmd, tiles, tiling, vsc, cmd->state.framebuffer,
                                fdm_offsets);
+   }
+
+   for (unsigned i = 0; i < cmd->state.pass->attachment_count; i++) {
+      if (i != cmd->state.pass->fragment_density_map.attachment &&
+          cmd->state.pass->attachments[i].store) {
+         tu_emit_query_metadata(cmd, &cmd->cs, i, tiles, tiling, vsc,
+                                cmd->state.framebuffer, fdm_offsets);
+      }
    }
 
 #ifdef HAVE_PERFETTO

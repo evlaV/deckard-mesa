@@ -22,6 +22,7 @@
 #include "tu_descriptor_set.h"
 #include "tu_formats.h"
 #include "tu_image.h"
+#include "tu_subsampled_image.h"
 #include "tu_tracepoints.h"
 #include "tu_lrz.h"
 
@@ -3351,6 +3352,33 @@ copy_buffer(struct tu_cmd_buffer *cmd,
 }
 
 template <chip CHIP>
+static void
+tu_copy_frag_size_metadata(struct tu_cmd_buffer *cmd,
+                           struct tu_image *src_image,
+                           struct tu_image *dst_image,
+                           const VkImageCopy2 *info)
+{
+   uint32_t layers_to_copy = vk_image_subresource_layer_count(&src_image->vk,
+                                                              &info->srcSubresource);
+
+   uint64_t src_start =
+      src_image->iova + src_image->frag_size_query_metadata_offset +
+      sizeof(struct tu_query_metadata) * info->srcSubresource.baseArrayLayer;
+
+   uint64_t dst_start =
+      dst_image->iova + dst_image->frag_size_query_metadata_offset +
+      sizeof(struct tu_query_metadata) * info->dstSubresource.baseArrayLayer;
+
+   uint32_t size = sizeof(struct tu_query_metadata) * layers_to_copy;
+
+   bool unaligned_store = false;
+
+   copy_buffer<CHIP>(cmd, dst_start, src_start, size, 16, &unaligned_store);
+
+   after_buffer_unaligned_buffer_store<CHIP>(cmd, unaligned_store);
+}
+
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
                  const VkCopyImageInfo2 *pCopyImageInfo)
@@ -3363,9 +3391,20 @@ tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
                           dst_image->vk.format);
 
    for (uint32_t i = 0; i < pCopyImageInfo->regionCount; ++i) {
+      VkImageCopy2 info = pCopyImageInfo->pRegions[i];
+      if (info.dstSubresource.aspectMask &
+          VK_IMAGE_ASPECT_FRAGMENT_DENSITY_METADATA_BIT_VALVE) {
+         tu_copy_frag_size_metadata<CHIP>(cmd, src_image, dst_image, &info);
+         info.srcSubresource.aspectMask &=
+            ~VK_IMAGE_ASPECT_FRAGMENT_DENSITY_METADATA_BIT_VALVE;
+         info.dstSubresource.aspectMask &=
+            ~VK_IMAGE_ASPECT_FRAGMENT_DENSITY_METADATA_BIT_VALVE;
+         if (info.srcSubresource.aspectMask == 0)
+            continue;
+      }
+
       if (src_image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT &&
           dst_image->vk.format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
-         VkImageCopy2 info = pCopyImageInfo->pRegions[i];
          u_foreach_bit(b, info.dstSubresource.aspectMask) {
             info.srcSubresource.aspectMask = BIT(b);
             info.dstSubresource.aspectMask = BIT(b);
@@ -3374,8 +3413,7 @@ tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
          continue;
       }
 
-      tu_copy_image_to_image<CHIP>(cmd, src_image, dst_image,
-                             pCopyImageInfo->pRegions + i);
+      tu_copy_image_to_image<CHIP>(cmd, src_image, dst_image, &info);
    }
 
    if (dst_image->lrz_layout.lrz_total_size) {

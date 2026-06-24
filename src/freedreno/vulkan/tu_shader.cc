@@ -831,6 +831,21 @@ lower_tex_ycbcr(const struct vk_ycbcr_conversion_state *ycbcr_sampler,
    builder->cursor = nir_before_instr(&tex->instr);
 }
 
+static int
+binding_array_index(nir_deref_instr *deref,
+                    const struct tu_descriptor_set_binding_layout *binding)
+{
+   if (deref->deref_type != nir_deref_type_var) {
+      assert(deref->deref_type == nir_deref_type_array);
+      if (!nir_src_is_const(deref->arr.index))
+         return -1;
+      unsigned array_index = nir_src_as_uint(deref->arr.index);
+      return MIN2(array_index, binding->array_size - 1);
+   }
+
+   return 0;
+}
+
 static void
 lower_tex_immutable(struct tu_device *dev,
                     struct tu_shader *shader,
@@ -855,14 +870,9 @@ lower_tex_immutable(struct tu_device *dev,
       return;
 
    assert(tex->texture_index == 0);
-   unsigned array_index = 0;
-   if (deref->deref_type != nir_deref_type_var) {
-      assert(deref->deref_type == nir_deref_type_array);
-      if (!nir_src_is_const(deref->arr.index))
-         return;
-      array_index = nir_src_as_uint(deref->arr.index);
-      array_index = MIN2(array_index, binding->array_size - 1);
-   }
+   int array_index = binding_array_index(deref, binding);
+   if (array_index < 0)
+      return;
 
    const struct vk_ycbcr_conversion_state *ycbcr_samplers =
       tu_immutable_ycbcr_samplers(set_layout, binding);
@@ -920,6 +930,61 @@ lower_tex_impl(nir_builder *b, nir_tex_instr *tex, struct tu_device *dev,
 }
 
 static bool
+tex_is_subsampled(nir_tex_instr *tex, const struct tu_pipeline_layout *layout)
+{
+   int samp_src_idx = nir_tex_instr_src_index(tex, nir_tex_src_texture_deref);
+   if (samp_src_idx < 0)
+      return false;
+
+   nir_deref_instr *deref = nir_src_as_deref(tex->src[samp_src_idx].src);
+   nir_variable *var = nir_deref_instr_get_variable(deref);
+   const struct tu_descriptor_set_layout *set_layout =
+      layout->set[var->data.descriptor_set].layout;
+   const struct tu_descriptor_set_binding_layout *binding =
+      &set_layout->binding[var->data.binding];
+
+   int array_index = binding_array_index(deref, binding);
+   if (array_index < 0)
+      return false;
+
+   const struct tu_sampler *samplers =
+      tu_immutable_samplers(set_layout, binding);
+   if (samplers) {
+      const struct tu_sampler *sampler = samplers + array_index;
+      return (sampler->vk.flags & VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT);
+   }
+
+   return false;
+}
+
+static void
+lower_frag_size_query(nir_builder *b, nir_tex_instr *tex,
+                      struct tu_device *dev,
+                      struct tu_shader *shader,
+                      const struct tu_pipeline_layout *layout)
+{
+   /* With subsampled images, the descriptor for the query metadata comes
+    * after the subsampled metadata.
+    */
+   unsigned descriptor_offset = tex_is_subsampled(tex, layout) ? 3 : 2;
+   int tex_src_idx = nir_tex_instr_src_index(tex, nir_tex_src_texture_deref);
+   assert(tex_src_idx >= 0);
+   nir_deref_instr *deref = nir_src_as_deref(tex->src[tex_src_idx].src);
+
+   bool descriptor_valid = true;
+   nir_def *bindless = build_bindless(dev, b, deref, descriptor_offset, 
+                                      shader, layout, 0, false,
+                                      &descriptor_valid);
+
+   nir_def *coord = nir_get_tex_src(tex, nir_tex_src_coord);
+
+   nir_def *result = tu_get_frag_size(b, coord, bindless, descriptor_valid);
+
+   nir_def_rewrite_uses(&tex->def, result);
+   nir_instr_remove(&tex->instr);
+}
+
+static bool
 lower_tex(nir_builder *b, nir_tex_instr *tex, struct tu_device *dev,
           struct tu_shader *shader, const struct tu_pipeline_layout *layout,
           uint32_t read_only_input_attachments, bool dynamic_renderpass)
@@ -931,6 +996,8 @@ lower_tex(nir_builder *b, nir_tex_instr *tex, struct tu_device *dev,
        tex->op == nir_texop_sample_weighted_qcom) {
       lower_tex_impl(b, tex, dev, shader, layout, read_only_input_attachments, dynamic_renderpass, false);
       lower_tex_impl(b, tex, dev, shader, layout, read_only_input_attachments, dynamic_renderpass, true);
+   } else if (tex->op == nir_texop_frag_size) {
+      lower_frag_size_query(b, tex, dev, shader, layout);
    } else {
       lower_tex_immutable(dev, shader, layout, b, tex);
       lower_tex_impl(b, tex, dev, shader, layout, read_only_input_attachments, dynamic_renderpass, false);

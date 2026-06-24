@@ -43,6 +43,17 @@ struct tu_subsampled_bin {
    float offset_y;
 };
 
+/* We can reuse the subsampled metadata header and layout for query metadata,
+ * but it's for querying we need to just store the frag size directly as an
+ * integer. The scale is derived from the frag size but is not an exact
+ * inverse for various reasons.
+ */
+struct tu_query_bin {
+   uint32_t frag_size_x;
+   uint32_t frag_size_y;
+   uint32_t pad0, pad1;
+};
+
 struct tu_subsampled_header {
    /* The bin coordinate to use is calculated as:
     * bin = int(coord * scale + offset)
@@ -62,6 +73,12 @@ struct tu_subsampled_metadata {
    struct tu_subsampled_bin bins[TU_SUBSAMPLED_MAX_BINS];
 };
 
+struct tu_query_metadata {
+   struct tu_subsampled_header hdr;
+
+   struct tu_query_bin bins[TU_SUBSAMPLED_MAX_BINS];
+};
+
 void
 tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
                             struct tu_cs *cs,
@@ -71,6 +88,16 @@ tu_emit_subsampled_metadata(struct tu_cmd_buffer *cmd,
                             const struct tu_vsc_config *vsc,
                             const struct tu_framebuffer *fb,
                             const VkOffset2D *fdm_offsets);
+
+void
+tu_emit_query_metadata(struct tu_cmd_buffer *cmd,
+                       struct tu_cs *cs,
+                       unsigned a,
+                       const struct tu_tile_config *tiles,
+                       const struct tu_tiling_config *tiling,
+                       const struct tu_vsc_config *vsc,
+                       const struct tu_framebuffer *fb,
+                       const VkOffset2D *fdm_offsets);
 
 unsigned
 tu_calc_subsampled_aprons(VkRect2D *dst,
@@ -88,3 +115,10 @@ _tu_get_subsampled_coordinates(nir_builder *b,
                               nir_def *coords,
                               nir_def *descriptor,
                               bool can_speculate);
+
+#define tu_get_frag_size(...) MESA_CALL_WITH_LTR_ARGS(_tu_get_frag_size, __VA_ARGS__)
+nir_def *
+_tu_get_frag_size(nir_builder *b,
+                  nir_def *coords,
+                  nir_def *descriptor,
+                  bool can_speculate);

@@ -650,6 +650,13 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
          image->vk.array_layers * sizeof(struct tu_subsampled_metadata);
    }
 
+   if (image->vk.create_flags &
+       VK_IMAGE_CREATE_FRAGMENT_DENSITY_QUERY_BIT_VALVE) {
+      image->frag_size_query_metadata_offset = align64(image->total_size, 16);
+      image->total_size = image->frag_size_query_metadata_offset +
+         image->vk.array_layers * sizeof(struct tu_query_metadata);
+   }
+
    return VK_SUCCESS;
 }
 TU_GENX(tu_image_update_layout);

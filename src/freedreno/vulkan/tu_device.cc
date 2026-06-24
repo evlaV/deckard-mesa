@@ -390,6 +390,7 @@ get_device_extensions(const struct tu_physical_device *device,
          device->info->props.has_per_view_viewport,
       .QCOM_render_pass_shader_resolve = true,
       .VALVE_fragment_density_map_layered = true,
+      .VALVE_fragment_density_map_query = true,
       .VALVE_mutable_descriptor_type = true,
    } };
 
@@ -864,6 +865,9 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* VK_VALVE_fragment_density_map_layered */
    features->fragmentDensityMapLayered = true;
+
+   /* VK_VALVE_fragment_density_map_query */
+   features->fragmentDensityMapQuery = true;
 
    /* VK_EXT_dynamic_rendering_unused_attachments */
    features->dynamicRenderingUnusedAttachments = true;
@@ -1451,6 +1455,9 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->resourceDescriptorBufferAddressSpaceSize = ~0ull;
    props->descriptorBufferAddressSpaceSize = ~0ull;
    props->combinedImageSamplerDensityMapDescriptorSize = 3 * FDL6_TEX_CONST_DWORDS * 4;
+   props->sampledImageFragSizeQueryDescriptorSize = 2 * FDL6_TEX_CONST_DWORDS * 4;
+   props->combinedImageSamplerFragSizeQueryDescriptorSize = 3 * FDL6_TEX_CONST_DWORDS * 4;
+   props->combinedImageSamplerDensityMapFragSizeQueryDescriptorSize = 4 * FDL6_TEX_CONST_DWORDS * 4;
 
    /* VK_EXT_legacy_vertex_attributes */
    props->nativeUnalignedPerformance = true;
