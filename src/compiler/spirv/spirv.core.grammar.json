@@ -11859,6 +11859,19 @@
       ],
       "capabilities" : [ "DotProductFloat8AccFloat32VALVE" ],
       "version" : "None"
+    },
+    {
+      "opname" : "OpImageQueryFragSizeVALVE",
+      "class"  : "Image",
+      "opcode" : 6919,
+      "operands" : [
+        { "kind" : "IdResultType" },
+        { "kind" : "IdResult" },
+        { "kind" : "IdRef",        "name" : "Sampled Image" },
+        { "kind" : "IdRef",        "name" : "Coordinate" }
+      ],
+      "capabilities" : [ "ImageQuery", "FragmentDensityQueryVALVE" ],
+      "version": "None"
     }
   ],
   "operand_kinds" : [
@@ -12683,6 +12696,16 @@
         {
           "enumerant" : "Rust",
           "value" : 13,
+          "version" : "1.0"
+        },
+        {
+          "enumerant" : "Pred",
+          "value" : 14,
+          "version" : "1.0"
+        },
+        {
+          "enumerant" : "ApilaJai",
+          "value" : 15,
           "version" : "1.0"
         }
       ]
@@ -18802,6 +18825,13 @@
           "value" : 6915,
           "capabilities" : [ "Float8EXT" ],
           "extensions" : [ "SPV_VALVE_mixed_float_dot_product" ],
+          "version" : "None"
+        },
+        {
+          "enumerant" : "FragmentDensityQueryVALVE",
+          "value" : 6916,
+          "capabilities" : [ "ImageQuery" ],
+          "extensions" : [ "SPV_VALVE_fragment_invocation_density_query" ],
           "version" : "None"
         }
       ]

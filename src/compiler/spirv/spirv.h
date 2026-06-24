@@ -63,6 +63,8 @@ typedef enum SpvSourceLanguage_ {
     SpvSourceLanguageSlang = 11,
     SpvSourceLanguageZig = 12,
     SpvSourceLanguageRust = 13,
+    SpvSourceLanguagePred = 14,
+    SpvSourceLanguageApilaJai = 15,
     SpvSourceLanguageMax = 0x7fffffff,
 } SpvSourceLanguage;
 
@@ -1415,6 +1417,7 @@ typedef enum SpvCapability_ {
     SpvCapabilityDotProductFloat16AccFloat16VALVE = 6913,
     SpvCapabilityDotProductBFloat16AccVALVE = 6914,
     SpvCapabilityDotProductFloat8AccFloat32VALVE = 6915,
+    SpvCapabilityFragmentDensityQueryVALVE = 6916,
     SpvCapabilityMax = 0x7fffffff,
 } SpvCapability;
 
@@ -2662,6 +2665,7 @@ typedef enum SpvOp_ {
     SpvOpFDot2MixAcc32VALVE = 6916,
     SpvOpFDot2MixAcc16VALVE = 6917,
     SpvOpFDot4MixAcc32VALVE = 6918,
+    SpvOpImageQueryFragSizeVALVE = 6919,
     SpvOpMax = 0x7fffffff,
 } SpvOp;
 
@@ -3546,6 +3550,7 @@ inline void SpvHasResultAndType(SpvOp opcode, bool *hasResult, bool *hasResultTy
     case SpvOpFDot2MixAcc32VALVE: *hasResult = true; *hasResultType = true; break;
     case SpvOpFDot2MixAcc16VALVE: *hasResult = true; *hasResultType = true; break;
     case SpvOpFDot4MixAcc32VALVE: *hasResult = true; *hasResultType = true; break;
+    case SpvOpImageQueryFragSizeVALVE: *hasResult = true; *hasResultType = true; break;
     }
 }
 inline const char* SpvSourceLanguageToString(SpvSourceLanguage value) {
@@ -3564,6 +3569,8 @@ inline const char* SpvSourceLanguageToString(SpvSourceLanguage value) {
     case SpvSourceLanguageSlang: return "Slang";
     case SpvSourceLanguageZig: return "Zig";
     case SpvSourceLanguageRust: return "Rust";
+    case SpvSourceLanguagePred: return "Pred";
+    case SpvSourceLanguageApilaJai: return "ApilaJai";
     default: return "Unknown";
     }
 }
@@ -4553,6 +4560,7 @@ inline const char* SpvCapabilityToString(SpvCapability value) {
     case SpvCapabilityDotProductFloat16AccFloat16VALVE: return "DotProductFloat16AccFloat16VALVE";
     case SpvCapabilityDotProductBFloat16AccVALVE: return "DotProductBFloat16AccVALVE";
     case SpvCapabilityDotProductFloat8AccFloat32VALVE: return "DotProductFloat8AccFloat32VALVE";
+    case SpvCapabilityFragmentDensityQueryVALVE: return "FragmentDensityQueryVALVE";
     default: return "Unknown";
     }
 }
@@ -5620,6 +5628,7 @@ inline const char* SpvOpToString(SpvOp value) {
     case SpvOpFDot2MixAcc32VALVE: return "OpFDot2MixAcc32VALVE";
     case SpvOpFDot2MixAcc16VALVE: return "OpFDot2MixAcc16VALVE";
     case SpvOpFDot4MixAcc32VALVE: return "OpFDot4MixAcc32VALVE";
+    case SpvOpImageQueryFragSizeVALVE: return "OpImageQueryFragSizeVALVE";
     default: return "Unknown";
     }
 }
