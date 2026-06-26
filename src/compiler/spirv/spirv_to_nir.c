@@ -100,6 +100,7 @@ static const struct spirv_capabilities implemented_capabilities = {
    .FloatControls2 = true,
    .FragmentBarycentricKHR = true,
    .FragmentDensityEXT = true,
+   .FragmentDensityQueryVALVE = true,
    .FragmentFullyCoveredEXT = true,
    .FragmentMaskAMD = true,
    .FragmentShaderPixelInterlockEXT = true,
@@ -3593,6 +3594,11 @@ vtn_handle_texture(struct vtn_builder *b, SpvOp opcode,
       dest_type = nir_type_int32;
       break;
 
+   case SpvOpImageQueryFragSizeVALVE:
+      texop = nir_texop_frag_size;
+      dest_type = nir_type_uint32;
+      break;
+
    case SpvOpFragmentFetchAMD:
       vtn_assert(sampler_dim == GLSL_SAMPLER_DIM_MS ||
                  sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
@@ -3661,6 +3667,15 @@ vtn_handle_texture(struct vtn_builder *b, SpvOp opcode,
    case nir_texop_fragment_mask_fetch_amd:
       /* These don't */
       break;
+   case nir_texop_frag_size:
+      /* The sampler is optional and only required to identify subsampled
+       * images at compile time.
+       */
+      if (sampler) {
+         p->src = nir_src_for_ssa(&sampler->def);
+         p->src_type = nir_tex_src_sampler_deref;
+      }
+      break;
    case nir_texop_txf_ms_fb:
       vtn_fail("unexpected nir_texop_txf_ms_fb");
       break;
@@ -3718,7 +3733,8 @@ vtn_handle_texture(struct vtn_builder *b, SpvOp opcode,
    case SpvOpImageSampleWeightedQCOM:
    case SpvOpImageBoxFilterQCOM:
    case SpvOpImageBlockMatchSADQCOM:
-   case SpvOpImageBlockMatchSSDQCOM: {
+   case SpvOpImageBlockMatchSSDQCOM:
+   case SpvOpImageQueryFragSizeVALVE: {
       /* All these types have the coordinate as their first real argument */
       coord_components = glsl_get_sampler_dim_coordinate_components(sampler_dim);
 
@@ -6677,6 +6693,7 @@ vtn_handle_body_instruction(struct vtn_builder *b, SpvOp opcode,
    case SpvOpImageBoxFilterQCOM:
    case SpvOpImageBlockMatchSADQCOM:
    case SpvOpImageBlockMatchSSDQCOM:
+   case SpvOpImageQueryFragSizeVALVE:
       vtn_handle_texture(b, opcode, w, count);
       break;
 
