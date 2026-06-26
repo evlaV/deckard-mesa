@@ -763,32 +763,12 @@ lower_tex_subsampled(const struct tu_sampler *sampler,
                                       &descriptor_valid);
 
    nir_def *coord = nir_steal_tex_src(tex, nir_tex_src_coord);
-   nir_def *coord_xy = nir_channels(b, coord, 0x3);
    nir_def *layer = NULL;
    if (coord->num_components > 2)
       layer = nir_channel(b, coord, 2);
 
-   /* In order to avoid problems in the math for finding the bin with
-    * an x or y coordinate of exactly 1.0, where we would overflow into the
-    * next bin, we have to clamp to some 1.0 - epsilon. The largest possible
-    * framebuffer is 2^14 pixels currently, and we cannot shift the coordinate
-    * to before the pixel center, so we use 2^-15.
-    */
-   const float epsilon = 0x1p-15f;
-   nir_def *clamped_coord_xy =
-      nir_fmax(b, nir_fmin(b, coord_xy, nir_imm_float(b, 1.0f - epsilon)),
-               nir_imm_float(b, 0.0));
-
-   nir_def *clamped_coord = clamped_coord_xy;
-   if (layer) {
-      clamped_coord = nir_vec3(b, nir_channel(b, clamped_coord_xy, 0),
-                               nir_channel(b, clamped_coord_xy, 1),
-                               layer);
-   }
-
    nir_def *transformed_coord_xy =
-      tu_get_subsampled_coordinates(b, clamped_coord, bindless,
-                                    descriptor_valid);
+      tu_get_subsampled_coordinates(b, coord, bindless, descriptor_valid);
 
    /* Due to VUID-VkSamplerCreateInfo-flags-02577 we only have to handle
     * CLAMP_TO_EDGE and CLAMP_TO_BORDER. We implicitly do CLAMP_TO_EDGE to

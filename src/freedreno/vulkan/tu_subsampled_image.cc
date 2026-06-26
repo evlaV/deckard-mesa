@@ -152,7 +152,20 @@ _tu_get_subsampled_coordinates(nir_builder *b,
    nir_def *hdr_scale = nir_channels(b, hdr0, 0x3);
    nir_def *hdr_offset = nir_channels(b, hdr0, 0xc);
 
-   nir_def *bin = nir_f2u16(b, nir_ffma(b, coords, hdr_scale, hdr_offset));
+   nir_def *coord_xy = nir_channels(b, coords, 0x3);
+
+   /* In order to avoid problems in the math for finding the bin with
+    * an x or y coordinate of exactly 1.0, where we would overflow into the
+    * next bin, we have to clamp to some 1.0 - epsilon. The largest possible
+    * framebuffer is 2^14 pixels currently, and we cannot shift the coordinate
+    * to before the pixel center, so we use 2^-15.
+    */
+   const float epsilon = 0x1p-15f;
+   nir_def *clamped_coord_xy =
+      nir_fmax(b, nir_fmin(b, coord_xy, nir_imm_float(b, 1.0f - epsilon)),
+               nir_imm_float(b, 0.0));
+
+   nir_def *bin = nir_f2u16(b, nir_ffma(b, clamped_coord_xy, hdr_scale, hdr_offset));
    nir_def *bin_idx = nir_iadd(b, nir_imul(b, nir_channel(b, bin, 1),
                                            nir_u2u16(b, bin_stride)),
                                nir_channel(b, bin, 0));
