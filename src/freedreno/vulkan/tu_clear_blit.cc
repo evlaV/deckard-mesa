@@ -3301,6 +3301,56 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
 }
 
 template <chip CHIP>
+static void
+copy_buffer(struct tu_cmd_buffer *cmd,
+            uint64_t dst_va,
+            uint64_t src_va,
+            uint64_t size,
+            uint32_t block_size,
+            bool *unaligned_store)
+{
+   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   struct tu_cs *cs = &cmd->cs;
+   uint64_t blocks = size / block_size;
+   enum pipe_format format;
+
+   switch (block_size) {
+   case 16:
+      format = PIPE_FORMAT_R32G32B32A32_UINT;
+      break;
+   case 4:
+      format = PIPE_FORMAT_R32_UINT;
+      break;
+   default:
+      assert(block_size == 1);
+      format = PIPE_FORMAT_R8_UNORM;
+      break;
+   }
+
+   handle_buffer_unaligned_store<CHIP>(cmd, dst_va, size, unaligned_store);
+
+   ops->setup(cmd, cs, format, format, VK_IMAGE_ASPECT_COLOR_BIT, 0, false, false,
+              VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT);
+
+   while (blocks) {
+      uint32_t src_x = (src_va & 63) / block_size;
+      uint32_t dst_x = (dst_va & 63) / block_size;
+      uint32_t width = MIN2(MIN2(blocks, 0x4000 - src_x), 0x4000 - dst_x);
+
+      ops->src_buffer(cmd, cs, format, src_va & ~63, 0, src_x + width, 1, format);
+      ops->dst_buffer(     cs, format, dst_va & ~63, 0, format);
+      ops->coords(cmd, cs, (VkOffset2D) {dst_x}, (VkOffset2D) {src_x}, (VkExtent2D) {width, 1});
+      ops->run(cmd, cs);
+
+      src_va += width * block_size;
+      dst_va += width * block_size;
+      blocks -= width;
+   }
+
+   ops->teardown(cmd, cs);
+}
+
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdCopyImage2(VkCommandBuffer commandBuffer,
                  const VkCopyImageInfo2 *pCopyImageInfo)
@@ -3521,56 +3571,6 @@ tu_TransitionImageLayoutEXT(VkDevice device,
 {
    /* We don't do anything with layouts so this should be a no-op */
    return VK_SUCCESS;
-}
-
-template <chip CHIP>
-static void
-copy_buffer(struct tu_cmd_buffer *cmd,
-            uint64_t dst_va,
-            uint64_t src_va,
-            uint64_t size,
-            uint32_t block_size,
-            bool *unaligned_store)
-{
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
-   struct tu_cs *cs = &cmd->cs;
-   uint64_t blocks = size / block_size;
-   enum pipe_format format;
-
-   switch (block_size) {
-   case 16:
-      format = PIPE_FORMAT_R32G32B32A32_UINT;
-      break;
-   case 4:
-      format = PIPE_FORMAT_R32_UINT;
-      break;
-   default:
-      assert(block_size == 1);
-      format = PIPE_FORMAT_R8_UNORM;
-      break;
-   }
-
-   handle_buffer_unaligned_store<CHIP>(cmd, dst_va, size, unaligned_store);
-
-   ops->setup(cmd, cs, format, format, VK_IMAGE_ASPECT_COLOR_BIT, 0, false, false,
-              VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT);
-
-   while (blocks) {
-      uint32_t src_x = (src_va & 63) / block_size;
-      uint32_t dst_x = (dst_va & 63) / block_size;
-      uint32_t width = MIN2(MIN2(blocks, 0x4000 - src_x), 0x4000 - dst_x);
-
-      ops->src_buffer(cmd, cs, format, src_va & ~63, 0, src_x + width, 1, format);
-      ops->dst_buffer(     cs, format, dst_va & ~63, 0, format);
-      ops->coords(cmd, cs, (VkOffset2D) {dst_x}, (VkOffset2D) {src_x}, (VkExtent2D) {width, 1});
-      ops->run(cmd, cs);
-
-      src_va += width * block_size;
-      dst_va += width * block_size;
-      blocks -= width;
-   }
-
-   ops->teardown(cmd, cs);
 }
 
 template <chip CHIP>
