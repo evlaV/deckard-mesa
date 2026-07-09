@@ -322,18 +322,29 @@ opt_cap_bool(uint32_t val)
 }
 
 static bool
-tu_drm_get_raytracing(struct vdrm_device *vdrm)
+tu_drm_get_bool_param(struct vdrm_device *vdrm, unsigned param)
 {
-   if (vdrm->caps.u.msm.has_raytracing)
-      return opt_cap_bool(vdrm->caps.u.msm.has_raytracing);
    uint64_t value;
-   int ret = tu_drm_get_param(vdrm, MSM_PARAM_RAYTRACING, &value);
+   int ret = tu_drm_get_param(vdrm, param, &value);
    if (ret)
       return false;
 
    return value;
 }
 
+static bool
+tu_drm_get_raytracing(struct vdrm_device *vdrm)
+{
+   if (vdrm->caps.u.msm.has_raytracing)
+      return opt_cap_bool(vdrm->caps.u.msm.has_raytracing);
+   return tu_drm_get_bool_param(vdrm, MSM_PARAM_RAYTRACING);
+}
+
+static bool
+tu_drm_get_aqe(struct vdrm_device *vdrm)
+{
+   return tu_drm_get_bool_param(vdrm, MSM_PARAM_AQE);
+}
 
 static VkResult
 virtio_device_check_status(struct tu_device *device)
@@ -1296,6 +1307,7 @@ tu_knl_drm_virtio_load(struct tu_instance *instance,
    sync->finalize(sync);
 
    bool has_raytracing = tu_drm_get_raytracing(vdrm);
+   bool has_aqe = tu_drm_get_aqe(vdrm);
 
    vdrm_device_close(vdrm);
 
@@ -1375,6 +1387,7 @@ tu_knl_drm_virtio_load(struct tu_instance *instance,
    device->submitqueue_priority_count = caps.u.msm.priorities;
 
    device->has_raytracing = has_raytracing;
+   device->has_aqe = has_aqe;
 
    device->syncobj_type = syncobj_type;
 

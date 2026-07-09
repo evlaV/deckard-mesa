@@ -1896,14 +1896,26 @@ static const struct tu_knl kgsl_knl_funcs = {
 };
 
 static bool
-tu_kgsl_get_raytracing(int fd)
+tu_kgsl_get_bool_prop(int fd, unsigned prop)
 {
    uint32_t value;
-   int ret = get_kgsl_prop(fd, KGSL_PROP_IS_RAYTRACING_ENABLED, &value, sizeof(value));
+   int ret = get_kgsl_prop(fd, prop, &value, sizeof(value));
    if (ret)
       return false;
 
    return value;
+}
+
+static bool
+tu_kgsl_get_raytracing(int fd)
+{
+   return tu_kgsl_get_bool_prop(fd, KGSL_PROP_IS_RAYTRACING_ENABLED);
+}
+
+static bool
+tu_kgsl_get_aqe(int fd)
+{
+   return tu_kgsl_get_bool_prop(fd, KGSL_PROP_IS_AQE_ENABLED);
 }
 
 VkResult

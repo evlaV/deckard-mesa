@@ -130,6 +130,7 @@ struct tu_physical_device
 
    bool has_set_iova;
    bool has_raytracing;
+   bool has_aqe;
    bool has_vm_bind;
    /* Whether a sparse queue can be created. */
    bool has_sparse;
