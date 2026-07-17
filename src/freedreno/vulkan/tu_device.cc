@@ -71,18 +71,27 @@ tu_device_get_build_id(blake3_hasher *ctx)
 #endif
 }
 
-static int
-tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
+static void
+tu_physical_device_compiler_options_init(struct tu_physical_device *device,
+                                         struct tu_instance *instance)
 {
-   blake3_hasher ctx;
-   unsigned char blake3[BLAKE3_KEY_LEN];
+   device->compiler_options.allow_oob_indirect_ubo_loads =
+      device->instance->allow_oob_indirect_ubo_loads;
+
    /* Note: IR3_SHADER_DEBUG also affects compilation, but it's not
     * initialized until after compiler creation so we have to add it to the
     * shader hash instead, since the compiler is only created with the logical
     * device.
     */
-   uint64_t driver_flags = TU_DEBUG(NOMULTIPOS) |
-      (TU_DEBUG(COMPUTE_ROUND_ROBIN) << 1u);
+   device->compiler_options.no_multi_pos = TU_DEBUG(NOMULTIPOS);
+   device->compiler_options.compute_round_robin = TU_DEBUG(COMPUTE_ROUND_ROBIN);
+}
+
+static int
+tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
+{
+   blake3_hasher ctx;
+   unsigned char blake3[BLAKE3_KEY_LEN];
 
    /* Note: we intentionally drop the upper 32 bits since they contain fuse
     * values that don't affect compilation.
@@ -96,8 +105,9 @@ tu_device_get_cache_uuid(struct tu_physical_device *device, void *uuid)
       return -1;
 
    _mesa_blake3_update(&ctx, &chip_id, sizeof(chip_id));
-   _mesa_blake3_update(&ctx, &driver_flags, sizeof(driver_flags));
    _mesa_blake3_update(&ctx, &device->uche_trap_base, sizeof(device->uche_trap_base));
+   _mesa_blake3_update(&ctx, &device->compiler_options,
+                       sizeof(device->compiler_options));
    _mesa_blake3_final(&ctx, blake3);
 
    memcpy(uuid, blake3, VK_UUID_SIZE);
@@ -1697,6 +1707,9 @@ tu_physical_device_init(struct tu_physical_device *device,
                                  "device %s is unsupported", device->name);
       goto fail_free_name;
    }
+
+   tu_physical_device_compiler_options_init(device, instance);
+
    if (tu_device_get_cache_uuid(device, device->cache_uuid)) {
       result = vk_startup_errorf(instance, VK_ERROR_INITIALIZATION_FAILED,
                                  "cannot generate UUID");

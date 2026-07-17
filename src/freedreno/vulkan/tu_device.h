@@ -153,6 +153,13 @@ struct tu_physical_device
    bool is_perf_cntr_selectable;
 
    struct {
+      bool allow_oob_indirect_ubo_loads : 1;
+      bool no_multi_pos : 1;
+      bool compute_round_robin : 1;
+      uint32_t padding : 28;
+   } compiler_options;
+
+   struct {
       uint32_t non_lazy_type_count;
       uint32_t type_count;
       VkMemoryPropertyFlags types[VK_MAX_MEMORY_TYPES];

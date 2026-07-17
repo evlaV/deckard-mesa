@@ -220,7 +220,7 @@ tu_spirv_to_nir(struct tu_device *dev,
    nir->info.num_ubos = 0;
    nir->info.num_ssbos = 0;
 
-   if (TU_DEBUG(COMPUTE_ROUND_ROBIN)) {
+   if (dev->physical_device->compiler_options.compute_round_robin) {
       nir->info.occupancy_bounded_workgroup_fairness = true;
    }
 
@@ -453,7 +453,7 @@ lower_ssbo_ubo_intrinsic(struct tu_device *dev,
    nir_def *descriptor_idx = nir_channel(b, intrin->src[buffer_src].ssa, 1);
 
    if (intrin->intrinsic == nir_intrinsic_load_ubo &&
-       dev->instance->allow_oob_indirect_ubo_loads) {
+       dev->physical_device->compiler_options.allow_oob_indirect_ubo_loads) {
       nir_scalar offset = nir_scalar_resolved(intrin->src[1].ssa, 0);
       if (!nir_scalar_is_const(offset)) {
          nir_intrinsic_set_range(intrin, ~0);
