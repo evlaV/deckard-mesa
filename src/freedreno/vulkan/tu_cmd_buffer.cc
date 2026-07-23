@@ -7338,6 +7338,8 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
       // gabe: no subpassinfo avail here?
       // TODO: How should srgb_cntl overriding be handled?
       tu_emit_subpass_begin<CHIP>(cmd);
+   } else {
+      tu_set_input_attachments<CHIP>(cmd, cmd->state.subpass);
    }
 
    if (suspending && !resuming) {
