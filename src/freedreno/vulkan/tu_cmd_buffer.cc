@@ -7389,8 +7389,12 @@ tu_CmdSetRenderingInputAttachmentIndicesKHR(
    }
 
    subpass->input_count = input_count;
+   /* Also should be propagated into custom resolve subpass. */
+   if (cmd->dynamic_pass.subpass_count > 1) {
+      cmd->dynamic_subpasses[1].input_count = input_count;
+   }
 
-   tu_set_input_attachments<CHIP>(cmd, subpass);
+   tu_set_input_attachments<CHIP>(cmd, cmd->state.subpass);
 }
 TU_GENX(tu_CmdSetRenderingInputAttachmentIndicesKHR);
 
