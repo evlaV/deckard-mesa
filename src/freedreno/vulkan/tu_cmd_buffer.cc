@@ -7333,8 +7333,10 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
                              &cmd->state.vk_mv,
                              cmd->state.pass, cmd->state.subpass);
 
-   if (!resuming) {
+   if (!cmd->patchpoints_ctx)
       cmd->patchpoints_ctx = ralloc_context(NULL);
+
+   if (!resuming) {
       // gabe: no subpassinfo avail here?
       // TODO: How should srgb_cntl overriding be handled?
       tu_emit_subpass_begin<CHIP>(cmd);
