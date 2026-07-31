@@ -142,7 +142,7 @@ alias_srcs(struct ir3_instruction *instr, const struct ir3_compiler *compiler)
     * scheduler to avoid putting potentially-aliasing instructions between mova
     * and the last use of the mova.
     */
-   if (num_aliases > 0 && compiler->info->chip == 7) {
+   if (num_aliases > 0 && compiler->info->props.alias_mova_quirk) {
       ir3_dst_create(instr, REG_A0_X, IR3_REG_HALF);
    }
 

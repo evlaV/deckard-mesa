@@ -1000,6 +1000,8 @@ a7xx_base = GPUProps(
         has_eolm_eogm = True,
 
         round_robin_errata = True,
+
+        alias_mova_quirk = True,
     )
 
 a7xx_gen1 = GPUProps(
@@ -1447,6 +1449,7 @@ a8xx_base = GPUProps(
         supports_double_threadsize = False,
         has_dual_wave_dispatch = True,
         round_robin_errata = False,
+        alias_mova_quirk = False,
     )
 
 # For a8xx, the chicken bit and most other non-ctx reg

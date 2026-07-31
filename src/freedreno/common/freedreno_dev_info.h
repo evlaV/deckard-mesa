@@ -484,6 +484,9 @@ struct fd_dev_info {
 
       /* The amount of valid draw state IDs. */
       uint32_t max_draw_states;
+
+      /* On a7xx alias.tex may hang when in between mova and (ul). */
+      bool alias_mova_quirk;
    } props;
 };
 
