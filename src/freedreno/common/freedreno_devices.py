@@ -1002,6 +1002,7 @@ a7xx_base = GPUProps(
         round_robin_errata = True,
 
         alias_mova_quirk = True,
+        alias_predication_quirk = True,
     )
 
 a7xx_gen1 = GPUProps(

@@ -176,7 +176,8 @@ ir3_create_alias_tex_regs(struct ir3 *ir)
       /* All current HW has a limitation where alias.tex is not allowed inside a
        * predt/predf/prede sequence.
        */
-      if (!block_is_predicated) {
+      if (!ir->compiler->info->props.alias_predication_quirk ||
+          !block_is_predicated) {
          foreach_instr (instr, &block->instr_list) {
             if (supports_alias_srcs(instr)) {
                progress |= alias_srcs(instr, ir->compiler);
