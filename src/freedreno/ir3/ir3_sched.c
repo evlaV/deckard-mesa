@@ -261,10 +261,13 @@ schedule(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
 
    if (writes_addr0(instr)) {
       assert(ctx->addr0 == NULL);
-      if (!instr->uses) {
-         /* If a0 is written but not actually used (i.e., bar in REUSEGPRMODE),
-          * we shouldn't keep track of the writer as this would deadlock us
-          * because no reader is ever scheduled.
+      if (instr->opc != OPC_MOV) {
+         /* If a0 is written but not actually used (i.e., bar in REUSEGPRMODE or
+          * alias-using texture instructions), we shouldn't keep track of the
+          * writer as this would deadlock us because no reader is ever
+          * scheduled. We can't rely on the uses because texture instructions
+          * have uses but their definition of a0.x does not, so we detect this
+          * by assuming that the only real writes of a0.x come from mova.
           */
          ctx->addr0 = NULL;
          ctx->addr0_uses = 0;
@@ -276,7 +279,7 @@ schedule(struct ir3_sched_ctx *ctx, struct ir3_instruction *instr)
 
    if (writes_addr1(instr)) {
       assert(ctx->addr1 == NULL);
-      if (!instr->uses) {
+      if (instr->opc != OPC_MOV) {
          /* See note above for a0. */
          ctx->addr1 = NULL;
          ctx->addr1_uses = 0;
