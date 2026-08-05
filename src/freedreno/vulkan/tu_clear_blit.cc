@@ -2272,6 +2272,80 @@ tu6_clear_lrz(struct tu_cmd_buffer *cmd,
 }
 TU_GENX(tu6_clear_lrz);
 
+/* Clear only the LRZ rows that the fast-clear buffer does not cover.
+ *
+ * When the flag RAM is too small for the whole LRZ image we keep fast clear
+ * enabled for the prefix it does cover and clear the rest here. Blocks with no
+ * flag bit fall back to reading LRZ memory, so writing the depth clear value
+ * into those rows is what makes the result correct -- and it is also correct if
+ * the hardware instead reads a stale flag bit and takes it as "dirty", since
+ * either path then lands on cleared LRZ.
+ */
+template <chip CHIP>
+void
+tu6_clear_lrz_partial(struct tu_cmd_buffer *cmd,
+                      struct tu_cs *cs,
+                      struct tu_image *image,
+                      const VkClearValue *value)
+{
+   const struct blit_ops *ops = &r2d_ops<CHIP>;
+   const struct fdl_lrz_layout *lrz = &image->lrz_layout;
+
+   /* This runs after FD_LRZ_CLEAR, so unlike tu6_clear_lrz there is LRZ work
+    * already in flight. The fast clear is processed by the LRZ block and its
+    * cache is separate from the CCU these writes go through, so without an
+    * explicit LRZ flush and an idle wait the two race and clobber each other at
+    * cache-line granularity -- which shows up as scattered, run-to-run-varying
+    * over-culling rather than a clean missing region.
+    *
+    * Emit into `cs`, the same stream as the blit below, so the ordering is
+    * actually guaranteed.
+    */
+   tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLUSH);
+   tu_emit_event_write<CHIP>(cmd, cs, FD_CACHE_CLEAN);
+   cmd->state.cache.flush_bits |= TU_CMD_FLAG_WAIT_FOR_IDLE;
+   tu_emit_cache_flush<CHIP>(cmd);
+
+   const unsigned lrz_buffers = CHIP >= A7XX ? 2 : 1;
+   bool any = false;
+
+   for (unsigned i = 0; i < lrz_buffers; i++) {
+      for (unsigned layer = 0; layer < image->vk.array_layers; layer++) {
+         uint32_t first = fdl6_lrz_fc_first_uncovered_row(lrz, layer);
+         if (first >= lrz->lrz_height)
+            continue;
+
+         uint32_t rows = lrz->lrz_height - first;
+         uint64_t iova = image->iova + lrz->lrz_offset +
+                         i * lrz->lrz_buffer_size +
+                         (uint64_t) layer * lrz->lrz_layer_size +
+                         (uint64_t) first * lrz->lrz_pitch * sizeof(uint16_t);
+
+         if (!any) {
+            ops->setup(cmd, cs, PIPE_FORMAT_Z16_UNORM, PIPE_FORMAT_Z16_UNORM,
+                       VK_IMAGE_ASPECT_DEPTH_BIT, 0, true, false,
+                       VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT);
+            ops->clear_value(cmd, cs, PIPE_FORMAT_Z16_UNORM, value);
+            any = true;
+         }
+
+         ops->dst_buffer(cs, PIPE_FORMAT_Z16_UNORM, iova,
+                         lrz->lrz_pitch * sizeof(uint16_t), PIPE_FORMAT_Z16_UNORM);
+         ops->coords(cmd, cs, (VkOffset2D) {}, blt_no_coord,
+                     (VkExtent2D) { lrz->lrz_pitch, rows });
+         ops->run(cmd, cs);
+      }
+   }
+
+   if (any)
+      ops->teardown(cmd, cs);
+
+   cmd->state.cache.flush_bits |=
+      TU_CMD_FLAG_CCU_CLEAN_COLOR | TU_CMD_FLAG_CACHE_INVALIDATE |
+      TU_CMD_FLAG_WAIT_FOR_IDLE;
+}
+TU_GENX(tu6_clear_lrz_partial);
+
 template <chip CHIP>
 void
 tu6_dirty_lrz_fc(struct tu_cmd_buffer *cmd,

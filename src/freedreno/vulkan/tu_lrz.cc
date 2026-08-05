@@ -610,6 +610,18 @@ tu_lrz_tiling_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
       if (CHIP >= A7XX)
          tu_cs_emit_regs(cs, GRAS_LRZ_DEPTH_CLEAR(CHIP, lrz->depth_clear_value.depthStencil.depth));
       tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_CLEAR);
+
+      /* The flag RAM may not cover the whole LRZ image. FD_LRZ_CLEAR only
+       * clears the part it does cover, so clear the rest explicitly.
+       */
+      if (lrz->fast_clear) {
+         const struct fdl_lrz_layout *l =
+            &lrz->image_view->image->lrz_layout;
+         if (l->lrz_fc_size < l->lrz_fc_full_size) {
+            tu6_clear_lrz_partial<CHIP>(cmd, cs, lrz->image_view->image,
+                                        &lrz->depth_clear_value);
+         }
+      }
    }
 
    if (!lrz->fast_clear) {
