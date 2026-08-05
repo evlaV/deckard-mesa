@@ -634,6 +634,25 @@ struct prefetch_state {
    struct prefetches tex, sampler;
 };
 
+/* Whether a sam prefetching this pair would encode its descriptor indices
+ * inside the instruction. get_bindless_samp_src() can only do that when both
+ * indices are constants below 16 sharing a descriptor set; otherwise the sam
+ * needs an a1 value built from the sampler index, which costs a mova1 and the
+ * write-to-use padding behind it for every distinct sampler.
+ */
+static bool
+prefetch_sam_is_inline(nir_def *tex, nir_def *samp)
+{
+   nir_intrinsic_instr *t = ir3_bindless_resource(nir_src_for_ssa(tex));
+   nir_intrinsic_instr *s = ir3_bindless_resource(nir_src_for_ssa(samp));
+
+   if (!t || !s || !nir_src_is_const(t->src[0]) || !nir_src_is_const(s->src[0]))
+      return false;
+
+   return nir_src_as_uint(t->src[0]) < 16 && nir_src_as_uint(s->src[0]) < 16 &&
+          nir_intrinsic_desc_set(t) == nir_intrinsic_desc_set(s);
+}
+
 static bool
 emit_descriptor_prefetch(nir_builder *b, nir_instr *instr, nir_def **descs,
                          struct prefetch_state *state)
@@ -672,7 +691,18 @@ emit_descriptor_prefetch(nir_builder *b, nir_instr *instr, nir_def **descs,
          return false;
 
       assert(texture_index >= 0);
-      if (sampler_index >= 0) {
+
+      /* A sam warms the sampler descriptor as well as the texture's, which is
+       * worth having when the instruction can encode both indices itself. When
+       * it cannot it needs an a1 value per distinct sampler, and the mova1
+       * writes and their padding grow the preamble enough to push it out of
+       * shared registers, which costs the whole preamble its early-preamble
+       * eligibility. Fall back to resinfo there: it is cat6, takes its index as
+       * a register source, and never needs a1.
+       */
+      if (sampler_index >= 0 &&
+          (prefetch_sam_is_inline(descs[0], descs[1]) ||
+           (ir3_shader_debug & IR3_DBG_DESCPF_SAM))) {
          bool sampler_already_prefetched =
             is_already_prefetched(&state->sampler, descs[1]);
 

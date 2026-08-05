@@ -2407,6 +2407,9 @@ IR3 shader debug environment variables
       Disable early preambles.
    ``nodescprefetch``
       Disable descriptor prefetch optimization.
+   ``descpfsam``
+      Prefetch texture and sampler descriptors with a dummy sam instead of
+      resinfo.
    ``expandrpt``
       Expand rptN instructions.
    ``noaliastex``
