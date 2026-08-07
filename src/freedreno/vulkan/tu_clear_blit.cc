@@ -929,6 +929,56 @@ build_ms_copy_fs_shader(void)
    return b->shader;
 }
 
+/* Packed-24 variant for D24S8/X8_D24: assemble the 24-bit value from the
+ * low three channels, reduce it as an integer and unpack the winner.
+ */
+static nir_shader *
+build_ds_resolve_packed_fs_shader(bool is_max, unsigned samples)
+{
+   nir_builder _b =
+      nir_builder_init_simple_shader(MESA_SHADER_FRAGMENT, NULL,
+                                     "msaa packed depth %s resolve fs (%ux)",
+                                     is_max ? "max" : "min", samples);
+   nir_builder *b = &_b;
+
+   nir_variable *out_color =
+      nir_create_variable_with_location(b->shader, nir_var_shader_out,
+                                        FRAG_RESULT_DATA0, glsl_vec4_type());
+   nir_variable *in_coords =
+      nir_create_variable_with_location(b->shader, nir_var_shader_in,
+                                        VARYING_SLOT_VAR0, glsl_vec_type(2));
+
+   b->shader->info.num_textures = 1;
+   BITSET_SET(b->shader->info.textures_used, 0);
+   BITSET_SET(b->shader->info.textures_used_by_txf, 0);
+
+   nir_def *coord = nir_f2i32(b, nir_load_var(b, in_coords));
+
+   /* TP returns the pun as unorm floats, which round-trip exactly. */
+   nir_def *acc = NULL;
+   for (unsigned i = 0; i < samples; i++) {
+      nir_def *val = nir_txf_ms(b, coord, nir_imm_int(b, i),
+                                .texture_index = 0, .sampler_index = 0,
+                                .dim = GLSL_SAMPLER_DIM_MS,
+                                .dest_type = nir_type_float32);
+      nir_def *bytes =
+         nir_f2u32(b, nir_fround_even(b, nir_fmul_imm(b, val, 255.0)));
+      nir_def *key =
+         nir_ior(b, nir_channel(b, bytes, 0),
+                 nir_ior(b, nir_ishl_imm(b, nir_channel(b, bytes, 1), 8),
+                         nir_ishl_imm(b, nir_channel(b, bytes, 2), 16)));
+      acc = !acc ? key : (is_max ? nir_umax(b, acc, key) : nir_umin(b, acc, key));
+   }
+
+   nir_def *out = nir_vec4(b,
+      nir_fmul_imm(b, nir_u2f32(b, nir_iand_imm(b, acc, 0xff)), 1.0 / 255.0),
+      nir_fmul_imm(b, nir_u2f32(b, nir_iand_imm(b, nir_ushr_imm(b, acc, 8), 0xff)), 1.0 / 255.0),
+      nir_fmul_imm(b, nir_u2f32(b, nir_ushr_imm(b, acc, 16)), 1.0 / 255.0),
+      nir_imm_float(b, 0.0));
+   nir_store_var(b, out_color, out, 0xf);
+   return b->shader;
+}
+
 static nir_shader *
 build_clear_fs_shader(unsigned mrts)
 {
@@ -1003,6 +1053,14 @@ tu_init_clear_blit_shaders(struct tu_device *dev)
    compile_shader(dev, build_blit_fs_shader(false), 0, &offset, GLOBAL_SH_FS_BLIT);
    compile_shader(dev, build_blit_fs_shader(true), 0, &offset, GLOBAL_SH_FS_BLIT_ZSCALE);
    compile_shader(dev, build_ms_copy_fs_shader(), 0, &offset, GLOBAL_SH_FS_COPY_MS);
+   compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 2), 0, &offset,
+                  GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S2);
+   compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 4), 0, &offset,
+                  GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S4);
+   compile_shader(dev, build_ds_resolve_packed_fs_shader(true, 2), 0, &offset,
+                  GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S2);
+   compile_shader(dev, build_ds_resolve_packed_fs_shader(true, 4), 0, &offset,
+                  GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S4);
 
    for (uint32_t num_rts = 0; num_rts <= MAX_RTS; num_rts++) {
       compile_shader(dev, build_clear_fs_shader(num_rts), num_rts, &offset,
@@ -1026,6 +1084,10 @@ enum r3d_blit_param {
    R3D_USE_MULTI_BLIT = 1 << 3,
    R3D_OUTSIDE_PASS = 1 << 4,
    R3D_OVERLAPPING = 1 << 5,
+   R3D_RESOLVE_MIN = 1 << 6,
+   R3D_RESOLVE_MAX = 1 << 7,
+   /* The resolved depth is 24 bits packed in a 32-bit texel. */
+   R3D_RESOLVE_PACKED = 1 << 8,
 };
 
 enum r3d_type {
@@ -1051,6 +1113,15 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
 
    if (blit_param & R3D_Z_SCALE) {
       fs_id = GLOBAL_SH_FS_BLIT_ZSCALE;
+   } else if (blit_param & (R3D_RESOLVE_MIN | R3D_RESOLVE_MAX)) {
+      assert(src_samples == VK_SAMPLE_COUNT_2_BIT ||
+             src_samples == VK_SAMPLE_COUNT_4_BIT);
+      /* Scalar depth reduces on A2D; only the packed formats need a shader. */
+      assert(blit_param & R3D_RESOLVE_PACKED);
+      fs_id = (enum global_shader)
+         (((blit_param & R3D_RESOLVE_MAX) ? GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S2
+                                          : GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S2) +
+          (src_samples == VK_SAMPLE_COUNT_4_BIT ? 1 : 0));
    } else if (src_samples != VK_SAMPLE_COUNT_1_BIT) {
       fs_id = GLOBAL_SH_FS_COPY_MS;
    }
@@ -3837,14 +3908,29 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
 {
    const struct blit_ops *ops = &r2d_ops<CHIP>;
 
-   enum a6xx_a2d_sample_reduce resolve_reduce = A2D_REDUCE_DEFAULT;
-   if (resolve_mode == VK_RESOLVE_MODE_MIN_BIT)
-      resolve_reduce = A2D_REDUCE_MIN;
-   else if (resolve_mode == VK_RESOLVE_MODE_MAX_BIT)
-      resolve_reduce = A2D_REDUCE_MAX;
+   bool minmax = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
+                 resolve_mode == VK_RESOLVE_MODE_MAX_BIT;
+   bool minmax_packed = minmax &&
+      (vk_dst_format == VK_FORMAT_D24_UNORM_S8_UINT ||
+       vk_dst_format == VK_FORMAT_X8_D24_UNORM_PACK32);
 
-   /* A2D does not support "unresolve". */
-   if (dst->image->layout[0].nr_samples > 1) {
+   enum a6xx_a2d_sample_reduce resolve_reduce = A2D_REDUCE_DEFAULT;
+   unsigned blit_param = 0;
+   VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+   if (minmax_packed) {
+      blit_param = R3D_RESOLVE_PACKED |
+         (resolve_mode == VK_RESOLVE_MODE_MIN_BIT ? R3D_RESOLVE_MIN
+                                                  : R3D_RESOLVE_MAX);
+      aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+   } else if (minmax) {
+      resolve_reduce = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
+         A2D_REDUCE_MIN : A2D_REDUCE_MAX;
+   }
+
+   /* A2D does not support "unresolve", and its per-channel reduction cannot
+    * express packed 24-bit depth.
+    */
+   if (dst->image->layout[0].nr_samples > 1 || minmax_packed) {
       assert(resolve_reduce == A2D_REDUCE_DEFAULT);
       ops = &r3d_ops<CHIP>;
    }
@@ -3861,7 +3947,7 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
    const struct fdl6_view *dst_fdl_view = tu_image_view_fdl_view(dst, dst_separate_stencil);
 
    ops->setup(cmd, cs, src_format, dst_format,
-              VK_IMAGE_ASPECT_COLOR_BIT, 0, false,
+              aspect_mask, blit_param, false,
               dst_fdl_view->ubwc_enabled,
               (VkSampleCountFlagBits)src->image->layout[0].nr_samples,
               (VkSampleCountFlagBits)dst->image->layout[0].nr_samples);
@@ -5727,12 +5813,114 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
    tu_emit_event_write<CHIP>(cmd, cs, FD_CCU_CLEAN_COLOR);
 }
 
+/* Patch the 3D store's vertex constants with this bin's coordinates,
+ * mirroring fdm_apply_store_coords(). The load is direct because a
+ * patchpoint can only emit command stream dwords.
+ */
+struct apply_r3d_store_coords_state {
+   unsigned view;
+};
+
+template <chip CHIP>
+static void
+fdm_apply_r3d_store_coords(struct tu_cmd_buffer *cmd,
+                           struct tu_cs *cs,
+                           void *data,
+                           VkOffset2D common_bin_offset,
+                           const VkOffset2D *hw_viewport_offsets,
+                           unsigned views,
+                           const struct tu_tile_config *tile,
+                           const VkRect2D *bins,
+                           bool binning)
+{
+   const struct apply_r3d_store_coords_state *state =
+      (const struct apply_r3d_store_coords_state *)data;
+   unsigned view = MIN2(state->view, views - 1);
+   VkExtent2D frag_area = tile->frag_areas[view];
+   VkRect2D bin = bins[view];
+
+   assert(bin.extent.width % frag_area.width == 0);
+   assert(bin.extent.height % frag_area.height == 0);
+   uint32_t scaled_width = bin.extent.width / frag_area.width;
+   uint32_t scaled_height = bin.extent.height / frag_area.height;
+
+   VkOffset2D dst_start = { 0, 0 };
+   VkExtent2D dst_extent = { 0, 0 };
+   if (bin.extent.width != 0 || bin.extent.height != 0) {
+      dst_start = tile->subsampled ?
+         tile->subsampled_pos[view].offset : bin.offset;
+      if (tile->subsampled_views & (1u << view)) {
+         /* Stored compactly: no scaling up. */
+         dst_extent = (VkExtent2D) { scaled_width, scaled_height };
+      } else {
+         dst_extent = bin.extent;
+      }
+   }
+
+   const float coords[8] = {
+      (float) dst_start.x,
+      (float) dst_start.y,
+      (float) common_bin_offset.x,
+      (float) common_bin_offset.y,
+      (float) (dst_start.x + dst_extent.width),
+      (float) (dst_start.y + dst_extent.height),
+      (float) (common_bin_offset.x + scaled_width),
+      (float) (common_bin_offset.y + scaled_height),
+   };
+
+   tu_cs_emit_pkt7(cs, CP_LOAD_STATE6_GEOM, 3 + ARRAY_SIZE(coords));
+   tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(0) |
+                  CP_LOAD_STATE6_0_STATE_TYPE(ST6_CONSTANTS) |
+                  CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
+                  CP_LOAD_STATE6_0_STATE_BLOCK(SB6_VS_SHADER) |
+                  CP_LOAD_STATE6_0_NUM_UNIT(2));
+   tu_cs_emit(cs, 0);
+   tu_cs_emit(cs, 0);
+   for (unsigned i = 0; i < ARRAY_SIZE(coords); i++)
+      tu_cs_emit(cs, fui(coords[i]));
+}
+
+#define R3D_STORE_COORDS_PATCH_DWORDS (4 + 8)
+
+/* The window scissor is in the space the destination is written in. */
+struct apply_r3d_store_scissor_state {
+   unsigned view;
+   VkRect2D render_area;
+   bool subsampled;
+};
+
+template <chip CHIP>
+static void
+fdm_apply_r3d_store_scissor(struct tu_cmd_buffer *cmd,
+                            struct tu_cs *cs,
+                            void *data,
+                            VkOffset2D common_bin_offset,
+                            const VkOffset2D *hw_viewport_offsets,
+                            unsigned views,
+                            const struct tu_tile_config *tile,
+                            const VkRect2D *bins,
+                            bool binning)
+{
+   const struct apply_r3d_store_scissor_state *state =
+      (const struct apply_r3d_store_scissor_state *)data;
+   unsigned view = MIN2(state->view, views - 1);
+
+   VkRect2D scissor = state->subsampled ?
+      transform_render_area(state->render_area, tile, bins, view) :
+      state->render_area;
+
+   tu6_emit_window_scissor<CHIP>(cs, scissor.offset.x, scissor.offset.y,
+                                 scissor.offset.x + scissor.extent.width - 1,
+                                 scissor.offset.y + scissor.extent.height - 1);
+}
+
 template <chip CHIP>
 static void
 store_3d_blit(struct tu_cmd_buffer *cmd,
               struct tu_cs *cs,
               const struct tu_image_view *src_iview,
               const struct tu_image_view *dst_iview,
+              VkSampleCountFlagBits src_samples,
               VkSampleCountFlagBits dst_samples,
               bool separate_stencil,
               enum pipe_format src_format,
@@ -5740,7 +5928,10 @@ store_3d_blit(struct tu_cmd_buffer *cmd,
               const VkRect2D *render_area,
               uint32_t layer,
               uint32_t gmem_offset,
-              uint32_t cpp)
+              uint32_t cpp,
+              unsigned blit_param,
+              int fdm_view,
+              VkImageAspectFlags aspect_mask)
 {
    const struct fdl6_view *src_fdl_view = tu_image_view_fdl_view(src_iview, separate_stencil);
    const struct fdl6_view *dst_fdl_view = tu_image_view_fdl_view(dst_iview, separate_stencil);
@@ -5762,10 +5953,39 @@ store_3d_blit(struct tu_cmd_buffer *cmd,
                      CP_REG_TO_SCRATCH_0_CNT(1 - 1));
    }
 
-   r3d_setup<CHIP>(cmd, cs, src_format, dst_format, VK_IMAGE_ASPECT_COLOR_BIT,
-                   0, false, dst_fdl_view->ubwc_enabled, dst_samples, dst_samples);
+   r3d_setup<CHIP>(cmd, cs, src_format, dst_format, aspect_mask,
+                   blit_param, false, dst_fdl_view->ubwc_enabled, src_samples,
+                   dst_samples);
 
-   r3d_coords(cmd, cs, render_area->offset, render_area->offset, render_area->extent);
+   if (fdm_view >= 0) {
+      /* Bin scaling would scale the store's writes too, so disable it, the
+       * coordinates already scale. The next tile select re-emits these.
+       */
+      if (cmd->device->physical_device->info->props.has_hw_bin_scaling) {
+         tu_cs_emit_regs(cs, GRAS_BIN_FOVEAT(CHIP));
+         tu_cs_emit_regs(cs, RB_BIN_FOVEAT(CHIP));
+      }
+
+      struct apply_r3d_store_scissor_state scissor_state = {
+         .view = (unsigned) fdm_view,
+         .render_area = *render_area,
+         .subsampled = (dst_iview->image->vk.create_flags &
+                        VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) != 0,
+      };
+      tu_create_fdm_bin_patchpoint(cmd, cs, 3, TU_FDM_SKIP_BINNING,
+                                   fdm_apply_r3d_store_scissor<CHIP>,
+                                   scissor_state);
+
+      struct apply_r3d_store_coords_state coords_state = {
+         .view = (unsigned) fdm_view,
+      };
+      tu_create_fdm_bin_patchpoint(cmd, cs, R3D_STORE_COORDS_PATCH_DWORDS,
+                                   TU_FDM_SKIP_BINNING,
+                                   fdm_apply_r3d_store_coords<CHIP>,
+                                   coords_state);
+   } else {
+      r3d_coords(cmd, cs, render_area->offset, render_area->offset, render_area->extent);
+   }
 
    r3d_dst<CHIP>(cs, dst_fdl_view, layer, src_format);
 
@@ -6087,8 +6307,13 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
        src->ds_resolve_mode == VK_RESOLVE_MODE_MAX_BIT);
    assert(!minmax_resolve || vk_format_has_depth(src->format));
 
+   /* A2D's per-channel reduction can't express packed 24-bit depth. */
+   bool minmax_packed = minmax_resolve &&
+      (src->format == VK_FORMAT_D24_UNORM_S8_UINT ||
+       src->format == VK_FORMAT_X8_D24_UNORM_PACK32);
+
    enum a6xx_a2d_sample_reduce resolve_reduce = A2D_REDUCE_DEFAULT;
-   if (minmax_resolve) {
+   if (minmax_resolve && !minmax_packed) {
       resolve_reduce = src->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
          A2D_REDUCE_MIN : A2D_REDUCE_MAX;
    }
@@ -6151,7 +6376,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    if (dst_format == PIPE_FORMAT_Z32_FLOAT_S8X24_UINT)
       dst_format = PIPE_FORMAT_Z32_FLOAT;
 
-   if (dst->samples > 1) {
+   if (dst->samples > 1 || minmax_packed) {
       /* If we hit this path, we have to disable draw states after every tile
        * instead of once at the end of the renderpass, so that they aren't
        * executed when calling CP_DRAW.
@@ -6162,19 +6387,33 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
       if (store_common || store_separate_stencil)
          tu_disable_draw_states(cmd, cs);
 
+      unsigned blit_param = 0;
+      VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+      if (minmax_packed) {
+         blit_param = R3D_RESOLVE_PACKED |
+            (src->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
+             R3D_RESOLVE_MIN : R3D_RESOLVE_MAX);
+         /* Only write depth's bytes, the stencil aspect isn't modified. */
+         aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      }
 
       for_each_layer(i, layer_mask, layers) {
          const VkRect2D *render_area =
             per_layer_render_area ? &cmd->state.render_areas[i] :
             &cmd->state.render_areas[0];
+         int fdm_view = cmd->state.pass->has_fdm ? (int) i : -1;
          if (store_common) {
-            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, dst->samples, false, src_format,
-                          dst_format, render_area, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp);
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples,
+                          dst->samples, false, src_format,
+                          dst_format, render_area, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp,
+                          blit_param, fdm_view, aspect_mask);
          }
          if (store_separate_stencil) {
-            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, dst->samples, true, PIPE_FORMAT_S8_UINT,
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples,
+                          dst->samples, true, PIPE_FORMAT_S8_UINT,
                           PIPE_FORMAT_S8_UINT, render_area, i,
-                          tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples);
+                          tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples,
+                          0, fdm_view, VK_IMAGE_ASPECT_COLOR_BIT);
          }
       }
    } else {
