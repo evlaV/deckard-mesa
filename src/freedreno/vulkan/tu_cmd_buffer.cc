@@ -7501,25 +7501,11 @@ tu_next_subpass_lrz(struct tu_cmd_buffer *cmd,
 }
 
 template <chip CHIP>
-VKAPI_ATTR void VKAPI_CALL
-tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
-                   const VkSubpassBeginInfo *pSubpassBeginInfo,
-                   const VkSubpassEndInfo *pSubpassEndInfo)
+static void
+tu_emit_subpass_stores(struct tu_cmd_buffer *cmd,
+                       const struct tu_subpass *subpass)
 {
-   VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
-
-   if (TU_DEBUG(DYNAMIC)) {
-      vk_common_CmdNextSubpass2(commandBuffer, pSubpassBeginInfo,
-                                pSubpassEndInfo);
-      return;
-   }
-
    struct tu_cs *cs = &cmd->draw_cs;
-
-   const struct tu_subpass *subpass = cmd->state.subpass++;
-   const struct tu_subpass *new_subpass = cmd->state.subpass;
-
-   tu_next_subpass_lrz<CHIP>(cmd, subpass, new_subpass);
 
    if (cmd->state.tiling->possible) {
       if (cmd->state.pass->has_fdm)
@@ -7545,6 +7531,28 @@ tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
 
    if (cmd->state.tiling->possible)
       tu_cond_exec_end(cs);
+}
+
+template <chip CHIP>
+VKAPI_ATTR void VKAPI_CALL
+tu_CmdNextSubpass2(VkCommandBuffer commandBuffer,
+                   const VkSubpassBeginInfo *pSubpassBeginInfo,
+                   const VkSubpassEndInfo *pSubpassEndInfo)
+{
+   VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+
+   if (TU_DEBUG(DYNAMIC)) {
+      vk_common_CmdNextSubpass2(commandBuffer, pSubpassBeginInfo,
+                                pSubpassEndInfo);
+      return;
+   }
+
+   const struct tu_subpass *subpass = cmd->state.subpass++;
+   const struct tu_subpass *new_subpass = cmd->state.subpass;
+
+   tu_next_subpass_lrz<CHIP>(cmd, subpass, new_subpass);
+
+   tu_emit_subpass_stores<CHIP>(cmd, subpass);
 
    /* Handle dependencies for the next subpass */
    tu_subpass_barrier<CHIP>(cmd, &cmd->state.subpass->start_barrier, false);
@@ -7575,6 +7583,7 @@ tu_CmdBeginCustomResolveEXT(VkCommandBuffer commandBuffer,
    cmd->state.subpass = new_subpass;
 
    tu_next_subpass_lrz<CHIP>(cmd, subpass, new_subpass);
+   tu_emit_subpass_stores<CHIP>(cmd, subpass);
 
    tu_fill_render_pass_state(&cmd->state.vk_rp,
                              &cmd->state.vk_mv,
