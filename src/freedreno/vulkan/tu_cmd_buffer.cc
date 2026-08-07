@@ -3087,13 +3087,46 @@ tu_renderpass_begin(struct tu_cmd_buffer *cmd)
 
    cmd->state.fdm_enabled = cmd->state.pass->has_fdm;
 
-   cmd->state.fdm_subsampled = false;
+   cmd->state.fdm_any_subsampled = false;
+   cmd->state.fdm_custom_resolve_subsampled = false;
 
    for (unsigned i = 0; i < cmd->state.framebuffer->attachment_count; i++) {
       const struct tu_image_view *iview = cmd->state.attachments[i];
       if (iview && (iview->image->vk.create_flags &
                     VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)) {
-         cmd->state.fdm_subsampled = true;
+         cmd->state.fdm_any_subsampled = true;
+      }
+   }
+
+   if (cmd->state.fdm_any_subsampled) {
+      for (unsigned i = 0; i < cmd->state.pass->subpass_count; i++) {
+         const struct tu_subpass *subpass = &cmd->state.pass->subpasses[i];
+         if (!subpass->custom_resolve)
+            continue;
+
+         for (unsigned j = 0; j < subpass->color_count; j++) {
+            uint32_t a = subpass->color_attachments[j].attachment;
+            if (a == VK_ATTACHMENT_UNUSED)
+               continue;
+            const tu_image_view *iview = cmd->state.attachments[a];
+            if (iview->image->vk.create_flags &
+                VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) {
+               cmd->state.fdm_custom_resolve_subsampled = true;
+               break;
+            }
+         }
+
+         uint32_t a = subpass->depth_stencil_attachment.attachment;
+         if (a != VK_ATTACHMENT_UNUSED) {
+            const tu_image_view *iview = cmd->state.attachments[a];
+            if (iview->image->vk.create_flags &
+                VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) {
+               cmd->state.fdm_custom_resolve_subsampled = true;
+            }
+         }
+
+         /* only one subpass can be custom resolve */
+         break;
       }
    }
 }
@@ -3322,10 +3355,13 @@ tu6_sysmem_render_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    tu_cs_emit_pkt7(cs, CP_SKIP_IB2_ENABLE_GLOBAL, 1);
    tu_cs_emit(cs, 0x0);
 
-   if (cmd->state.fdm_subsampled) {
+   if (cmd->state.fdm_any_subsampled) {
       for (unsigned i = 0; i < cmd->state.pass->attachment_count; i++) {
          if (i != cmd->state.pass->fragment_density_map.attachment &&
-             (cmd->state.pass->attachments[i].store || cmd->state.pass->attachments[i].store_stencil)) {
+             (cmd->state.pass->attachments[i].store ||
+              cmd->state.pass->attachments[i].store_stencil) &&
+             (cmd->state.attachments[i]->image->vk.create_flags &
+              VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)) {
             /* emit dummy subsampled metadata since we didn't use FDM */
             tu_emit_subsampled_metadata(cmd, &cmd->cs, i,
                                         NULL, NULL, NULL,
@@ -3833,7 +3869,10 @@ tu_emit_subsampled(struct tu_cmd_buffer *cmd,
 
    for (unsigned i = 0; i < cmd->state.pass->attachment_count; i++) {
       if (i != cmd->state.pass->fragment_density_map.attachment &&
-          (cmd->state.pass->attachments[i].store || cmd->state.pass->attachments[i].store_stencil)) {
+          (cmd->state.pass->attachments[i].store ||
+           cmd->state.pass->attachments[i].store_stencil) &&
+          (cmd->state.attachments[i]->image->vk.create_flags &
+           VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)) {
          tu_emit_subsampled_metadata(cmd, cs, i,
                                      tiles, tiling, vsc,
                                      cmd->state.framebuffer,
@@ -4006,7 +4045,7 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
     */
    tu_disable_draw_states(cmd, &cmd->cs);
 
-   if (cmd->state.fdm_subsampled) {
+   if (cmd->state.fdm_any_subsampled) {
       tu_emit_subsampled<CHIP>(cmd, tiles, tiling, vsc, cmd->state.framebuffer,
                                fdm_offsets);
    }
@@ -6230,7 +6269,9 @@ tu_restore_suspended_pass(struct tu_cmd_buffer *cmd,
           suspended->state.suspended_pass.render_areas,
           sizeof(cmd->state.render_areas));
    cmd->state.per_layer_render_area = suspended->state.suspended_pass.per_layer_render_area;
-   cmd->state.fdm_subsampled = suspended->state.suspended_pass.fdm_subsampled;
+   cmd->state.fdm_any_subsampled = suspended->state.suspended_pass.fdm_any_subsampled;
+   cmd->state.fdm_custom_resolve_subsampled =
+      suspended->state.suspended_pass.fdm_custom_resolve_subsampled;
    cmd->state.gmem_layout = suspended->state.suspended_pass.gmem_layout;
    cmd->state.gmem_layout_divisor = suspended->state.suspended_pass.gmem_layout_divisor;
    cmd->state.tiling = tu_framebuffer_get_tiling_config(cmd->state.framebuffer, cmd->device, cmd->state.pass,
@@ -7306,8 +7347,10 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
              cmd->state.render_areas, sizeof(cmd->state.render_areas));
       cmd->state.suspended_pass.per_layer_render_area =
          cmd->state.per_layer_render_area;
-      cmd->state.suspended_pass.fdm_subsampled =
-         cmd->state.fdm_subsampled;
+      cmd->state.suspended_pass.fdm_any_subsampled =
+         cmd->state.fdm_any_subsampled;
+      cmd->state.suspended_pass.fdm_custom_resolve_subsampled =
+         cmd->state.fdm_custom_resolve_subsampled;
       cmd->state.suspended_pass.attachments = cmd->state.attachments;
       cmd->state.suspended_pass.clear_values = cmd->state.clear_values;
       cmd->state.suspended_pass.gmem_layout = cmd->state.gmem_layout;
@@ -8224,11 +8267,12 @@ fdm_apply_fs_params(struct tu_cmd_buffer *cmd,
       VkExtent2D rendering_frag_area = tile_frag_area;
       VkExtent2D gmem_frag_area = (VkExtent2D) { 1, 1 };
       if (state->custom_resolve) {
-         if (config->subsampled)
+         if (config->custom_resolve_subsampled)
             tile_start = config->subsampled_pos[view].offset;
          else
             tile_start = bin.offset;
-         if (!(config->subsampled_views & (1u << view))) {
+         if (!(config->subsampled_views & (1u << view)) ||
+             !config->custom_resolve_subsampled) {
             rendering_frag_area = (VkExtent2D){ 1, 1 };
             gmem_frag_area = tile_frag_area;
          }

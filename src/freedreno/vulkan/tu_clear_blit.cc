@@ -5446,7 +5446,8 @@ tu_emit_blit(struct tu_cmd_buffer *cmd,
    const struct fdl6_view *fdl_view = tu_image_view_fdl_view(iview, separate_stencil);
 
    for_each_layer(i, attachment->used_views, cmd->state.framebuffer->layers) {
-      if (cmd->state.pass->has_fdm && cmd->state.fdm_subsampled) {
+      if (cmd->state.pass->has_fdm &&
+          (iview->image->vk.create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)) {
             struct apply_blit_scissor_state state = {
                .view = i,
                .render_area = scissor_per_layer ?
@@ -6044,7 +6045,7 @@ tu_attachment_store_unaligned(struct tu_cmd_buffer *cmd, uint32_t a)
     * conditionally use A2D for the unaligned blits at the edge. Just return
     * false here.
     */
-   if (cmd->state.fdm_subsampled)
+   if (iview->image->vk.create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)
       return false;
 
    for (unsigned i = 0; i < render_area_count; i++) {
@@ -6376,6 +6377,9 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    if (dst_format == PIPE_FORMAT_Z32_FLOAT_S8X24_UINT)
       dst_format = PIPE_FORMAT_Z32_FLOAT;
 
+   bool fdm_subsampled = dst_iview->image->vk.create_flags &
+      VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT;
+
    if (dst->samples > 1 || minmax_packed) {
       /* If we hit this path, we have to disable draw states after every tile
        * instead of once at the end of the renderpass, so that they aren't
@@ -6422,7 +6426,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
          if (!cmd->state.pass->has_fdm) {
             r2d_coords<CHIP>(cmd, cs, render_area->offset, render_area->offset,
                              render_area->extent);
-         } else if (!cmd->state.fdm_subsampled) {
+         } else if (!fdm_subsampled) {
             /* Usually GRAS_2D_RESOLVE_CNTL_* clips the destination to the bin
              * area and the coordinates span the entire render area, but for
              * FDM we need to scale the coordinates so we need to take the
@@ -6444,7 +6448,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
             if (!cmd->state.pass->has_fdm) {
                r2d_coords<CHIP>(cmd, cs, render_area->offset, render_area->offset,
                                 render_area->extent);
-            } else if (!cmd->state.fdm_subsampled) {
+            } else if (!fdm_subsampled) {
                tu_cs_emit_regs(cs,
                                GRAS_A2D_SCISSOR_TL(CHIP, .x = render_area->offset.x,
                                                          .y = render_area->offset.y,),
@@ -6454,7 +6458,7 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
          }
 
          if (cmd->state.pass->has_fdm) {
-            if (cmd->state.fdm_subsampled) {
+            if (fdm_subsampled) {
                struct apply_render_area_state state {
                   .view = i,
                   .render_area =
