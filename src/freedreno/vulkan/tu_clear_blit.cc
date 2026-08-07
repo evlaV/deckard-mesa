@@ -418,11 +418,23 @@ r2d_src(struct tu_cmd_buffer *cmd,
         const struct fdl6_view *iview,
         uint32_t layer,
         VkFilter filter,
+        VkResolveModeFlagBits resolve_mode,
         enum pipe_format dst_format)
 {
    uint32_t src_info = iview->TPL1_A2D_SRC_TEXTURE_INFO;
    if (filter != VK_FILTER_NEAREST)
       src_info |= A6XX_TPL1_A2D_SRC_TEXTURE_INFO_FILTER;
+
+   /* SAMPLES_AVERAGE must be set for REDUCTION_MODE to apply. */
+   if (resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
+       resolve_mode == VK_RESOLVE_MODE_MAX_BIT) {
+      src_info |= A6XX_TPL1_A2D_SRC_TEXTURE_INFO_REDUCTION_MODE(
+         resolve_mode == VK_RESOLVE_MODE_MIN_BIT ? A6XX_REDUCTION_MODE_MIN
+                                                 : A6XX_REDUCTION_MODE_MAX);
+      src_info |= A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES_AVERAGE;
+   } else if (resolve_mode == VK_RESOLVE_MODE_SAMPLE_ZERO_BIT) {
+      src_info &= ~A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES_AVERAGE;
+   }
 
    enum a6xx_format fmt = (enum a6xx_format) pkt_field_get(
       A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT, src_info);
@@ -439,33 +451,6 @@ r2d_src(struct tu_cmd_buffer *cmd,
 
    tu_cs_emit_pkt4(cs, __TPL1_A2D_SRC_TEXTURE_FLAG_BASE<CHIP>({}).reg, 3);
    tu_cs_image_flag_ref(cs, iview, layer);
-}
-
-/* Re-emit the src info with a sample reduction, which r2d_src() cannot
- * express through VkFilter.
- */
-template <chip CHIP>
-static void
-r2d_src_set_reduce(struct tu_cmd_buffer *cmd,
-                   struct tu_cs *cs,
-                   const struct fdl6_view *iview,
-                   enum pipe_format dst_format,
-                   enum a6xx_a2d_sample_reduce reduce)
-{
-   uint32_t src_info = iview->TPL1_A2D_SRC_TEXTURE_INFO;
-
-   enum a6xx_format fmt = (enum a6xx_format) pkt_field_get(
-      A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT, src_info);
-   enum pipe_format src_format = iview->format;
-   fixup_src_format(&src_format, dst_format, &fmt);
-
-   src_info =
-      pkt_field_set(A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT, src_info, fmt);
-   src_info |= A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLE_REDUCE(reduce);
-   src_info |= A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES_AVERAGE;
-
-   tu_cs_emit_pkt4(cs, TPL1_A2D_SRC_TEXTURE_INFO(CHIP,).reg, 1);
-   tu_cs_emit(cs, src_info);
 }
 
 template <chip CHIP>
@@ -1484,8 +1469,11 @@ r3d_src(struct tu_cmd_buffer *cmd,
         const struct fdl6_view *iview,
         uint32_t layer,
         VkFilter filter,
+        VkResolveModeFlagBits resolve_mode,
         enum pipe_format dst_format)
 {
+   /* Reduction happens in the FS selected by blit_param at setup. */
+
    uint32_t desc[FDL6_TEX_CONST_DWORDS];
    memcpy(desc, iview->descriptor, sizeof(desc));
 
@@ -1993,6 +1981,7 @@ struct blit_ops {
         const struct fdl6_view *iview,
         uint32_t layer,
         VkFilter filter,
+        VkResolveModeFlagBits resolve_mode,
         enum pipe_format dst_format);
    void (*src_buffer)(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                       enum pipe_format format,
@@ -2642,7 +2631,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
    if (z_scale) {
       tu_image_view_copy_blit<CHIP>(&src, src_image, src_format,
                                     &info->srcSubresource, 0, true);
-      ops->src(cmd, cs, &src, 0, filter, dst_format);
+      ops->src(cmd, cs, &src, 0, filter, VK_RESOLVE_MODE_NONE, dst_format);
    } else {
       tu_image_view_blit<CHIP>(&src, src_image, &info->srcSubresource, info->srcOffsets[0].z);
    }
@@ -2652,7 +2641,7 @@ tu6_blit_image(struct tu_cmd_buffer *cmd,
          float t = ((float) i + 0.5f) / (float) layers;
          r3d_coord_z(cmd, cs, t * (src1_z - src0_z) + src0_z);
       } else {
-         ops->src(cmd, cs, &src, i, filter, dst_format);
+         ops->src(cmd, cs, &src, i, filter, VK_RESOLVE_MODE_NONE, dst_format);
       }
       ops->dst(cs, &dst, i, src_format);
       ops->run(cmd, cs);
@@ -3000,7 +2989,7 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
                             &info->imageSubresource, offset.z);
 
    for (uint32_t i = 0; i < layers; i++) {
-      ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, dst_format);
+      ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, dst_format);
 
       uint64_t dst_va = vk_buffer_address(&dst_buffer->vk, info->bufferOffset) + layer_size * i;
       if ((dst_va & 63) || (pitch & 63)) {
@@ -3343,7 +3332,7 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
       coords(ops, cmd, cs, staging_offset, src_offset, extent);
 
       for (uint32_t i = 0; i < layers_to_copy; i++) {
-         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, src_format);
+         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, src_format);
          ops->dst(cs, &staging, i, src_format);
          ops->run(cmd, cs);
       }
@@ -3382,7 +3371,7 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
       coords(ops, cmd, cs, dst_offset, staging_offset, extent);
 
       for (uint32_t i = 0; i < layers_to_copy; i++) {
-         ops->src(cmd, cs, &staging, i, VK_FILTER_NEAREST, dst_format);
+         ops->src(cmd, cs, &staging, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, dst_format);
          ops->dst(cs, &dst, i, dst_format);
          ops->run(cmd, cs);
       }
@@ -3397,7 +3386,7 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
       coords(ops, cmd, cs, dst_offset, src_offset, extent);
 
       for (uint32_t i = 0; i < layers_to_copy; i++) {
-         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, dst_format);
+         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, dst_format);
          ops->dst(cs, &dst, i, src_format);
          ops->run(cmd, cs);
       }
@@ -3878,7 +3867,7 @@ tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
       tu_image_view_blit<CHIP>(&src, src_image, &info->srcSubresource, info->srcOffset.z);
 
       for (uint32_t i = 0; i < layers; i++) {
-         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, dst_format);
+         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, dst_format);
          ops->dst(cs, &dst, i, src_format);
          ops->run(cmd, cs);
       }
@@ -5730,8 +5719,10 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
               uint32_t layer,
               uint32_t gmem_offset,
               uint32_t cpp,
-              enum a6xx_a2d_sample_reduce reduce)
+              VkResolveModeFlagBits resolve_mode)
 {
+   bool minmax = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
+                 resolve_mode == VK_RESOLVE_MODE_MAX_BIT;
    const struct fdl6_view *dst_fdl_view = tu_image_view_fdl_view(dst_iview, separate_stencil);
 
    r2d_setup_common<CHIP>(cmd, cs, src_format, dst_format,
@@ -5783,10 +5774,15 @@ store_cp_blit(struct tu_cmd_buffer *cmd,
                       /* SAMPLE_REDUCE requires SAMPLES_AVERAGE */
                       .samples_average = (!util_format_is_pure_integer(dst_format) &&
                                           !util_format_is_depth_or_stencil(dst_format)) ||
-                                         reduce != A2D_REDUCE_DEFAULT,
+                                         minmax,
                       .unk20 = 1,
                       .unk22 = 1,
-                      .sample_reduce = reduce,
+                      .reduction_mode =
+                         resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
+                            A6XX_REDUCTION_MODE_MIN :
+                         resolve_mode == VK_RESOLVE_MODE_MAX_BIT ?
+                            A6XX_REDUCTION_MODE_MAX :
+                            A6XX_REDUCTION_MODE_AVERAGE,
                       .mutableen = src_iview->view.is_mutable),
                    TPL1_A2D_SRC_TEXTURE_SIZE(CHIP,
                       .width = src_width,
@@ -6113,16 +6109,17 @@ tu_choose_gmem_layout(struct tu_cmd_buffer *cmd)
           * blit events for the S8_UINT format.
           */
          cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
-      if (att->will_be_resolved &&
-          (!blit_can_resolve(att->format) ||
-           att->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
-           att->ds_resolve_mode == VK_RESOLVE_MODE_MAX_BIT))
+      if (att->will_be_resolved && !blit_can_resolve(att->format))
          cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
    }
 
    for (unsigned i = 0; i < cmd->state.pass->subpass_count; i++) {
       const struct tu_subpass *subpass = &cmd->state.pass->subpasses[i];
       if (subpass->custom_resolve)
+         cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
+      if (subpass->resolve_depth_stencil &&
+          (subpass->depth_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
+           subpass->depth_resolve_mode == VK_RESOLVE_MODE_MAX_BIT))
          cmd->state.gmem_layout = TU_GMEM_LAYOUT_AVOID_CCU;
 
       for (unsigned j = 0; j < subpass->resolve_count; j++) {
@@ -6259,7 +6256,8 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
                          uint32_t layers,
                          uint32_t layer_mask,
                          bool per_layer_render_area,
-                         bool cond_exec_allowed)
+                         bool cond_exec_allowed,
+                         VkResolveModeFlagBits resolve_mode)
 {
    struct tu_render_pass_attachment *dst = &cmd->state.pass->attachments[a];
    const struct tu_image_view *dst_iview = cmd->state.attachments[a];
@@ -6304,8 +6302,8 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
     */
    /* The blit event can't reduce, so MIN and MAX take the slow path. */
    bool minmax_resolve = resolve &&
-      (src->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
-       src->ds_resolve_mode == VK_RESOLVE_MODE_MAX_BIT);
+      (resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
+       resolve_mode == VK_RESOLVE_MODE_MAX_BIT);
    assert(!minmax_resolve || vk_format_has_depth(src->format));
 
    /* A2D's per-channel reduction can't express packed 24-bit depth. */
@@ -6484,12 +6482,12 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
          if (store_common) {
             store_cp_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, false, src_format,
                           dst_format, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp,
-                          resolve_reduce);
+                          minmax_packed ? VK_RESOLVE_MODE_NONE : resolve_mode);
          }
          if (store_separate_stencil) {
             store_cp_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, true, PIPE_FORMAT_S8_UINT,
                           PIPE_FORMAT_S8_UINT, i, tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples,
-                          A2D_REDUCE_DEFAULT);
+                          VK_RESOLVE_MODE_NONE);
          }
       }
    }

@@ -1843,7 +1843,8 @@ tu6_emit_sysmem_resolve(struct tu_cmd_buffer *cmd,
                         struct tu_cs *cs,
                         uint32_t layer_mask,
                         uint32_t a,
-                        uint32_t gmem_a)
+                        uint32_t gmem_a,
+                        VkResolveModeFlagBits resolve_mode)
 {
    const struct tu_framebuffer *fb = cmd->state.framebuffer;
    const struct tu_image_view *dst = cmd->state.attachments[a];
@@ -1852,7 +1853,7 @@ tu6_emit_sysmem_resolve(struct tu_cmd_buffer *cmd,
    tu_resolve_sysmem<CHIP>(cmd, cs, src, dst, layer_mask, fb->layers,
                            cmd->state.per_layer_render_area,
                            cmd->state.render_areas,
-                           cmd->state.pass->attachments[gmem_a].ds_resolve_mode);
+                           resolve_mode);
 }
 
 template <chip CHIP>
@@ -1899,7 +1900,12 @@ tu6_emit_sysmem_resolves(struct tu_cmd_buffer *cmd,
 
          uint32_t gmem_a = tu_subpass_get_attachment_to_resolve(subpass, i);
 
-         tu6_emit_sysmem_resolve<CHIP>(cmd, cs, subpass->multiview_mask, a, gmem_a);
+         bool is_ds = subpass->resolve_depth_stencil &&
+                      i == subpass->resolve_count - 1;
+         tu6_emit_sysmem_resolve<CHIP>(cmd, cs, subpass->multiview_mask, a,
+                                       gmem_a,
+                                       is_ds ? subpass->depth_resolve_mode
+                                             : VK_RESOLVE_MODE_NONE);
       }
    }
 }
@@ -1983,9 +1989,13 @@ tu6_emit_gmem_resolves(struct tu_cmd_buffer *cmd,
 
          uint32_t gmem_a = tu_subpass_get_attachment_to_resolve(subpass, i);
 
+         bool is_ds = subpass->resolve_depth_stencil &&
+                      i == subpass->resolve_count - 1;
          tu_store_gmem_attachment<CHIP>(cmd, cs, resolve_group, a, gmem_a,
                                         fb->layers, subpass->multiview_mask,
-                                        per_layer_render_area, false);
+                                        per_layer_render_area, false,
+                                        is_ds ? subpass->depth_resolve_mode
+                                              : VK_RESOLVE_MODE_NONE);
 
          if (pass->attachments[a].gmem) {
             /* check if the resolved attachment is needed by later subpasses,
@@ -2066,7 +2076,8 @@ tu6_emit_gmem_stores(struct tu_cmd_buffer *cmd,
          }
          tu_store_gmem_attachment<CHIP>(cmd, cs, resolve_group, a, a,
                                   fb->layers, att->used_views,
-                                  per_layer_render_area, cond_exec_allowed);
+                                  per_layer_render_area, cond_exec_allowed,
+                                  VK_RESOLVE_MODE_NONE);
       }
    }
 }
