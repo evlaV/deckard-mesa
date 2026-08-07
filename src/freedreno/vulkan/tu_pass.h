@@ -52,6 +52,8 @@ struct tu_subpass
    uint32_t resolve_count;
    uint32_t unresolve_count;
    bool resolve_depth_stencil;
+   /* How this subpass resolves depth, NONE if it doesn't. */
+   VkResolveModeFlagBits depth_resolve_mode;
 
    bool legacy_dithering_enabled;
 
@@ -121,8 +123,6 @@ struct tu_render_pass_attachment
    bool gmem;
    int32_t gmem_offset[TU_GMEM_LAYOUT_COUNT];
    bool will_be_resolved;
-   /* How this attachment's depth is resolved, NONE if it isn't. */
-   VkResolveModeFlagBits ds_resolve_mode;
    /* for D32S8 separate stencil: */
    bool load_stencil;
    bool store_stencil;

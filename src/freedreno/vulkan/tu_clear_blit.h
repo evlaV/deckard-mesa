@@ -101,7 +101,8 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
                          uint32_t layers,
                          uint32_t layer_mask,
                          bool per_layer_render_area,
-                         bool cond_exec_allowed);
+                         bool cond_exec_allowed,
+                         VkResolveModeFlagBits resolve_mode);
 
 void
 tu_choose_gmem_layout(struct tu_cmd_buffer *cmd);
