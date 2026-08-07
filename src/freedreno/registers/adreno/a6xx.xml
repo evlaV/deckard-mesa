@@ -2776,6 +2776,12 @@ by a particular renderpass/blit.
 		<bitfield name="ALPHA_DST_FACTOR" low="27" high="31" type="adreno_rb_blend_factor"/>
 	</reg32>
 
+	<enum name="a6xx_a2d_sample_reduce">
+		<value value="0" name="A2D_REDUCE_DEFAULT"/>
+		<value value="1" name="A2D_REDUCE_MIN"/>
+		<value value="2" name="A2D_REDUCE_MAX"/>
+	</enum>
+
 	<bitset name="a6xx_a2d_src_texture_info" inline="yes">
 		<bitfield name="COLOR_FORMAT" low="0" high="7" type="a6xx_format"/>
 		<bitfield name="TILE_MODE" low="8" high="9" type="a6xx_tile_mode"/>
@@ -2790,7 +2796,9 @@ by a particular renderpass/blit.
 		<bitfield name="UNK20" pos="20" type="boolean"/>
 		<bitfield name="UNK21" pos="21" type="boolean"/>
 		<bitfield name="UNK22" pos="22" type="boolean"/>
-		<bitfield name="UNK23" low="23" high="26"/>
+		<bitfield name="UNK23" low="23" high="24"/>
+		<!-- For multisample resolves: MIN or MAX instead of sample 0. -->
+		<bitfield name="SAMPLE_REDUCE" low="25" high="26" type="a6xx_a2d_sample_reduce"/>
 		<bitfield name="UNK28" pos="28" type="boolean"/>
 		<bitfield name="MUTABLEEN" pos="29" type="boolean" variants="A7XX-"/>
 	</bitset>

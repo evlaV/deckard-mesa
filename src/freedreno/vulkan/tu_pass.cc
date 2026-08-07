@@ -1293,6 +1293,7 @@ tu_CreateRenderPass2(VkDevice _device,
          uint32_t a = ds_resolve->pDepthStencilResolveAttachment->attachment;
          uint32_t src_a = desc->pDepthStencilAttachment->attachment;
          subpass->resolve_attachments[subpass->resolve_count - 1].attachment = a;
+         pass->attachments[src_a].ds_resolve_mode = ds_resolve->depthResolveMode;
 
          tu_subpass_resolve_attachment(pass, i, a, src_a);
       }
@@ -1666,6 +1667,7 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
                   unsigned i = subpass->resolve_count++;
                   subpass->resolve_attachments[i].attachment = a++;
                   att->will_be_resolved = true;
+                  att->ds_resolve_mode = common_info->resolveMode;
                   subpass->resolve_depth_stencil = true;
                   resolve_att->resolve_views = info->viewMask;
                   resolve_att->used_views = 0;

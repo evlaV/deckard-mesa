@@ -1851,7 +1851,8 @@ tu6_emit_sysmem_resolve(struct tu_cmd_buffer *cmd,
 
    tu_resolve_sysmem<CHIP>(cmd, cs, src, dst, layer_mask, fb->layers,
                            cmd->state.per_layer_render_area,
-                           cmd->state.render_areas);
+                           cmd->state.render_areas,
+                           cmd->state.pass->attachments[gmem_a].ds_resolve_mode);
 }
 
 template <chip CHIP>
@@ -1915,9 +1916,11 @@ tu6_emit_sysmem_unresolve(struct tu_cmd_buffer *cmd,
    const struct tu_image_view *src = cmd->state.attachments[a];
    const struct tu_image_view *dst = cmd->state.attachments[gmem_a];
 
+   /* Unresolves load, they never reduce. */
    tu_resolve_sysmem<CHIP>(cmd, cs, src, dst, layer_mask, fb->layers,
                            cmd->state.per_layer_render_area,
-                           cmd->state.render_areas);
+                           cmd->state.render_areas,
+                           VK_RESOLVE_MODE_NONE);
 }
 
 template <chip CHIP>

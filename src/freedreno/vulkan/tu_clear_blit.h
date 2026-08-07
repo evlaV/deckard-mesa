@@ -44,7 +44,8 @@ tu_resolve_sysmem(struct tu_cmd_buffer *cmd,
                   uint32_t layer_mask,
                   uint32_t layers,
                   bool per_layer_rect,
-                  const VkRect2D *rect);
+                  const VkRect2D *rect,
+                  VkResolveModeFlagBits resolve_mode);
 
 struct tu_resolve_group {
    uint32_t color_buffer_id;

@@ -1078,8 +1078,13 @@ tu_get_physical_device_properties_1_2(struct tu_physical_device *pdevice,
    p->maxDescriptorSetUpdateAfterBindStorageImages       = max_descriptor_set_size;
    p->maxDescriptorSetUpdateAfterBindInputAttachments    = MAX_RTS;
 
+   /* Without independentResolve the stencil mode would have to match, so
+    * MIN/MAX are only advertised for depth.
+    */
    p->supportedDepthResolveModes    =
       VK_RESOLVE_MODE_SAMPLE_ZERO_BIT |
+      VK_RESOLVE_MODE_MIN_BIT |
+      VK_RESOLVE_MODE_MAX_BIT |
       VK_RESOLVE_MODE_CUSTOM_BIT_EXT;
    p->supportedStencilResolveModes  =
       VK_RESOLVE_MODE_SAMPLE_ZERO_BIT |
