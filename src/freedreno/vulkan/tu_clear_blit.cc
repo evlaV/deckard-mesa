@@ -6319,8 +6319,17 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
          A2D_REDUCE_MIN : A2D_REDUCE_MAX;
    }
 
+   bool fdm_subsampled = dst_iview->image->vk.create_flags &
+      VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT;
+
+   /* With subsampled bin placement the blit event cannot expand bins into a
+    * non-subsampled destination; take the A2D path with per-bin coordinates.
+    */
+   bool mixed_subsampled = cmd->state.fdm_any_subsampled && !fdm_subsampled;
+
    bool use_fast_path = !unaligned && !mismatched_mutability &&
                         !resolve_d24s8_s8 && !minmax_resolve &&
+                        !mixed_subsampled &&
                         (a == gmem_a || blit_can_resolve(dst->format)) &&
                         (!cmd->state.pass->has_fdm || CHIP >= A7XX);
 
@@ -6376,9 +6385,6 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    enum pipe_format dst_format = vk_format_to_pipe_format(dst->format);
    if (dst_format == PIPE_FORMAT_Z32_FLOAT_S8X24_UINT)
       dst_format = PIPE_FORMAT_Z32_FLOAT;
-
-   bool fdm_subsampled = dst_iview->image->vk.create_flags &
-      VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT;
 
    if (dst->samples > 1 || minmax_packed) {
       /* If we hit this path, we have to disable draw states after every tile
