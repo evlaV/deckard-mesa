@@ -1039,13 +1039,21 @@ tu_init_clear_blit_shaders(struct tu_device *dev)
    compile_shader(dev, build_blit_fs_shader(true), 0, &offset, GLOBAL_SH_FS_BLIT_ZSCALE);
    compile_shader(dev, build_ms_copy_fs_shader(), 0, &offset, GLOBAL_SH_FS_COPY_MS);
    compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 2), 0, &offset,
-                  GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S2);
-   compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 4), 0, &offset,
-                  GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S4);
+                  GLOBAL_SH_FS_RESOLVE_PACKED_S2_MIN);
    compile_shader(dev, build_ds_resolve_packed_fs_shader(true, 2), 0, &offset,
-                  GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S2);
+                  GLOBAL_SH_FS_RESOLVE_PACKED_S2_MAX);
+   compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 4), 0, &offset,
+                  GLOBAL_SH_FS_RESOLVE_PACKED_S4_MIN);
    compile_shader(dev, build_ds_resolve_packed_fs_shader(true, 4), 0, &offset,
-                  GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S4);
+                  GLOBAL_SH_FS_RESOLVE_PACKED_S4_MAX);
+
+   /* Only a7xx supports 8x MSAA. */
+   if (dev->physical_device->info->chip >= A7XX) {
+      compile_shader(dev, build_ds_resolve_packed_fs_shader(false, 8), 0, &offset,
+                     GLOBAL_SH_FS_RESOLVE_PACKED_S8_MIN);
+      compile_shader(dev, build_ds_resolve_packed_fs_shader(true, 8), 0, &offset,
+                     GLOBAL_SH_FS_RESOLVE_PACKED_S8_MAX);
+   }
 
    for (uint32_t num_rts = 0; num_rts <= MAX_RTS; num_rts++) {
       compile_shader(dev, build_clear_fs_shader(num_rts), num_rts, &offset,
@@ -1071,8 +1079,6 @@ enum r3d_blit_param {
    R3D_OVERLAPPING = 1 << 5,
    R3D_RESOLVE_MIN = 1 << 6,
    R3D_RESOLVE_MAX = 1 << 7,
-   /* The resolved depth is 24 bits packed in a 32-bit texel. */
-   R3D_RESOLVE_PACKED = 1 << 8,
 };
 
 enum r3d_type {
@@ -1084,7 +1090,7 @@ enum r3d_type {
 template <chip CHIP>
 static void
 r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
-           uint32_t rts_mask, unsigned blit_param,
+           uint32_t rts_mask, unsigned blit_param, enum pipe_format src_format,
            VkSampleCountFlagBits src_samples, VkSampleCountFlagBits dst_samples)
 {
    enum global_shader vs_id =
@@ -1099,14 +1105,17 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
    if (blit_param & R3D_Z_SCALE) {
       fs_id = GLOBAL_SH_FS_BLIT_ZSCALE;
    } else if (blit_param & (R3D_RESOLVE_MIN | R3D_RESOLVE_MAX)) {
-      assert(src_samples == VK_SAMPLE_COUNT_2_BIT ||
-             src_samples == VK_SAMPLE_COUNT_4_BIT);
       /* Scalar depth reduces on A2D; only the packed formats need a shader. */
-      assert(blit_param & R3D_RESOLVE_PACKED);
+      assert(src_format == PIPE_FORMAT_Z24_UNORM_S8_UINT ||
+             src_format == PIPE_FORMAT_Z24_UNORM_S8_UINT_AS_R8G8B8A8 ||
+             src_format == PIPE_FORMAT_Z24X8_UNORM);
+      assert(src_samples == VK_SAMPLE_COUNT_2_BIT ||
+             src_samples == VK_SAMPLE_COUNT_4_BIT ||
+             src_samples == VK_SAMPLE_COUNT_8_BIT);
       fs_id = (enum global_shader)
-         (((blit_param & R3D_RESOLVE_MAX) ? GLOBAL_SH_FS_RESOLVE_PACKED_MAX_S2
-                                          : GLOBAL_SH_FS_RESOLVE_PACKED_MIN_S2) +
-          (src_samples == VK_SAMPLE_COUNT_4_BIT ? 1 : 0));
+         (GLOBAL_SH_FS_RESOLVE_PACKED_S2_MIN +
+          2 * (util_logbase2(src_samples) - 1) +
+          ((blit_param & R3D_RESOLVE_MAX) ? 1 : 0));
    } else if (src_samples != VK_SAMPLE_COUNT_1_BIT) {
       fs_id = GLOBAL_SH_FS_COPY_MS;
    }
@@ -1840,7 +1849,8 @@ r3d_setup(struct tu_cmd_buffer *cmd,
 
    const enum r3d_type type = (clear) ? R3D_CLEAR :
       ((blit_param & R3D_USE_MULTI_BLIT) ? R3D_MULTI_BLIT : R3D_BLIT);
-   r3d_common<CHIP>(cmd, cs, type, 1, blit_param, src_samples, dst_samples);
+   r3d_common<CHIP>(cmd, cs, type, 1, blit_param, src_format, src_samples,
+                    dst_samples);
 
    tu_cs_emit_regs(cs, A6XX_SP_PS_MRT_CNTL(.mrt = 1));
    tu_cs_emit_regs(cs, A6XX_RB_PS_MRT_CNTL(.mrt = 1));
@@ -3903,24 +3913,19 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
       (vk_dst_format == VK_FORMAT_D24_UNORM_S8_UINT ||
        vk_dst_format == VK_FORMAT_X8_D24_UNORM_PACK32);
 
-   enum a6xx_a2d_sample_reduce resolve_reduce = A2D_REDUCE_DEFAULT;
    unsigned blit_param = 0;
    VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
    if (minmax_packed) {
-      blit_param = R3D_RESOLVE_PACKED |
-         (resolve_mode == VK_RESOLVE_MODE_MIN_BIT ? R3D_RESOLVE_MIN
-                                                  : R3D_RESOLVE_MAX);
+      blit_param = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ? R3D_RESOLVE_MIN
+                                                           : R3D_RESOLVE_MAX;
       aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
-   } else if (minmax) {
-      resolve_reduce = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
-         A2D_REDUCE_MIN : A2D_REDUCE_MAX;
    }
 
    /* A2D does not support "unresolve", and its per-channel reduction cannot
     * express packed 24-bit depth.
     */
    if (dst->image->layout[0].nr_samples > 1 || minmax_packed) {
-      assert(resolve_reduce == A2D_REDUCE_DEFAULT);
+      assert(resolve_mode == VK_RESOLVE_MODE_NONE || minmax_packed);
       ops = &r3d_ops<CHIP>;
    }
 
@@ -3951,11 +3956,9 @@ resolve_sysmem(struct tu_cmd_buffer *cmd,
       if (ops == &r3d_ops<CHIP>) {
          r3d_src_sysmem_load<CHIP>(cmd, cs, src_fdl_view, i, VK_FILTER_NEAREST);
       } else {
-         ops->src(cmd, cs, src_fdl_view, i, VK_FILTER_NEAREST, dst_format);
-         if (resolve_reduce != A2D_REDUCE_DEFAULT) {
-            r2d_src_set_reduce<CHIP>(cmd, cs, src_fdl_view, dst_format,
-                                     resolve_reduce);
-         }
+         ops->src(cmd, cs, src_fdl_view, i, VK_FILTER_NEAREST,
+                  minmax_packed ? VK_RESOLVE_MODE_NONE : resolve_mode,
+                  dst_format);
       }
 
       ops->dst(cs, dst_fdl_view, i, src_format);
@@ -4483,7 +4486,7 @@ tu_clear_sysmem_attachments(struct tu_cmd_buffer *cmd,
                   0xfc000000);
    tu_cs_emit(cs, A6XX_SP_PS_MRT_CNTL_MRT(mrt_count));
 
-   r3d_common<CHIP>(cmd, cs, R3D_CLEAR, clear_rts, 0,
+   r3d_common<CHIP>(cmd, cs, R3D_CLEAR, clear_rts, 0, PIPE_FORMAT_NONE,
                     cmd->state.subpass->samples,
                     cmd->state.subpass->samples);
 
@@ -6293,13 +6296,6 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    bool store_common = dst->store && !resolve_d32s8_s8;
    bool store_separate_stencil = dst->store_stencil || resolve_d32s8_s8;
 
-   /* MIN and MAX resolves reduce across samples, which neither the blit event
-    * nor A2D can do; they take a 3D blit with a shader that reads every
-    * sample. Only depth-only formats can get here: the advertised stencil
-    * resolve modes do not include MIN or MAX, and without independentResolve
-    * the two modes must match, so packed depth/stencil formats can never use
-    * them.
-    */
    /* The blit event can't reduce, so MIN and MAX take the slow path. */
    bool minmax_resolve = resolve &&
       (resolve_mode == VK_RESOLVE_MODE_MIN_BIT ||
@@ -6310,12 +6306,6 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
    bool minmax_packed = minmax_resolve &&
       (src->format == VK_FORMAT_D24_UNORM_S8_UINT ||
        src->format == VK_FORMAT_X8_D24_UNORM_PACK32);
-
-   enum a6xx_a2d_sample_reduce resolve_reduce = A2D_REDUCE_DEFAULT;
-   if (minmax_resolve && !minmax_packed) {
-      resolve_reduce = src->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
-         A2D_REDUCE_MIN : A2D_REDUCE_MAX;
-   }
 
    bool use_fast_path = !unaligned && !mismatched_mutability &&
                         !resolve_d24s8_s8 && !minmax_resolve &&
@@ -6398,9 +6388,8 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
       unsigned blit_param = 0;
       VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
       if (minmax_packed) {
-         blit_param = R3D_RESOLVE_PACKED |
-            (src->ds_resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
-             R3D_RESOLVE_MIN : R3D_RESOLVE_MAX);
+         blit_param = resolve_mode == VK_RESOLVE_MODE_MIN_BIT ?
+            R3D_RESOLVE_MIN : R3D_RESOLVE_MAX;
          /* Only write depth's bytes, the stencil aspect isn't modified. */
          aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
       }
@@ -6411,17 +6400,14 @@ tu_store_gmem_attachment(struct tu_cmd_buffer *cmd,
             &cmd->state.render_areas[0];
          int fdm_view = cmd->state.pass->has_fdm ? (int) i : -1;
          if (store_common) {
-            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples,
-                          dst->samples, false, src_format,
-                          dst_format, render_area, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp,
-                          blit_param, fdm_view, aspect_mask);
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, dst->samples, false, src_format,
+                                dst_format, render_area, i, tu_attachment_gmem_offset(cmd, src, i), src->cpp,
+                                blit_param, fdm_view, aspect_mask);
          }
          if (store_separate_stencil) {
-            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples,
-                          dst->samples, true, PIPE_FORMAT_S8_UINT,
-                          PIPE_FORMAT_S8_UINT, render_area, i,
-                          tu_attachment_gmem_offset_stencil(cmd, src, i), src->samples,
-                          0, fdm_view, VK_IMAGE_ASPECT_COLOR_BIT);
+            store_3d_blit<CHIP>(cmd, cs, src_iview, dst_iview, src->samples, dst->samples, true, PIPE_FORMAT_S8_UINT,
+                                PIPE_FORMAT_S8_UINT, render_area, i, tu_attachment_gmem_offset_stencil(cmd, src, i),
+                                src->samples, 0, fdm_view, VK_IMAGE_ASPECT_COLOR_BIT);
          }
       }
    } else {
