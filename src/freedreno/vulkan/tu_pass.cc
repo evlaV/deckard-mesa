@@ -1432,7 +1432,8 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
       resolve_subpass->samples = VK_SAMPLE_COUNT_1_BIT;
       resolve_subpass->color_count = info->colorAttachmentCount;
       resolve_subpass->input_count = info->colorAttachmentCount + 1;
-      resolve_subpass->color_attachments = cmd_buffer->dynamic_resolve_attachments;
+      resolve_subpass->color_attachments =
+         cmd_buffer->dynamic_custom_resolve_attachments;
       resolve_subpass->input_attachments = cmd_buffer->dynamic_input_attachments;
       resolve_subpass->multiview_mask = info->viewMask;
       resolve_subpass->legacy_dithering_enabled = info->flags &
@@ -1445,12 +1446,16 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
 
       resolve_subpass->depth_stencil_attachment.attachment = VK_ATTACHMENT_UNUSED;
       pass->subpass_count = 2;
-      subpass->resolve_count = 0;
    } else {
-      subpass->resolve_attachments = cmd_buffer->dynamic_resolve_attachments;
-      subpass->resolve_count = info->colorAttachmentCount;
       pass->subpass_count = 1;
    }
+
+   /* The main subpass keeps its own resolve list either way: a pass with
+    * custom resolves can still resolve other attachments through the
+    * fixed-function path.
+    */
+   subpass->resolve_attachments = cmd_buffer->dynamic_resolve_attachments;
+   subpass->resolve_count = info->colorAttachmentCount;
 
    pass->attachments = cmd_buffer->dynamic_rp_attachments;
 
@@ -1552,6 +1557,7 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
                resolve_att->used_views = info->viewMask;
                resolve_att->resolve_views = 0;
                resolve_subpass->color_attachments[i].attachment = a++;
+               subpass->resolve_attachments[i].attachment = VK_ATTACHMENT_UNUSED;
             } else {
                subpass->resolve_attachments[i].attachment = a++;
                att->will_be_resolved = true;

@@ -1868,7 +1868,21 @@ tu6_emit_sysmem_resolves(struct tu_cmd_buffer *cmd,
                          struct tu_cs *cs,
                          const struct tu_subpass *subpass)
 {
+   /* Every slot can be UNUSED now that custom resolve passes also carry a
+    * resolve list. Don't pay the flushes below for an empty one.
+    */
+   bool any_resolves = false;
    if (subpass->resolve_attachments) {
+      for (unsigned i = 0; i < subpass->resolve_count; i++) {
+         if (subpass->resolve_attachments[i].attachment !=
+             VK_ATTACHMENT_UNUSED) {
+            any_resolves = true;
+            break;
+         }
+      }
+   }
+
+   if (any_resolves) {
       /* From the documentation for vkCmdNextSubpass, section 7.4 "Render Pass
        * Commands":
        *
@@ -7230,7 +7244,12 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
                      pRenderingInfo->pColorAttachments[i].imageView);
       cmd->state.attachments[a] = view;
 
-      if (cmd->dynamic_pass.subpass_count > 1) {
+      /* A fixed-function resolve mixed into a custom resolve pass lives on
+       * the main subpass, not the custom resolve subpass.
+       */
+      if (cmd->dynamic_pass.subpass_count > 1 &&
+          cmd->dynamic_subpasses[1].color_attachments[i].attachment !=
+             VK_ATTACHMENT_UNUSED) {
          a = cmd->dynamic_subpasses[1].color_attachments[i].attachment;
       } else {
          a = cmd->dynamic_subpasses[0].resolve_attachments[i].attachment;
