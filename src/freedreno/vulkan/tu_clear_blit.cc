@@ -941,11 +941,14 @@ build_ds_resolve_packed_fs_shader(bool is_max, unsigned samples)
 
    /* TP returns the pun as unorm floats, which round-trip exactly. */
    nir_def *acc = NULL;
+   nir_def *s0_alpha = NULL;
    for (unsigned i = 0; i < samples; i++) {
       nir_def *val = nir_txf_ms(b, coord, nir_imm_int(b, i),
                                 .texture_index = 0, .sampler_index = 0,
                                 .dim = GLSL_SAMPLER_DIM_MS,
                                 .dest_type = nir_type_float32);
+      if (i == 0)
+         s0_alpha = nir_channel(b, val, 3);
       nir_def *bytes =
          nir_f2u32(b, nir_fround_even(b, nir_fmul_imm(b, val, 255.0)));
       nir_def *key =
@@ -955,11 +958,14 @@ build_ds_resolve_packed_fs_shader(bool is_max, unsigned samples)
       acc = !acc ? key : (is_max ? nir_umax(b, acc, key) : nir_umin(b, acc, key));
    }
 
+   /* Alpha carries sample zero's stencil byte, so a combined resolve can
+    * write the whole texel, and depth-only resolves mask it off at the RB.
+    */
    nir_def *out = nir_vec4(b,
       nir_fmul_imm(b, nir_u2f32(b, nir_iand_imm(b, acc, 0xff)), 1.0 / 255.0),
       nir_fmul_imm(b, nir_u2f32(b, nir_iand_imm(b, nir_ushr_imm(b, acc, 8), 0xff)), 1.0 / 255.0),
       nir_fmul_imm(b, nir_u2f32(b, nir_ushr_imm(b, acc, 16)), 1.0 / 255.0),
-      nir_imm_float(b, 0.0));
+      s0_alpha);
    nir_store_var(b, out_color, out, 0xf);
    return b->shader;
 }
@@ -3841,6 +3847,110 @@ tu_CmdFillBuffer(VkCommandBuffer commandBuffer,
 TU_GENX(tu_CmdFillBuffer);
 
 template <chip CHIP>
+static void
+resolve_image_blit(struct tu_cmd_buffer *cmd,
+                   struct tu_cs *cs,
+                   struct tu_image *src_image,
+                   struct tu_image *dst_image,
+                   const VkImageResolve2 *info,
+                   VkImageAspectFlags view_aspects,
+                   VkImageAspectFlags write_aspects,
+                   unsigned blit_param,
+                   VkResolveModeFlagBits resolve_mode)
+{
+   uint32_t layers = MAX2(info->extent.depth, vk_image_subresource_layer_count(&dst_image->vk, &info->dstSubresource));
+   bool r3d = blit_param & (R3D_RESOLVE_MIN | R3D_RESOLVE_MAX);
+   const struct blit_ops *ops = r3d ? &r3d_ops<CHIP> : &r2d_ops<CHIP>;
+
+   VkImageSubresourceLayers src_subres = info->srcSubresource;
+   VkImageSubresourceLayers dst_subres = info->dstSubresource;
+   src_subres.aspectMask = dst_subres.aspectMask = view_aspects;
+
+   struct fdl6_view dst, src;
+   tu_image_view_blit<CHIP>(&dst, dst_image, &dst_subres, info->dstOffset.z);
+   tu_image_view_blit<CHIP>(&src, src_image, &src_subres, info->srcOffset.z);
+
+   ops->setup(cmd, cs, src.format, dst.format, write_aspects, blit_param, false, dst.ubwc_enabled,
+              (VkSampleCountFlagBits) src_image->layout[0].nr_samples, VK_SAMPLE_COUNT_1_BIT);
+
+   coords(ops, cmd, cs, info->dstOffset, info->srcOffset, info->extent);
+
+   for (uint32_t i = 0; i < layers; i++) {
+      ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, r3d ? VK_RESOLVE_MODE_NONE : resolve_mode, dst.format);
+      ops->dst(cs, &dst, i, src.format);
+      ops->run(cmd, cs);
+   }
+
+   ops->teardown(cmd, cs);
+}
+
+/* Resolve a depth/stencil region: both aspects together wherever the layout
+ * allows.
+ */
+template <chip CHIP>
+static void
+resolve_image_ds(struct tu_cmd_buffer *cmd,
+                 struct tu_cs *cs,
+                 VkImageAspectFlags aspects,
+                 struct tu_image *src_image,
+                 struct tu_image *dst_image,
+                 const VkImageResolve2 *info,
+                 VkResolveModeFlagBits depth_mode,
+                 VkResolveModeFlagBits stencil_mode)
+{
+   VkFormat format = src_image->vk.format;
+   if (depth_mode == VK_RESOLVE_MODE_NONE)
+      aspects &= ~VK_IMAGE_ASPECT_DEPTH_BIT;
+   if (stencil_mode == VK_RESOLVE_MODE_NONE)
+      aspects &= ~VK_IMAGE_ASPECT_STENCIL_BIT;
+   if (!aspects)
+      return;
+
+   /* D32S8 has separate planes, so each aspect is its own blit. */
+   if (format == VK_FORMAT_D32_SFLOAT_S8_UINT) {
+      if (aspects & VK_IMAGE_ASPECT_DEPTH_BIT) {
+         resolve_image_blit<CHIP>(cmd, cs, src_image, dst_image, info, VK_IMAGE_ASPECT_DEPTH_BIT,
+                                  VK_IMAGE_ASPECT_COLOR_BIT, 0, depth_mode);
+      }
+      if (aspects & VK_IMAGE_ASPECT_STENCIL_BIT) {
+         resolve_image_blit<CHIP>(cmd, cs, src_image, dst_image, info, VK_IMAGE_ASPECT_STENCIL_BIT,
+                                  VK_IMAGE_ASPECT_COLOR_BIT, 0, stencil_mode);
+      }
+      return;
+   }
+
+   /* Single-plane: everything requested resolves in one blit, and one mode
+    * covers it, since with both aspects present the modes must match
+    * (VUID-VkResolveImageInfo2-srcImage-10991 without independentResolve).
+    */
+   VkResolveModeFlagBits mode =
+      (aspects & VK_IMAGE_ASPECT_DEPTH_BIT) ? depth_mode : stencil_mode;
+
+   bool packed_minmax = (aspects & VK_IMAGE_ASPECT_DEPTH_BIT) &&
+      (mode == VK_RESOLVE_MODE_MIN_BIT || mode == VK_RESOLVE_MODE_MAX_BIT) &&
+      (format == VK_FORMAT_D24_UNORM_S8_UINT ||
+       format == VK_FORMAT_X8_D24_UNORM_PACK32);
+
+   if (packed_minmax) {
+      /* The packed 3D blit views the whole texel, reduces the assembled
+       * 24-bit value in its shader with sample zero's stencil in alpha, and
+       * write-masks the bytes of any aspect not being resolved.
+       */
+      resolve_image_blit<CHIP>(cmd, cs, src_image, dst_image, info,
+                               vk_format_aspects(format), aspects,
+                               mode == VK_RESOLVE_MODE_MIN_BIT ?
+                                  R3D_RESOLVE_MIN : R3D_RESOLVE_MAX,
+                               mode);
+   } else {
+      /* A2D views exactly the aspects being resolved, and the pun formats
+       * confine its writes.
+       */
+      resolve_image_blit<CHIP>(cmd, cs, src_image, dst_image, info, aspects,
+                               VK_IMAGE_ASPECT_COLOR_BIT, 0, mode);
+   }
+}
+
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
                     const VkResolveImageInfo2 *pResolveImageInfo)
@@ -3848,42 +3958,29 @@ tu_CmdResolveImage2(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
    VK_FROM_HANDLE(tu_image, src_image, pResolveImageInfo->srcImage);
    VK_FROM_HANDLE(tu_image, dst_image, pResolveImageInfo->dstImage);
-   const struct blit_ops *ops = &r2d_ops<CHIP>;
    struct tu_cs *cs = &cmd->cs;
+
+   const VkResolveImageModeInfoKHR *mode_info =
+      vk_find_struct_const(pResolveImageInfo->pNext, RESOLVE_IMAGE_MODE_INFO_KHR);
+   VkResolveModeFlagBits resolve_mode = mode_info ? mode_info->resolveMode : VK_RESOLVE_MODE_NONE;
+   VkResolveModeFlagBits stencil_mode = mode_info ? mode_info->stencilResolveMode : VK_RESOLVE_MODE_NONE;
 
    trace_start_resolve_image(&cmd->trace, &cmd->cs, cmd, src_image->vk.format,
                              dst_image->vk.format);
 
-   enum pipe_format src_format =
-      vk_format_to_pipe_format(src_image->vk.format);
-   enum pipe_format dst_format =
-      vk_format_to_pipe_format(dst_image->vk.format);
-   ops->setup(cmd, cs, src_format, dst_format,
-              VK_IMAGE_ASPECT_COLOR_BIT, 0, false, dst_image->layout[0].ubwc, 
-              VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_1_BIT);
-
    for (uint32_t i = 0; i < pResolveImageInfo->regionCount; ++i) {
       const VkImageResolve2 *info = &pResolveImageInfo->pRegions[i];
-      uint32_t layers = MAX2(info->extent.depth,
-                             vk_image_subresource_layer_count(&dst_image->vk,
-                                                              &info->dstSubresource));
+      VkImageAspectFlags aspects = info->srcSubresource.aspectMask;
 
-      /* TODO: aspect masks possible ? */
-
-      coords(ops, cmd, cs, info->dstOffset, info->srcOffset, info->extent);
-
-      struct fdl6_view dst, src;
-      tu_image_view_blit<CHIP>(&dst, dst_image, &info->dstSubresource, info->dstOffset.z);
-      tu_image_view_blit<CHIP>(&src, src_image, &info->srcSubresource, info->srcOffset.z);
-
-      for (uint32_t i = 0; i < layers; i++) {
-         ops->src(cmd, cs, &src, i, VK_FILTER_NEAREST, VK_RESOLVE_MODE_NONE, dst_format);
-         ops->dst(cs, &dst, i, src_format);
-         ops->run(cmd, cs);
+      if (aspects & VK_IMAGE_ASPECT_COLOR_BIT) {
+         resolve_image_blit<CHIP>(cmd, cs, src_image, dst_image, info, VK_IMAGE_ASPECT_COLOR_BIT,
+                                  VK_IMAGE_ASPECT_COLOR_BIT, 0, resolve_mode);
+      } else if (aspects & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+         resolve_image_ds<CHIP>(cmd, cs, aspects, src_image, dst_image, info, resolve_mode, stencil_mode);
+      } else {
+         UNREACHABLE("invalid aspect mask");
       }
    }
-
-   ops->teardown(cmd, cs);
 
    trace_end_resolve_image(&cmd->trace, &cmd->cs);
 }

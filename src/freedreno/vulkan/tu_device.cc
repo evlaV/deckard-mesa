@@ -268,6 +268,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .KHR_maintenance7 = tu_is_vk_1_1(device),
       .KHR_maintenance8 = tu_is_vk_1_1(device),
       .KHR_maintenance9 = tu_is_vk_1_1(device),
+      .KHR_maintenance10 = tu_is_vk_1_1(device),
       .KHR_map_memory2 = true,
       .KHR_multiview = tu_has_multiview(device),
       .KHR_performance_query = (TU_DEBUG(PERFC) || TU_DEBUG(PERFCRAW)) && device->is_perf_cntr_selectable,
@@ -633,6 +634,9 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* VK_KHR_maintenance9 */
    features->maintenance9 = true;
+
+   /* VK_KHR_maintenance10 */
+   features->maintenance10 = true;
 
    /* VK_KHR_performance_query */
    features->performanceCounterQueryPools = true;
@@ -1550,6 +1554,11 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->image2DViewOf3DSparse = false;
    props->defaultVertexAttributeValue =
       VK_DEFAULT_VERTEX_ATTRIBUTE_VALUE_ZERO_ZERO_ZERO_ZERO_KHR;
+
+   /* VK_KHR_maintenance10 */
+   props->rgba4OpaqueBlackSwizzled = true;
+   props->resolveSrgbFormatAppliesTransferFunction = true;
+   props->resolveSrgbFormatSupportsTransferFunctionControl = false;
 
    /* VK_EXT_host_image_copy */
 
