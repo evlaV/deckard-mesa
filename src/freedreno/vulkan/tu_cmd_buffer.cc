@@ -7297,7 +7297,12 @@ tu_CmdBeginRendering(VkCommandBuffer commandBuffer,
             cmd->state.attachments[a] = resolve_view;
          }
 
-         if (cmd->dynamic_pass.subpass_count > 1) {
+         /* A fixed-function resolve mixed into a custom resolve pass lives on
+          * the main subpass, not the custom resolve subpass.
+          */
+         if (cmd->dynamic_pass.subpass_count > 1 &&
+             cmd->dynamic_subpasses[1].depth_stencil_attachment.attachment !=
+             VK_ATTACHMENT_UNUSED) {
             a = cmd->dynamic_subpasses[1].depth_stencil_attachment.attachment;
             if (a != VK_ATTACHMENT_UNUSED) {
                VK_FROM_HANDLE(tu_image_view, resolve_view,

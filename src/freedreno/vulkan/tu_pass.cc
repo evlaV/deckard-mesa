@@ -1492,6 +1492,10 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
          subpass->input_attachments[i + 1].attachment = VK_ATTACHMENT_UNUSED;
          if (subpass->resolve_attachments)
             subpass->resolve_attachments[i].attachment = VK_ATTACHMENT_UNUSED;
+         if (pass->subpass_count > 1) {
+            resolve_subpass->color_attachments[i].attachment =
+               VK_ATTACHMENT_UNUSED;
+         }
          subpass->unresolve_attachments[i].attachment = VK_ATTACHMENT_UNUSED;
          continue;
       }
@@ -1563,6 +1567,10 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
                att->will_be_resolved = true;
                resolve_att->resolve_views = info->viewMask;
                resolve_att->used_views = 0;
+               if (pass->subpass_count > 1) {
+                  resolve_subpass->color_attachments[i].attachment =
+                     VK_ATTACHMENT_UNUSED;
+               }
             }
          } else {
             if (subpass->resolve_count)
@@ -1682,6 +1690,10 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
                   subpass->resolve_depth_stencil = true;
                   resolve_att->resolve_views = info->viewMask;
                   resolve_att->used_views = 0;
+                  if (pass->subpass_count > 1) {
+                     resolve_subpass->depth_stencil_attachment.attachment =
+                        VK_ATTACHMENT_UNUSED;
+                  }
                }
             } else {
                att->will_be_resolved = false;
@@ -1693,10 +1705,18 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
       } else {
          subpass->depth_stencil_attachment.attachment = VK_ATTACHMENT_UNUSED;
          subpass->input_attachments[0].attachment = VK_ATTACHMENT_UNUSED;
+         if (pass->subpass_count > 1) {
+            resolve_subpass->depth_stencil_attachment.attachment =
+               VK_ATTACHMENT_UNUSED;
+         }
       }
    } else {
       subpass->depth_stencil_attachment.attachment = VK_ATTACHMENT_UNUSED;
       subpass->input_attachments[0].attachment = VK_ATTACHMENT_UNUSED;
+      if (pass->subpass_count > 1) {
+         resolve_subpass->depth_stencil_attachment.attachment =
+            VK_ATTACHMENT_UNUSED;
+      }
    }
 
    /* We have to set this early for tu_render_pass_disable_fdm() to work. We
