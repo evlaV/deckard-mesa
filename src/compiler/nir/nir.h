@@ -2403,6 +2403,18 @@ nir_intrinsic_has_align(const nir_intrinsic_instr *intrin)
           nir_intrinsic_has_align_offset(intrin);
 }
 
+static inline void
+nir_intrinsic_set_speculated(nir_intrinsic_instr *intrin)
+{
+   if (nir_intrinsic_has_access(intrin) &&
+       (nir_intrinsic_access(intrin) & ACCESS_CAN_SPECULATE)) {
+      nir_intrinsic_set_access(intrin,
+                               (enum gl_access_qualifier)(
+                                  nir_intrinsic_access(intrin) |
+                                  ACCESS_IS_SPECULATED));
+   }
+}
+
 unsigned
 nir_image_intrinsic_coord_components(const nir_intrinsic_instr *instr);
 

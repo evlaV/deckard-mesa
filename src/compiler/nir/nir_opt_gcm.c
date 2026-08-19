@@ -697,10 +697,14 @@ gcm_schedule_late_def(nir_def *def, void *void_state)
    nir_block *best_block =
       gcm_choose_block_for_instr(nir_def_instr(def), early_block, lca, state);
 
-   if (nir_def_block(def) != best_block)
+   nir_instr *instr = nir_def_instr(def);
+   if (nir_def_block(def) != best_block) {
+      if (instr->type == nir_instr_type_intrinsic)
+         nir_intrinsic_set_speculated(nir_instr_as_intrinsic(instr));
       state->progress = true;
+   }
 
-   nir_def_instr(def)->block = best_block;
+   instr->block = best_block;
 
    return true;
 }

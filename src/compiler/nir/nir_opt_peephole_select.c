@@ -344,7 +344,8 @@ get_options_for_if(nir_if *if_stmt,
 }
 
 /* If we're moving discards or other conditional intrinsics
- * out of the if we need to add the if's condition to it
+ * out of the if we need to add the if's condition to it, and we need to mark
+ * loads as speculated.
  */
 static void
 rewrite_intrinsic_conds(nir_instr *instr, nir_def *if_cond, bool is_else)
@@ -352,6 +353,8 @@ rewrite_intrinsic_conds(nir_instr *instr, nir_def *if_cond, bool is_else)
    if (instr->type != nir_instr_type_intrinsic)
       return;
    nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
+
+   nir_intrinsic_set_speculated(intr);
 
    if (intr->intrinsic != nir_intrinsic_terminate_if &&
        intr->intrinsic != nir_intrinsic_terminate &&

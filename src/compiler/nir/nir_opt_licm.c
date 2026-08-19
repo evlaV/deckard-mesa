@@ -66,6 +66,9 @@ visit_block(nir_block *block, licm_state *state)
          nir_instr_remove(instr);
          nir_instr_insert_after_block(nir_loop_predecessor_block(state->loop),
                                       instr);
+         if (!state->current_block_dominates_exit &&
+             instr->type == nir_instr_type_intrinsic)
+            nir_intrinsic_set_speculated(nir_instr_as_intrinsic(instr));
          progress = true;
       }
    }
