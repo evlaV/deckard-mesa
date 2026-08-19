@@ -42,6 +42,8 @@ is_instr_loop_invariant(nir_instr *instr, licm_state *state)
    case nir_instr_type_tex:
    case nir_instr_type_deref:
       return nir_foreach_src(instr, defined_before_loop, state) &&
+             (state->current_block_dominates_exit ||
+              nir_instr_can_speculate(instr)) &&
              (!state->filter ||
               state->filter(instr, state->loop,
                             state->current_block_dominates_exit));

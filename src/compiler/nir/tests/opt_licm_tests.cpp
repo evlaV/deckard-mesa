@@ -46,9 +46,6 @@ static bool
 licm_filter(nir_instr *instr, nir_loop *loop,
             bool instr_block_dominates_exit)
 {
-   if (!instr_block_dominates_exit && !nir_instr_can_speculate(instr))
-      return false;
-
    if (instr->type == nir_instr_type_alu) {
       nir_def *def = nir_instr_def(instr);
       unsigned sum_src_bits = 0;
