@@ -1290,6 +1290,14 @@ enum gl_access_qualifier
     * one-time accesses or if the data is larger than what the memory can store.
     */
    ACCESS_ESTREAM_PAN = (1 << 22),
+
+   /**
+    * Whether a load has actually been speculated. Only valid to set if
+    * ACCESS_CAN_SPECULATE has also been set. Speculated loads may be
+    * out-of-bounds, even if the application has not enabled robustness
+    * features.
+    */
+   ACCESS_IS_SPECULATED = (1 << 23),
 };
 
 enum gl_tess_spacing
