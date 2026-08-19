@@ -205,6 +205,7 @@ struct entry {
    const struct intrinsic_info *info;
    enum gl_access_qualifier access;
    bool is_store;
+   bool is_speculated;
 
    nir_deref_instr *deref;
 };
@@ -800,6 +801,8 @@ create_entry(struct vectorize_ctx *ctx,
    entry->instr = &intrin->instr;
    entry->info = info;
    entry->is_store = entry->info->value_src >= 0 || is_shared_append;
+   entry->is_speculated = nir_intrinsic_has_access(intrin) &&
+      (nir_intrinsic_access(intrin) & ACCESS_IS_SPECULATED);
 
    entry->num_components =
       entry->is_store ? intrin->num_components : nir_def_last_component_read(&intrin->def) + 1;
@@ -1522,7 +1525,8 @@ try_vectorize(nir_function_impl *impl, struct vectorize_ctx *ctx,
 
    uint64_t diff = get_offset_diff(low, high);
    nir_variable_mode mode = get_variable_mode(low);
-   if ((mode & ctx->options->robust_modes) || high->index == -1) {
+   if ((mode & ctx->options->robust_modes) || high->index == -1 ||
+       low->is_speculated || high->is_speculated) {
       /* Only vectorize robust modes or hoist low entries, if robustness is ensured. */
       if (check_for_robustness(ctx, low, diff))
          return false;
