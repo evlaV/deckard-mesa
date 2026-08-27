@@ -432,6 +432,8 @@ get_device_extensions(const struct tu_physical_device *device,
       .QCOM_multiview_per_view_viewports =
          device->info->props.has_per_view_viewport,
       .QCOM_render_pass_shader_resolve = true,
+      .VALVE_buffer_device_address_allocation_alignment =
+         device->has_iova_align,
       .VALVE_fragment_density_map_layered = tu_is_vk_1_1(device),
       .VALVE_mutable_descriptor_type = true,
    } };
@@ -951,6 +953,9 @@ tu_get_features(struct tu_physical_device *pdevice,
    features->presentAtRelativeTime = true;
    features->presentAtAbsoluteTime = true;
 #endif
+
+   /* VALVE_buffer_device_address_allocation_alignment */
+   features->bufferDeviceAddressAllocationAlignment = true;
 }
 
 static void
@@ -1678,6 +1683,12 @@ tu_get_properties(struct tu_physical_device *pdevice,
 
    /* VK_ANDROID_native_buffer */
    props->sharedImage = vk_android_get_front_buffer_usage() != 0;
+
+   /* VALVE_buffer_device_address_allocation_alignment */
+   /* The limit is determined by kgsl, but there's not much point in exposing
+    * larger alignments anyway.
+    */
+   props->maxBufferDeviceAddressAllocationAlignment = 1 << 20;
 }
 
 static const struct vk_pipeline_cache_object_ops *const cache_import_ops[] = {
@@ -3551,6 +3562,7 @@ _tu_init_memory(struct tu_device *device,
                 VkMemoryPropertyFlags mem_property,
                 enum tu_bo_alloc_flags alloc_flags,
                 VkDeviceSize size,
+                VkDeviceSize align,
                 VkDeviceAddress client_address,
                 const char *name)
 {
@@ -3565,11 +3577,11 @@ _tu_init_memory(struct tu_device *device,
       result = tu_sparse_vma_init(device, &mem->vk.base,
                                   &mem->lazy_vma, &mem->iova,
                                   sparse_flags,
-                                  size,
+                                  size, align,
                                   client_address);
    } else {
       result = tu_bo_init_new_explicit_iova(
-         device, &mem->vk.base, &mem->bo, size,
+         device, &mem->vk.base, &mem->bo, size, align,
          client_address, mem_property, alloc_flags, NULL, name);
    }
 
@@ -3596,7 +3608,7 @@ tu_create_memory(struct tu_device *device,
    mem->refcnt = 1;
 
    VkResult result = _tu_init_memory(device, mem, mem_property, alloc_flags,
-                                     size, 0, name);
+                                     size, 0, 0, name);
 
    if (result != VK_SUCCESS) {
       vk_object_free(&device->vk, NULL, mem);
@@ -3730,6 +3742,11 @@ tu_AllocateMemory(VkDevice _device,
    const VkImportMemoryFdInfoKHR *fd_info =
       vk_find_struct_const(pAllocateInfo->pNext, IMPORT_MEMORY_FD_INFO_KHR);
 
+   const VkBufferDeviceAddressAlignmentAllocateInfoVALVE *align_info =
+      vk_find_struct_const(pAllocateInfo->pNext,
+                           BUFFER_DEVICE_ADDRESS_ALIGNMENT_ALLOCATE_INFO_VALVE);
+   uint64_t alignment = align_info ? align_info->alignment : 0;
+
    if (fd_info && fd_info->handleType) {
       assert(fd_info->handleType ==
                 VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT ||
@@ -3743,7 +3760,7 @@ tu_AllocateMemory(VkDevice _device,
        */
       result =
          tu_bo_init_dmabuf(device, &mem->bo, pAllocateInfo->allocationSize,
-                           alloc_flags, fd_info->fd);
+                           alignment, alloc_flags, fd_info->fd);
       if (result == VK_SUCCESS) {
          /* take ownership and close the fd */
          close(fd_info->fd);
@@ -3753,7 +3770,7 @@ tu_AllocateMemory(VkDevice _device,
       const native_handle_t *handle = AHardwareBuffer_getNativeHandle(mem->vk.ahardware_buffer);
       assert(handle->numFds > 0);
       size_t size = lseek(handle->data[0], 0, SEEK_END);
-      result = tu_bo_init_dmabuf(device, &mem->bo, size, alloc_flags,
+      result = tu_bo_init_dmabuf(device, &mem->bo, size, alignment, alloc_flags,
                                  handle->data[0]);
 #else
       result = VK_ERROR_FEATURE_NOT_PRESENT;
@@ -3789,7 +3806,8 @@ tu_AllocateMemory(VkDevice _device,
          device->physical_device->memory.types[pAllocateInfo->memoryTypeIndex];
 
       result = _tu_init_memory(device, mem, mem_property, alloc_flags,
-                               pAllocateInfo->allocationSize, client_address,
+                               pAllocateInfo->allocationSize, alignment,
+                               client_address,
                                name);
    }
 
@@ -3876,7 +3894,7 @@ tu_allocate_lazy_memory(struct tu_device *dev,
                   (long)DIV_ROUND_UP(mem->size, 1024));
       result =
          tu_bo_init_new_explicit_iova(dev, &mem->vk.base,
-                                      &mem->bo, mem->size, 0, 0,
+                                      &mem->bo, mem->size, 0, 0, 0,
                                       TU_BO_ALLOC_NO_FLAGS,
                                       &mem->lazy_vma, name);
       mem->lazy_initialized = true;

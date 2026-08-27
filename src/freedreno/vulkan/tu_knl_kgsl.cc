@@ -245,11 +245,31 @@ kgsl_sparse_vma_map(struct tu_device *dev,
    return VK_SUCCESS;
 }
 
+static uint32_t
+kgsl_align_flag(uint64_t align)
+{
+   if (align > os_page_size) {
+      /* kgsl treats the alignment as a hint and will round it down, but
+       * at least with current behavior, a 64K alignment and 1 MB alignment
+       * are respected.
+       */
+      if (align <= (1 << 16)) { /* 64K */
+         return 16 << KGSL_MEMALIGN_SHIFT;
+      } else {
+         assert(align <= (1 << 20)); /* 1 MB */
+         return 20 << KGSL_MEMALIGN_SHIFT;
+      }
+   }
+
+   return 0;
+}
+
 static VkResult
 kgsl_bo_init(struct tu_device *dev,
              struct vk_object_base *base,
              struct tu_bo **out_bo,
              uint64_t size,
+             uint64_t align,
              uint64_t client_iova,
              VkMemoryPropertyFlags mem_property,
              enum tu_bo_alloc_flags flags,
@@ -295,6 +315,8 @@ kgsl_bo_init(struct tu_device *dev,
 
    if (flags & TU_BO_ALLOC_REPLAYABLE)
       req.flags |= KGSL_MEMFLAGS_USE_CPU_MAP;
+
+   req.flags |= kgsl_align_flag(align);
 
    /* Forcing everything in the first 4GB is overkill, but we don't have many
     * other options here since we don't control iova addresses and kgsl
@@ -353,6 +375,7 @@ static VkResult
 kgsl_bo_init_dmabuf(struct tu_device *dev,
                     struct tu_bo **out_bo,
                     uint64_t size,
+                    uint64_t align,
                     enum tu_bo_alloc_flags flags,
                     int fd)
 {
@@ -366,6 +389,8 @@ kgsl_bo_init_dmabuf(struct tu_device *dev,
       .type = KGSL_USER_MEM_TYPE_DMABUF,
    };
    int ret;
+
+   req.flags |= kgsl_align_flag(align);
 
    ret = safe_ioctl(dev->physical_device->local_fd,
                     IOCTL_KGSL_GPUOBJ_IMPORT, &req);
@@ -482,7 +507,7 @@ kgsl_sparse_vma_init(struct tu_device *dev,
                      struct tu_sparse_vma *out_vma,
                      uint64_t *out_iova,
                      enum tu_sparse_vma_flags flags,
-                     uint64_t size, uint64_t client_iova)
+                     uint64_t size, uint64_t align, uint64_t client_iova)
 {
    /* Note: we cannot use kgsl_gpumem_alloc_id because it only has a 32-bit
     * flags value. kgsl_gpuobj_alloc seems to be the only ioctl we can use.
@@ -498,6 +523,8 @@ kgsl_sparse_vma_init(struct tu_device *dev,
 
    if (!(flags & TU_SPARSE_VMA_MAP_ZERO))
       req.flags |= KGSL_MEMFLAGS_VBO_NO_MAP_ZERO;
+
+   req.flags |= kgsl_align_flag(align);
 
    int ret;
 
@@ -1889,6 +1916,8 @@ tu_knl_kgsl_load(struct tu_instance *instance, int fd)
 
    device->has_set_iova = kgsl_is_memory_type_supported(
       fd, KGSL_MEMFLAGS_USE_CPU_MAP);
+
+   device->has_iova_align = true;
 
    /* Even if kernel is new enough, the GPU itself may not support it. */
    device->has_cached_coherent_memory = kgsl_is_memory_type_supported(
