@@ -66,7 +66,7 @@ extern "C" {
 //#define VK_API_VERSION VK_MAKE_API_VERSION(0, 1, 0, 0) // Patch version should always be set to 0
 
 // Version of this file
-#define VK_HEADER_VERSION 359
+#define VK_HEADER_VERSION 360
 
 // Complete version of this file
 #define VK_HEADER_VERSION_COMPLETE VK_MAKE_API_VERSION(0, 1, 4, VK_HEADER_VERSION)
@@ -1493,6 +1493,9 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_TILING_CONTROL_FEATURES_EXT = 1000687000,
     VK_STRUCTURE_TYPE_IMAGE_TILING_CONTROL_CREATE_INFO_EXT = 1000687001,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_DECODE_VECTOR_FEATURES_NV = 1000689000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_ALLOCATION_ALIGNMENT_FEATURES_VALVE = 1000709000,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_ALLOCATION_ALIGNMENT_PROPERTIES_VALVE = 1000709001,
+    VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_ALIGNMENT_ALLOCATE_INFO_VALVE = 1000709002,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTER_FEATURES = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETER_FEATURES = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES,
   // VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT is a legacy alias
@@ -26586,6 +26589,30 @@ typedef struct VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV {
     void*              pNext;
     VkBool32           cooperativeMatrixDecodeVector;
 } VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV;
+
+
+
+// VK_VALVE_buffer_device_address_allocation_alignment is a preprocessor guard. Do not pass it to API calls.
+#define VK_VALVE_buffer_device_address_allocation_alignment 1
+#define VK_VALVE_BUFFER_DEVICE_ADDRESS_ALLOCATION_ALIGNMENT_SPEC_VERSION 1
+#define VK_VALVE_BUFFER_DEVICE_ADDRESS_ALLOCATION_ALIGNMENT_EXTENSION_NAME "VK_VALVE_buffer_device_address_allocation_alignment"
+typedef struct VkPhysicalDeviceBufferDeviceAddressAllocationAlignmentFeaturesVALVE {
+    VkStructureType    sType;
+    void*              pNext;
+    VkBool32           bufferDeviceAddressAllocationAlignment;
+} VkPhysicalDeviceBufferDeviceAddressAllocationAlignmentFeaturesVALVE;
+
+typedef struct VkPhysicalDeviceBufferDeviceAddressAllocationAlignmentPropertiesVALVE {
+    VkStructureType    sType;
+    void*              pNext;
+    uint32_t           maxBufferDeviceAddressAllocationAlignment;
+} VkPhysicalDeviceBufferDeviceAddressAllocationAlignmentPropertiesVALVE;
+
+typedef struct VkBufferDeviceAddressAlignmentAllocateInfoVALVE {
+    VkStructureType    sType;
+    void*              pNext;
+    uint32_t           alignment;
+} VkBufferDeviceAddressAlignmentAllocateInfoVALVE;
 
 
 
