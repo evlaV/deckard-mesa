@@ -64,6 +64,7 @@ static const struct debug_control tu_debug_options[] = {
    { "computeroundrobin", TU_DEBUG_COMPUTE_ROUND_ROBIN },
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "logsocket", TU_DEBUG_LOGSOCKET },
+   { "gmem_warmup", TU_DEBUG_GMEM_WARMUP },
    { NULL, 0 }
 };
 
