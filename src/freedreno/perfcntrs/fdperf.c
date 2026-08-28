@@ -32,15 +32,19 @@
 
 #include "drm-uapi/msm_drm.h"
 
-#define MAX_CNTR_PER_GROUP 24
+#define MAX_CNTR_PER_GROUP 40
 #define REFRESH_MS         500
 
 static struct {
    int refresh_ms;
    bool dump;
+   int dump_count;
+   const char *trigger;
 } options = {
    .refresh_ms = REFRESH_MS,
    .dump = false,
+   .dump_count = 1,
+   .trigger = NULL,
 };
 
 /* NOTE first counter group should always be CP, since we unconditionally
@@ -237,7 +241,8 @@ find_device(void)
       err(1, "could not map device");
    }
 
-   fd_pipe_set_param(dev.pipe, FD_SYSPROF, 1);
+   if (fd_pipe_set_param(dev.pipe, FD_SYSPROF, 2))
+      warn("FD_SYSPROF=2 failed (need root); counters may reset (IFPC)");
 }
 
 /*
@@ -1179,13 +1184,19 @@ parse_options(int argc, char **argv)
 {
    int c;
 
-   while ((c = getopt(argc, argv, "r:d")) != -1) {
+   while ((c = getopt(argc, argv, "r:dn:t:")) != -1) {
       switch (c) {
       case 'r':
          options.refresh_ms = atoi(optarg);
          break;
       case 'd':
          options.dump = true;
+         break;
+      case 'n':
+         options.dump_count = atoi(optarg);
+         break;
+      case 't':
+         options.trigger = optarg;
          break;
       default:
          print_usage(argv[0]);
@@ -1211,8 +1222,23 @@ main(int argc, char **argv)
    config_restore();
    flush_ring();
 
-   if (options.dump)
-      dump_counters();
+   if (options.dump) {
+      for (int b = 0;; b++) {
+         if (options.trigger) {
+            while (access(options.trigger, F_OK))
+               usleep(2000);
+            unlink(options.trigger);
+            printf("=== batch %d ===\n", b);
+         }
+         for (int i = 0; i < options.dump_count; i++) {
+            printf("=== window %d t=%" PRIu64 " ===\n", i, gettime_us());
+            dump_counters();
+            fflush(stdout);
+         }
+         if (!options.trigger)
+            break;
+      }
+   }
    else
       main_ui();
 
