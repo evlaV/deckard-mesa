@@ -1229,7 +1229,10 @@ add_gpus([
         GPUId(chip_id=0xffff43051401, name="FD750"), # Default no-speedbin fallback
     ], A6xxGPUInfo(
         CHIP.A7XX,
-        [a7xx_base, a7xx_gen3],
+        [a7xx_base, a7xx_gen3,
+         # Tuned on a750: the aspect guard and the GMEM budget already limit
+         # foveated passes to 384x384 tiles, so the cap does not bind there.
+         GPUProps(max_fdm_tile_size = 384)],
         num_ccu = 6,
         tile_align_w = 96,
         tile_align_h = 32,
