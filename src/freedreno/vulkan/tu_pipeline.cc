@@ -4791,11 +4791,26 @@ tu_pipeline_builder_init_graphics(
 
       builder->unscaled_input_fragcoord = 0;
       for (unsigned i = 0; i < subpass->input_count; i++) {
+         uint32_t a = subpass->input_attachments[i].attachment;
+         if (a == VK_ATTACHMENT_UNUSED)
+            continue;
          /* Input attachments stored in GMEM must be loaded with unscaled
           * FragCoord.
           */
-         if (subpass->input_attachments[i].attachment != VK_ATTACHMENT_UNUSED &&
-             subpass->input_attachments[i].patch_input_gmem)
+         if (subpass->input_attachments[i].patch_input_gmem) {
+            builder->unscaled_input_fragcoord |= 1u << i;
+            continue;
+         }
+         /* A hybrid pass has moved this attachment to sysmem, but a subsampled
+          * one is still stored packed: one texel per fragment, at the bin's
+          * packed position. The read therefore still wants the raw rendering
+          * coordinate, exactly as the GMEM case does -- scaling it to
+          * framebuffer space samples the packed data as if it were full
+          * resolution. Demotion only changes where the texels live, not how
+          * densely they are packed, so it must not change the coordinate
+          * space.
+          */
+         if (tu_attachment_packed_in_sysmem(pass, a))
             builder->unscaled_input_fragcoord |= 1u << i;
       }
 

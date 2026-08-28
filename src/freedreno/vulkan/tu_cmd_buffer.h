@@ -1020,6 +1020,28 @@ tu_bin_offset(VkOffset2D fdm_offset, const struct tu_tiling_config *tiling)
    };
 }
 
+/* True when an attachment is stored PACKED (it is subsampled) but lives in
+ * SYSMEM rather than GMEM, which is the shape hybrid placement creates and the
+ * invariant the hybrid fixes serve: demotion changes where the texels live, not
+ * how densely they are packed.
+ *
+ * Two consequences follow, and both are bugs if forgotten:
+ *   - reads must stay in packed space, so the input attachment keeps unscaled
+ *     FragCoord (see tu_pipeline.cc, unscaled_input_fragcoord);
+ *   - writes must stay inside the packed allocation, fb + tile_align, which
+ *     bounds how far the bin grid may slide.
+ *
+ * The subsampled half cannot be answered from the pass alone -- it is a
+ * property of the image -- so callers that have the image view should check it
+ * too; this is the pass-side half.
+ */
+static inline bool
+tu_attachment_packed_in_sysmem(const struct tu_render_pass *pass, uint32_t a)
+{
+   return pass->hybrid && a != VK_ATTACHMENT_UNUSED &&
+          !pass->attachments[a].gmem;
+}
+
 static inline uint32_t
 tu_fdm_num_layers(const struct tu_cmd_buffer *cmd)
 {

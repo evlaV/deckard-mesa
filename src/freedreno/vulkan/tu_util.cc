@@ -65,6 +65,7 @@ static const struct debug_control tu_debug_options[] = {
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "logsocket", TU_DEBUG_LOGSOCKET },
    { "gmem_warmup", TU_DEBUG_GMEM_WARMUP },
+   { "force_hybrid", TU_DEBUG_FORCE_HYBRID },
    { NULL, 0 }
 };
 

@@ -1524,6 +1524,31 @@ tu7_emit_tile_render_begin_regs(struct tu_cs *cs)
    tu_cs_emit_regs(cs, RB_CLEAR_TARGET(CHIP, .clear_mode = CLEAR_MODE_GMEM));
 }
 
+/* Like tu7_emit_tile_render_begin_regs, but for hybrid passes the color
+ * RTs are placed in sysmem while depth/stencil stays in GMEM.
+ */
+template <chip CHIP>
+static void
+tu7_emit_tile_render_begin_regs_pass(struct tu_cmd_buffer *cmd,
+                                     struct tu_cs *cs)
+{
+   if (unlikely(cmd->state.pass->hybrid)) {
+      tu_cs_emit_regs(cs, RB_BUFFER_CNTL(CHIP,
+         .rt0_sysmem = true,
+         .rt1_sysmem = true,
+         .rt2_sysmem = true,
+         .rt3_sysmem = true,
+         .rt4_sysmem = true,
+         .rt5_sysmem = true,
+         .rt6_sysmem = true,
+         .rt7_sysmem = true,
+      ));
+      tu_cs_emit_regs(cs, RB_CLEAR_TARGET(CHIP, .clear_mode = CLEAR_MODE_GMEM));
+   } else {
+      tu7_emit_tile_render_begin_regs<CHIP>(cs);
+   }
+}
+
 /* Set always-identical registers used specifically for sysmem */
 template <chip CHIP>
 static void
@@ -1605,7 +1630,7 @@ tu6_emit_tile_select(struct tu_cmd_buffer *cmd,
     */
    if (CHIP >= A7XX &&
        cmd->state.pass->subpasses[cmd->state.pass->subpass_count - 1].custom_resolve) {
-      tu7_emit_tile_render_begin_regs<CHIP>(cs);
+      tu7_emit_tile_render_begin_regs_pass<CHIP>(cmd, cs);
    }
 
    /* The GMEM stride is hardcoded when we emit input attachments and 3d
@@ -1994,6 +2019,15 @@ tu6_emit_gmem_resolves(struct tu_cmd_buffer *cmd,
             continue;
 
          uint32_t gmem_a = tu_subpass_get_attachment_to_resolve(subpass, i);
+
+         /* A fixed-function resolve reads its source out of GMEM. If hybrid
+          * demoted that source to sysmem there is nothing in GMEM to read, so
+          * this resolve is both wasted work and wrong.
+          */
+         if (unlikely(!pass->attachments[gmem_a].gmem)) {
+            mesa_logw("resolving a%u from a%u, which is not in GMEM "
+                      "(hybrid=%d)", a, gmem_a, pass->hybrid);
+         }
 
          tu_store_gmem_attachment<CHIP>(cmd, cs, resolve_group, a, gmem_a,
                                         fb->layers, subpass->multiview_mask,
@@ -3022,7 +3056,10 @@ tu_trace_start_render_pass(struct tu_cmd_buffer *cmd)
    trace_start_render_pass(&cmd->trace, &cmd->cs, cmd, cmd->state.framebuffer,
                            cmd->state.tiling, max_samples, clear_cpp,
                            load_cpp, store_cpp, has_depth, ubwc, cmd->state.pass->has_msrtss,
-                           cmd->state.rp.cb_disable_reason ? cmd->state.rp.cb_disable_reason : "");
+                           cmd->state.rp.cb_disable_reason ? cmd->state.rp.cb_disable_reason : "",
+                           cmd->state.pass->hybrid_demoted_count,
+                           cmd->state.pass->hybrid_disable_reason
+                              ? cmd->state.pass->hybrid_disable_reason : "");
 }
 
 template <chip CHIP>
@@ -3565,7 +3602,7 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    bool use_cb = false;
 
    if (CHIP >= A7XX) {
-      tu7_emit_tile_render_begin_regs<CHIP>(cs);
+      tu7_emit_tile_render_begin_regs_pass<CHIP>(cmd, cs);
       use_cb = tu7_emit_concurrent_binning_gmem(cmd, cs, use_binning);
    }
 
@@ -4144,6 +4181,12 @@ tu_cmd_render(struct tu_cmd_buffer *cmd_buffer,
    tu_autotune::rp_ctx_t rp_ctx = NULL;
    if (use_sysmem_rendering(cmd_buffer, &rp_ctx, rp_key))
    {
+      if (unlikely(cmd_buffer->state.pass->hybrid)) {
+         perf_debug(cmd_buffer->device,
+                    "hybrid pass running in sysmem, tiles were sized for a "
+                    "GMEM walk that did not happen: %s",
+                    cmd_buffer->state.rp.gmem_disable_reason ?: "unknown");
+      }
 #if defined(HAVE_GPUVIS)
       GPUVIS_TRACE_BLOCK("[MESA] tu_cmd_render SYSMEM");
 #endif
@@ -6840,6 +6883,42 @@ tu_emit_subpass_begin_sysmem(struct tu_cmd_buffer *cmd)
       tu_cond_exec_end(cs); /* sysmem */
 }
 
+/* Emit this subpass's first-use clears.
+ *
+ * hybrid_steering asks for the per-attachment RB_CLEAR_TARGET dance that a
+ * hybrid pass needs in GMEM mode, where its demoted colour attachments live in
+ * sysmem while depth stays in GMEM.
+ */
+static void
+tu7_emit_subpass_clear_body(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+                            struct tu_resolve_group *resolve_group,
+                            uint32_t subpass_idx, bool emit_blit_scissor,
+                            bool hybrid_steering)
+{
+   bool emitted_scissor = false;
+   for (uint32_t i = 0; i < cmd->state.pass->attachment_count; ++i) {
+      struct tu_render_pass_attachment *att =
+         &cmd->state.pass->attachments[i];
+      if (!att->clear_mask || att->first_subpass_idx != subpass_idx)
+         continue;
+
+      if (!emitted_scissor && emit_blit_scissor) {
+         tu6_emit_blit_scissor(cmd, cs, 0, false);
+         emitted_scissor = true;
+      }
+
+      bool sysmem_clear = hybrid_steering && !att->gmem;
+      if (sysmem_clear)
+         tu_cs_emit_regs(cs, RB_CLEAR_TARGET(A7XX,
+            .clear_mode = CLEAR_MODE_SYSMEM));
+      tu7_generic_clear_attachment(cmd, cs, resolve_group,
+                                   cmd->state.per_layer_render_area, i);
+      if (sysmem_clear)
+         tu_cs_emit_regs(cs, RB_CLEAR_TARGET(A7XX,
+            .clear_mode = CLEAR_MODE_GMEM));
+   }
+}
+
 static void
 tu7_emit_subpass_clear(struct tu_cmd_buffer *cmd, struct tu_resolve_group *resolve_group)
 {
@@ -6856,25 +6935,37 @@ tu7_emit_subpass_clear(struct tu_cmd_buffer *cmd, struct tu_resolve_group *resol
    if (cmd->state.fdm_enabled)
       tu_cs_set_writeable(cs, true);
 
-   tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(RENDER_MODE) |
-                          CP_COND_REG_EXEC_0_GMEM |
-                          CP_COND_REG_EXEC_0_SYSMEM);
+   if (unlikely(cmd->state.pass->hybrid)) {
+      /* A hybrid pass needs different clear steering per render mode, and this
+       * stream runs in both, so the clears are emitted once for each.
+       *
+       * In GMEM mode the demoted colour attachments want sysmem steering while
+       * depth still wants GMEM, hence the per-attachment dance. In sysmem mode
+       * everything already wants sysmem -- set once by
+       * tu7_emit_sysmem_render_begin_regs() -- and touching the register would
+       * leave GMEM steering behind for every later clear in the pass. That is
+       * what made a hybrid pass rendered in sysmem mode come out wrong, and it
+       * was reachable: the autotuner alone can choose sysmem for such a pass.
+       */
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(RENDER_MODE) |
+                             CP_COND_REG_EXEC_0_GMEM);
+      tu7_emit_subpass_clear_body(cmd, cs, resolve_group, subpass_idx,
+                                  emit_blit_scissor, true);
+      tu_cond_exec_end(cs);
 
-   bool emitted_scissor = false;
-   for (uint32_t i = 0; i < cmd->state.pass->attachment_count; ++i) {
-      struct tu_render_pass_attachment *att =
-         &cmd->state.pass->attachments[i];
-      if (att->clear_mask && att->first_subpass_idx == subpass_idx) {
-         if (!emitted_scissor && emit_blit_scissor) {
-            tu6_emit_blit_scissor(cmd, cs, 0, false);
-            emitted_scissor = true;
-         }
-         tu7_generic_clear_attachment(cmd, cs, resolve_group,
-                                      cmd->state.per_layer_render_area, i);
-      }
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(RENDER_MODE) |
+                             CP_COND_REG_EXEC_0_SYSMEM);
+      tu7_emit_subpass_clear_body(cmd, cs, resolve_group, subpass_idx,
+                                  emit_blit_scissor, false);
+      tu_cond_exec_end(cs);
+   } else {
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(RENDER_MODE) |
+                             CP_COND_REG_EXEC_0_GMEM |
+                             CP_COND_REG_EXEC_0_SYSMEM);
+      tu7_emit_subpass_clear_body(cmd, cs, resolve_group, subpass_idx,
+                                  emit_blit_scissor, false);
+      tu_cond_exec_end(cs);
    }
-
-   tu_cond_exec_end(cs);
 
    if (cmd->state.fdm_enabled)
       tu_cs_set_writeable(cs, false);

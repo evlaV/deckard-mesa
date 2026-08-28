@@ -34,6 +34,9 @@ def declare_options():
         S("tu_autotune_algorithm",
           description="Set the preferred autotune algorithm",
           c_name="autotune_algo"),
+        B("tu_allow_fdm_hybrid", False,
+          "For fragment-density-map passes with a custom resolve, keep only depth in GMEM and write colour straight to memory, which lets the tiles grow. Off by default because the win depends on the pass shape",
+          c_name="allow_fdm_hybrid"),
     ]
 
     misc_options = [

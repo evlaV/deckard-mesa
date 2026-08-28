@@ -699,6 +699,7 @@ tu_image_init(struct tu_device *device, struct tu_image *image,
    }
 
    /* Layout computation begins here */
+   uint32_t subsampled_pad = 0;
    enum a6xx_tile_mode tile_mode = TILE6_3;
 #if DETECT_OS_LINUX || DETECT_OS_BSD
    image->vk.drm_format_mod = modifier;
@@ -753,11 +754,25 @@ tu_image_init(struct tu_device *device, struct tu_image *image,
 
       /* Subsampled images with FDM offset require extra space for adjusting
        * the offset to make the tiles aligned.
+       *
+       * A hybrid pass needs more than alignment: it writes such an image packed
+       * at each bin's raster anchor with no GMEM store left to relocate the
+       * result, so its padding has to absorb the whole bin slide, and the tile
+       * is capped to match below. The GMEM path has that store and needs only
+       * the alignment, so only pay for the larger padding where hybrid can
+       * happen at all.
        */
       if ((image->vk.create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) &&
           (image->vk.create_flags & VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT)) {
-         width0 += device->physical_device->info->tile_align_w;
-         height0 += device->physical_device->info->tile_align_h;
+         uint32_t pad_w = device->physical_device->info->tile_align_w;
+         uint32_t pad_h = device->physical_device->info->tile_align_h;
+         if (device->instance->drirc.perf.allow_fdm_hybrid &&
+             device->physical_device->info->props.max_fdm_tile_size) {
+            pad_w = pad_h = subsampled_pad =
+               device->physical_device->info->props.max_fdm_tile_size;
+         }
+         width0 += pad_w;
+         height0 += pad_h;
       }
 
       struct fdl_explicit_layout plane_layout;
@@ -822,6 +837,14 @@ tu_image_init(struct tu_device *device, struct tu_image *image,
 
    image->max_tile_w_constraint_fdm = ~0;
    image->max_tile_h_constraint_fdm = ~0;
+
+   /* The padding above only bounds the packed write if the tile is bounded to
+    * match, since the slide is a remainder modulo the tile.
+    */
+   if (subsampled_pad) {
+      image->max_tile_w_constraint_fdm = subsampled_pad;
+      image->max_tile_h_constraint_fdm = subsampled_pad;
+   }
 
    const struct util_format_description *desc = util_format_description(image->layout[0].format);
    if (util_format_has_depth(desc) && device->use_lrz) {

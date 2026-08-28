@@ -146,6 +146,17 @@ struct tu_render_pass
    uint32_t min_cpp;
    uint64_t autotune_hash;
 
+   /* Colour attachments placed in sysmem while depth stays in GMEM, see
+    * tu_render_pass_apply_hybrid().
+    */
+   bool hybrid;
+   /* How many colour attachments the placement demoted, and for a pass that
+    * had a fragment density map but did not get the placement, why not. Both
+    * are reported on the render_pass tracepoint.
+    */
+   uint8_t hybrid_demoted_count;
+   const char *hybrid_disable_reason;
+
    /* memory bandwidth costs (in bytes) for gmem / sysmem rendering */
    uint32_t gmem_bandwidth_per_pixel;
    uint32_t sysmem_bandwidth_per_pixel;

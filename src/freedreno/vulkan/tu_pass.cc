@@ -17,6 +17,8 @@
 #include "tu_image.h"
 
 #define XXH_INLINE_ALL
+#include "util/perf/cpu_trace.h"
+#include "util/u_debug.h"
 #include "util/xxhash.h"
 
 static void
@@ -734,6 +736,128 @@ tu_gmem_alloc(struct tu_gmem_alloc *allocs,
    return alloc;
 }
 
+/* Place the colour attachments of a custom-resolve pass in sysmem while depth
+ * stays in GMEM. The tile budget then only carries depth, so tiles grow and
+ * the number of per-tile command-stream walks drops. Colour writes go through
+ * the CCU to memory, UBWC-compressed where the image layout is, and the
+ * resolve reads them back through the normal texture path.
+ *
+ * Sysmem mode stays correct: tu7_emit_subpass_clear() emits the clear body
+ * once per render mode, so a demoted clear does not leave GMEM steering behind
+ * for the clears after it. Running a hybrid pass in sysmem is merely wasteful,
+ * not wrong.
+ *
+ * The decision is taken here, at pass-creation time, rather than per execution,
+ * because the GMEM offsets it changes live in the shared render-pass object and
+ * cannot be re-derived at begin.
+ */
+static void
+tu_render_pass_apply_hybrid(struct tu_device *device,
+                            struct tu_render_pass *pass)
+{
+   /* Only foveated passes benefit: without FDM the tiles the demotion frees up
+    * are not what limits the pass. Such a pass is not a candidate at all, so it
+    * is left without a reason rather than filling traces with noise -- every
+    * rejection below is a pass that looked like it should have qualified.
+    */
+   if (!pass->has_fdm)
+      return;
+
+   if (likely(!device->instance->drirc.perf.allow_fdm_hybrid) &&
+       !TU_DEBUG(FORCE_HYBRID)) {
+      pass->hybrid_disable_reason = "not enabled for this application";
+      return;
+   }
+
+   /* The demoted colour writes are held inside a subsampled image's padding,
+    * which is sized by the device's largest FDM tile; a device that declares
+    * none cannot bound the write, so it does not get hybrid.
+    */
+   if (!device->physical_device->info->props.max_fdm_tile_size) {
+      pass->hybrid_disable_reason = "device declares no largest FDM tile";
+      return;
+   }
+
+   if (pass->subpass_count == 0 ||
+       !pass->subpasses[pass->subpass_count - 1].custom_resolve) {
+      pass->hybrid_disable_reason = "no custom resolve";
+      return;
+   }
+
+   /* Without a depth attachment left in GMEM there is nothing to tile. */
+   if (pass->subpasses[0].depth_stencil_attachment.attachment ==
+       VK_ATTACHMENT_UNUSED) {
+      pass->hybrid_disable_reason = "no depth attachment to tile";
+      return;
+   }
+
+   bool demoted[pass->attachment_count];
+   memset(demoted, 0, sizeof(demoted));
+   uint32_t count = 0;
+
+   /* A fixed-function resolve reads its source out of GMEM
+    * (tu6_emit_gmem_resolves -> tu_store_gmem_attachment), and an MSAA resolve
+    * is real work that has to happen somewhere, so demoting such a source
+    * would leave that resolve reading GMEM nothing ever wrote. The store for a
+    * demoted attachment is already skipped, which is correct -- it is in memory
+    * already -- but the resolve cannot simply be skipped in the same way.
+    *
+    * So exclude any attachment a fixed-function resolve needs. Measured
+    * reachable: vk.custres's "custom depth resolve + fixed colour resolve"
+    * shape hit it 6 times with hybrid exactly as it ships.
+    */
+   bool resolve_src[pass->attachment_count];
+   memset(resolve_src, 0, sizeof(resolve_src));
+   for (uint32_t i = 0; i < pass->subpass_count; i++) {
+      const struct tu_subpass *subpass = &pass->subpasses[i];
+      if (!subpass->resolve_attachments)
+         continue;
+      for (uint32_t j = 0; j < subpass->resolve_count; j++) {
+         if (subpass->resolve_attachments[j].attachment == VK_ATTACHMENT_UNUSED)
+            continue;
+         uint32_t src = tu_subpass_get_attachment_to_resolve(subpass, j);
+         if (src != VK_ATTACHMENT_UNUSED && src < pass->attachment_count)
+            resolve_src[src] = true;
+      }
+   }
+
+   for (uint32_t i = 0; i < pass->subpass_count; i++) {
+      struct tu_subpass *subpass = &pass->subpasses[i];
+      for (uint32_t j = 0; j < subpass->color_count; j++) {
+         uint32_t a = subpass->color_attachments[j].attachment;
+         if (a == VK_ATTACHMENT_UNUSED)
+            continue;
+         struct tu_render_pass_attachment *att = &pass->attachments[a];
+         if (att->gmem && !resolve_src[a]) {
+            att->gmem = false;
+            demoted[a] = true;
+            count++;
+         }
+      }
+   }
+
+   if (!count) {
+      pass->hybrid_disable_reason = "no demotable colour attachment";
+      return;
+   }
+
+   pass->hybrid = true;
+   pass->hybrid_demoted_count = MIN2(count, UINT8_MAX);
+
+   MESA_TRACE_SCOPE("tu hybrid engaged demoted=%u source=%s", count,
+                    TU_DEBUG(FORCE_HYBRID) ? "forced" : "driconf");
+
+   /* The demoted attachments are read from memory, not GMEM. */
+   for (uint32_t i = 0; i < pass->subpass_count; i++) {
+      struct tu_subpass *subpass = &pass->subpasses[i];
+      for (uint32_t j = 0; j < subpass->input_count; j++) {
+         uint32_t a = subpass->input_attachments[j].attachment;
+         if (a != VK_ATTACHMENT_UNUSED && demoted[a])
+            subpass->input_attachments[j].patch_input_gmem = false;
+      }
+   }
+}
+
 static void
 tu_render_pass_gmem_config(struct tu_render_pass *pass,
                            const struct tu_physical_device *phys_dev)
@@ -1352,6 +1476,7 @@ tu_CreateRenderPass2(VkDevice _device,
       }
    }
 
+   tu_render_pass_apply_hybrid(device, pass);
    tu_render_pass_check_ib2_skip(pass);
    tu_render_pass_cond_config(device, pass);
    tu_render_pass_gmem_config(pass, device->physical_device);
@@ -1857,6 +1982,7 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
 
    pass->attachment_count = a;
 
+   tu_render_pass_apply_hybrid(device, pass);
    tu_render_pass_check_ib2_skip(pass);
    tu_render_pass_cond_config(device, pass);
    tu_render_pass_gmem_config(pass, device->physical_device);

@@ -135,7 +135,14 @@ begin_end_tp('render_pass',
           Arg(type='bool',     var='hasDepth',    c_format='%s', to_prim_type='({} ? "true" : "false")'),
           Arg(type='str',      var='ubwc',        c_format='%s', length_arg='11', copy_func='strncpy'),
           Arg(type='bool',     var='msrtss',      c_format='%s', to_prim_type='({} ? "true" : "false")'),
-          Arg(type='const char *', var='cbDisableReason', c_format='%s'),],
+          Arg(type='const char *', var='cbDisableReason', c_format='%s'),
+          # How many colour attachments hybrid placement moved to sysmem, 0 for a pass that did
+          # not get it. Pairs with tiledRender below: a hybrid pass that did not tile was sized
+          # for a GMEM walk that never happened, the one way the placement costs rather than pays.
+          Arg(type='uint8_t',  var='hybridDemoted', c_format='%u'),
+          # Why a pass that has a fragment density map did not get the placement; empty when it
+          # did, and for a pass with no FDM, which was never a candidate.
+          Arg(type='const char *', var='hybridDisableReason', c_format='%s'),],
     tp_struct=[Arg(type='uint16_t', name='width',               var='fb->width',                                            c_format='%u'),
                Arg(type='uint16_t', name='height',              var='fb->height',                                           c_format='%u'),
                Arg(type='uint8_t',  name='attachment_count',    var='fb->attachment_count',                                 c_format='%u'),

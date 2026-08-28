@@ -3055,6 +3055,15 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       device->vsc_prim_strm_pitch = 0x4000 + VSC_PAD;
    }
 
+   if (TU_DEBUG(STARTUP) &&
+       (device->instance->drirc.perf.allow_fdm_hybrid ||
+        TU_DEBUG(FORCE_HYBRID))) {
+      mesa_logi("FDM hybrid placement allowed (%s), largest FDM tile %u px",
+                device->instance->drirc.perf.allow_fdm_hybrid ? "driconf"
+                                                              : "forced",
+                device->physical_device->info->props.max_fdm_tile_size);
+   }
+
    if (device->vk.enabled_features.customBorderColors)
       global_size += TU_BORDER_COLOR_COUNT * sizeof(struct bcolor_entry);
 
@@ -4282,18 +4291,20 @@ tu_CreateFramebuffer(VkDevice _device,
             }
          }
       } else {
+         /* Any attachment that has to absorb the bin slide constrains the tile,
+          * so take the tightest rather than the first one found.
+          */
          for (uint32_t i = 0; i < pCreateInfo->attachmentCount; i++) {
             const struct tu_image_view *iview = framebuffer->attachments[i];
-            if (iview->image->vk.create_flags &
-                   VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT &&
-                iview->image->vk.usage &
-                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-               framebuffer->max_tile_w_constraint =
-                  iview->image->max_tile_w_constraint_fdm;
-               framebuffer->max_tile_h_constraint =
-                  iview->image->max_tile_h_constraint_fdm;
-               break;
-            }
+            if (!(iview->image->vk.create_flags &
+                  VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT))
+               continue;
+            framebuffer->max_tile_w_constraint =
+               MIN2(framebuffer->max_tile_w_constraint,
+                    iview->image->max_tile_w_constraint_fdm);
+            framebuffer->max_tile_h_constraint =
+               MIN2(framebuffer->max_tile_h_constraint,
+                    iview->image->max_tile_h_constraint_fdm);
          }
       }
    }
@@ -4350,14 +4361,25 @@ tu_setup_dynamic_framebuffer(struct tu_cmd_buffer *cmd_buffer,
    framebuffer->max_tile_w_constraint = ~0;
    framebuffer->max_tile_h_constraint = ~0;
 
-   if (pass->has_fdm && pRenderingInfo->pDepthAttachment &&
-       pRenderingInfo->pDepthAttachment->imageView != VK_NULL_HANDLE) {
-      VK_FROM_HANDLE(tu_image_view, view,
-                     pRenderingInfo->pDepthAttachment->imageView);
-      framebuffer->max_tile_w_constraint =
-         view->image->max_tile_w_constraint_fdm;
-      framebuffer->max_tile_h_constraint =
-         view->image->max_tile_h_constraint_fdm;
+   if (pass->has_fdm) {
+      const VkRenderingAttachmentInfo *atts[MAX_RTS + 1];
+      unsigned n = 0;
+      if (pRenderingInfo->pDepthAttachment)
+         atts[n++] = pRenderingInfo->pDepthAttachment;
+      for (unsigned i = 0; i < pRenderingInfo->colorAttachmentCount; i++)
+         atts[n++] = &pRenderingInfo->pColorAttachments[i];
+
+      for (unsigned i = 0; i < n; i++) {
+         if (!atts[i] || atts[i]->imageView == VK_NULL_HANDLE)
+            continue;
+         VK_FROM_HANDLE(tu_image_view, view, atts[i]->imageView);
+         framebuffer->max_tile_w_constraint =
+            MIN2(framebuffer->max_tile_w_constraint,
+                 view->image->max_tile_w_constraint_fdm);
+         framebuffer->max_tile_h_constraint =
+            MIN2(framebuffer->max_tile_h_constraint,
+                 view->image->max_tile_h_constraint_fdm);
+      }
    }
 
    tu_framebuffer_init_tiling_config(framebuffer, cmd_buffer->device, pass);
