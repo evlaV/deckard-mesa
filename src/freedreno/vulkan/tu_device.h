@@ -577,6 +577,14 @@ struct tu_tiling_config {
    /* size of the first tile */
    VkExtent2D tile0;
 
+   /* Largest bin-grid slide a hybrid pass may use, or ~0 for no limit; see
+    * tu_tiling_set_max_slide().
+    *
+    * NOTE this config is cached per framebuffer and reused across executions
+    * with differing FDM offsets, so it may only be derived from geometry.
+    */
+   uint32_t max_slide_w, max_slide_h;
+
    /* Whether using GMEM is even possible with this configuration */
    bool possible;
 

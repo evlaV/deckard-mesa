@@ -1015,8 +1015,10 @@ static inline VkOffset2D
 tu_bin_offset(VkOffset2D fdm_offset, const struct tu_tiling_config *tiling)
 {
    return (VkOffset2D) {
-      euclid_rem(-fdm_offset.x, tiling->tile0.width),
-      euclid_rem(-fdm_offset.y, tiling->tile0.height),
+      (int32_t) MIN2((uint32_t) euclid_rem(-fdm_offset.x, tiling->tile0.width),
+                     tiling->max_slide_w),
+      (int32_t) MIN2((uint32_t) euclid_rem(-fdm_offset.y, tiling->tile0.height),
+                     tiling->max_slide_h),
    };
 }
 
@@ -1029,7 +1031,7 @@ tu_bin_offset(VkOffset2D fdm_offset, const struct tu_tiling_config *tiling)
  *   - reads must stay in packed space, so the input attachment keeps unscaled
  *     FragCoord (see tu_pipeline.cc, unscaled_input_fragcoord);
  *   - writes must stay inside the packed allocation, fb + tile_align, which
- *     bounds how far the bin grid may slide.
+ *     bounds how far the bin grid may slide (see tu_util.cc, max_slide_w/h).
  *
  * The subsampled half cannot be answered from the pass alone -- it is a
  * property of the image -- so callers that have the image view should check it

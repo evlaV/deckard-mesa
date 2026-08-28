@@ -800,6 +800,61 @@ tu_calc_tile_config(struct tu_cmd_buffer *cmd, const struct tu_vsc_config *vsc,
                          cmd->state.fdm_custom_resolve_subsampled);
    }
 
+#ifndef NDEBUG /* present exactly when the assert below is */
+   /* A hybrid pass writes its demoted colour attachments packed at the bin's
+    * raster anchor, and a subsampled image is only allocated the framebuffer
+    * plus one tile alignment, so a write reaching past that is lost.
+    * tu_tiling_set_max_slide() bounds the slide precisely to make this
+    * unreachable; check it, because the offsets that would trip it depend on
+    * gaze and so would only corrupt the occasional frame.
+    */
+   if (unlikely(cmd->state.pass->hybrid) && fdm_offsets &&
+       cmd->state.fdm_any_subsampled) {
+      const struct tu_framebuffer *fb = cmd->state.framebuffer;
+      const struct tu_tiling_config *tiling = cmd->state.tiling;
+      const struct fd_dev_info *info = cmd->device->physical_device->info;
+      uint32_t alloc_w = fb->width, alloc_h = fb->height;
+      for (unsigned i = 0; i < fb->attachment_count; i++) {
+         const struct tu_image_view *iview = cmd->state.attachments[i];
+         if (!iview || !(iview->image->vk.create_flags &
+                         VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT))
+            continue;
+         if (iview->image->vk.create_flags &
+             VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM) {
+            alloc_w += info->tile_align_w;
+            alloc_h += info->tile_align_h;
+         }
+         break;
+      }
+
+      unsigned n = vsc->tile_count.width * vsc->tile_count.height;
+      unsigned views = tu_fdm_num_layers(cmd);
+      for (unsigned v = 0; v < views; v++) {
+         VkOffset2D slide = tu_bin_offset(fdm_offsets[v], tiling);
+         for (unsigned i = 0; i < n; i++) {
+            const struct tu_tile_config *tile = &tiles[i];
+            int32_t anchor_x = tile->pos.x * tiling->tile0.width;
+            int32_t anchor_y = tile->pos.y * tiling->tile0.height;
+            if (anchor_x - slide.x >= (int32_t) fb->width ||
+                anchor_y - slide.y >= (int32_t) fb->height)
+               continue;
+            int32_t end_x = anchor_x + tile->subsampled_pos[v].extent.width;
+            int32_t end_y = anchor_y + tile->subsampled_pos[v].extent.height;
+            if (end_x > (int32_t) alloc_w || end_y > (int32_t) alloc_h) {
+               mesa_loge("hybrid packed write past the subsampled allocation: "
+                         "bin %u,%u view %u offset=%d,%d slide=%d,%d "
+                         "end=%d,%d alloc=%ux%u tile0=%ux%u",
+                         tile->pos.x, tile->pos.y, v, fdm_offsets[v].x,
+                         fdm_offsets[v].y, slide.x, slide.y, end_x, end_y,
+                         alloc_w, alloc_h, tiling->tile0.width,
+                         tiling->tile0.height);
+               assert(!"hybrid packed write past the subsampled allocation");
+            }
+         }
+      }
+   }
+#endif
+
    return tiles;
 }
 

@@ -234,6 +234,49 @@ __vk_startup_errorf(struct tu_instance *instance,
    return error;
 }
 
+/* Bound how far the bin grid may slide, for hybrid passes only.
+ *
+ * A hybrid pass writes its demoted colour attachments packed at each bin's
+ * raster anchor with no GMEM store left to relocate them, so the write has to
+ * stay inside the padding tu_image_init() gives a subsampled image, which is
+ * one device tile alignment.
+ *
+ * Nothing else is bounded. For a non-hybrid pass the slide is how the FDM
+ * offset gets applied, and clamping it makes the offset inexact -- which the
+ * CTS fragment_density_map_offset tests check for and rightly fail. The LRZ
+ * margin does not need a bound here either: it is sized to the largest slide
+ * and caps the tile to match, so the slide already fits it.
+ */
+static void
+tu_tiling_set_max_slide(struct tu_tiling_config *tiling,
+                        const struct tu_render_pass *pass,
+                        const struct tu_framebuffer *fb,
+                        const struct tu_device *dev)
+{
+   tiling->max_slide_w = tiling->max_slide_h = ~0u;
+   if (likely(!pass->hybrid) || !pass->has_fdm || !tiling->possible)
+      return;
+
+   const struct fd_dev_info *info = dev->physical_device->info;
+   tiling->max_slide_w = info->tile_align_w;
+   tiling->max_slide_h = info->tile_align_h;
+
+   /* The grid carries one more column and row than the framebuffer needs so it
+    * can slide, and the trailing bin is anchored past the end of a subsampled
+    * image. If the grid already reaches beyond the allocation then that anchor
+    * is itself out of bounds, so it additionally has to stay hidden.
+    */
+   uint32_t reach_w = tiling->vsc.tile_count.width * tiling->tile0.width;
+   uint32_t reach_h = tiling->vsc.tile_count.height * tiling->tile0.height;
+
+   if (reach_w > fb->width + info->tile_align_w)
+      tiling->max_slide_w = MIN2(tiling->max_slide_w,
+                                 reach_w > fb->width ? reach_w - fb->width : 0);
+   if (reach_h > fb->height + info->tile_align_h)
+      tiling->max_slide_h = MIN2(tiling->max_slide_h,
+                                 reach_h > fb->height ? reach_h - fb->height : 0);
+}
+
 static void
 tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
                                     const struct tu_device *dev,
@@ -249,6 +292,11 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
        * them, since you shouldn't be doing gmem work if gmem is not possible.
        */
       .tile0 = (VkExtent2D) { ~0, ~0 },
+      /* No limit unless a hybrid pass narrows it below; zero would silently pin
+       * every slide to 0.
+       */
+      .max_slide_w = ~0u,
+      .max_slide_h = ~0u,
       .possible = false,
       .vsc = {
          .tile_count = (VkExtent2D) { .width = 1, .height = 1 },
@@ -355,6 +403,8 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
       }
    }
 
+   tu_tiling_set_max_slide(tiling, pass, fb, dev);
+
    /* If forcing binning, try to get at least 2 tiles in each direction. */
    if (TU_DEBUG(FORCEBIN) && tiling->possible) {
       if (tiling->vsc.tile_count.width == 1 && tiling->tile0.width != tile_align_w) {
@@ -365,6 +415,7 @@ tu_tiling_config_update_tile_layout(struct tu_framebuffer *fb,
          tiling->tile0.height = align(DIV_ROUND_UP(tiling->tile0.height, 2), tile_align_h);
          tiling->vsc.tile_count.height = 2;
       }
+      tu_tiling_set_max_slide(tiling, pass, fb, dev);
    }
 }
 
