@@ -841,6 +841,19 @@ tu_image_init(struct tu_device *device, struct tu_image *image,
             image->layout[0].height0, image->vk.samples,
             image->vk.array_layers);
 
+         /* Where no tile size keeps LRZ fast-clear covered the helper gives up
+          * and returns the device maximum, far more than the slide can ever
+          * reach, and fast clear is lost either way. Cap it at the device's
+          * largest FDM tile instead; the same figure caps the tile search
+          * below, which is what holds the slide inside the margin.
+          */
+         uint32_t max_fdm_tile =
+            device->physical_device->info->props.max_fdm_tile_size;
+         if (max_fdm_tile) {
+            extra_size.extra_width = MIN2(extra_size.extra_width, max_fdm_tile);
+            extra_size.extra_height = MIN2(extra_size.extra_height, max_fdm_tile);
+         }
+
          image->max_tile_w_constraint_fdm = extra_size.extra_width;
          image->max_tile_h_constraint_fdm = extra_size.extra_height;
       }

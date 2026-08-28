@@ -225,6 +225,18 @@ struct fd_dev_info {
       uint32_t gmem_vpc_pos_buf_size;
       uint32_t gmem_vpc_bv_pos_buf_size;
 
+      /* The largest tile allowed when FDM offsets are in play, or 0 for no
+       * limit. The bin-grid slide is a remainder modulo the tile size, so it
+       * is always smaller than this, and any allocation that has to absorb
+       * the slide (the LRZ image, which is shifted by it) can be padded by
+       * exactly this much instead of a worst case, with the offset still
+       * applied exactly. The value is a tuning tradeoff, not a hardware
+       * limit: a larger cap admits larger tiles and costs padding, and it
+       * only pays where it does not bind on the tiles the GMEM budget
+       * produces for foveated passes.
+       */
+      uint32_t max_fdm_tile_size;
+
       /* Corresponds to SP_LB_PARAM_LIMIT::PRIMALLOCTHRESHOLD */
       uint32_t prim_alloc_threshold;
 
