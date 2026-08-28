@@ -79,6 +79,18 @@ fd6_calc_gmem_cache_offsets(const struct fd_dev_info *info, unsigned gmemsize_by
    sysmem->color_ccu_offset = sysmem->depth_ccu_offset + depth_cache_size;
    sysmem->depth_cache_fraction =
       info->props.sysmem_ccu_depth_cache_fraction;
+   sysmem->color_cache_fraction =
+      info->props.sysmem_ccu_color_cache_fraction;
+   sysmem->depth_cache_size = info->props.sysmem_per_ccu_depth_cache_size;
+   sysmem->color_cache_size = info->props.sysmem_per_ccu_color_cache_size;
+
+   /* Sizes are per CCU, as the a8xx branch below already stores them. */
+   gmem->depth_cache_fraction = info->props.gmem_ccu_depth_cache_fraction;
+   gmem->color_cache_fraction = info->props.gmem_ccu_color_cache_fraction;
+   gmem->depth_cache_size =
+      sysmem->depth_cache_size >> info->props.gmem_ccu_depth_cache_fraction;
+   gmem->color_cache_size =
+      sysmem->color_cache_size >> info->props.gmem_ccu_color_cache_fraction;
 
    /* TODO we could unify gen7/gen8 setup.. gen7 is a subset.. */
    if (info->chip == 8) {
@@ -111,14 +123,12 @@ fd6_calc_gmem_cache_offsets(const struct fd_dev_info *info, unsigned gmemsize_by
       gmem->color_ccu_offset = gmem->vpc_attr_buf_offset - color_cache_size_gmem;
       /* Custom resolves can write depth through the CCU. */
       gmem->depth_ccu_offset = gmem->color_ccu_offset - depth_cache_size_gmem;
-      gmem->depth_cache_fraction = info->props.gmem_ccu_depth_cache_fraction;
 
       return gmem->vpc_attr_buf_offset;
    } else {
       gmem->color_ccu_offset = gmemsize_bytes - color_cache_size_gmem;
       /* Custom resolves can write depth through the CCU. */
       gmem->depth_ccu_offset = gmem->color_ccu_offset - depth_cache_size_gmem;
-      gmem->depth_cache_fraction = info->props.gmem_ccu_depth_cache_fraction;
 
       return gmemsize_bytes;
    }

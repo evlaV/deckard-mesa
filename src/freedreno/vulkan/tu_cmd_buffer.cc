@@ -661,8 +661,8 @@ emit_rb_ccu_cntl(struct tu_cs *cs, struct tu_device *dev, bool gmem)
    uint32_t depth_offset_hi = depth_offset >> 21;
    depth_offset &= 0x1fffff;
 
-   enum a6xx_ccu_cache_size color_cache_size = !gmem ? CCU_CACHE_SIZE_FULL : !gmem ? CCU_CACHE_SIZE_FULL :
-      (a6xx_ccu_cache_size)(dev->physical_device->info->props.gmem_ccu_color_cache_fraction);
+   enum a6xx_ccu_cache_size color_cache_size =
+      (a6xx_ccu_cache_size) cfg->color_cache_fraction;
 
    if (CHIP == A8XX) {
       tu_cs_emit_regs(cs, RB_CCU_CACHE_CNTL(CHIP,
