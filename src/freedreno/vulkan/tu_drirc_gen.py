@@ -46,6 +46,10 @@ def declare_options():
           "Disable conservative LRZ",
           c_name="disable_conservative_lrz"),
 
+        B("tu_allow_lrz_writes_with_stencil_based_on_depth_test", False,
+          "Don't disable LRZ writes when stencil write depends on depth test result, in general case this is incorrect, unless the app guarantees that every fragment with depth test has stencilCompareOp = ALWAYS + passOp = REPLACE + depthFailOp = KEEP + same stencil mask",
+          c_name="allow_lrz_writes_with_stencil_based_on_depth_test"),
+
         B("tu_dont_reserve_descriptor_set", False,
           "Don't internally reserve one of the HW descriptor sets for descriptor set dynamic offset support, this frees up an extra descriptor set at the cost of that feature",
           c_name="dont_reserve_descriptor_set"),
