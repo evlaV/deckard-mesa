@@ -1965,6 +1965,16 @@ tu_init_dri_options(struct tu_instance *instance)
       instance->drirc.perf.allow_concurrent_binning = false;
    if (TU_DEBUG(FORCE_CONCURRENT_BINNING))
       instance->drirc.perf.allow_concurrent_binning = true;
+
+   /* XXX: temporary lab enablement. In-game the deployed drirc.d is not on
+    * the driver's compiled config search path (and pressure-vessel hides the
+    * host's /usr/local), so the Alyx application profile never loads. Match
+    * it here, with the same contains semantics as application_name_match,
+    * until the driconf ships in a searched location.
+    */
+   const char *app_name = instance->vk.app_info.app_name;
+   if (app_name && strstr(app_name, "hlvr"))
+      instance->drirc.perf.allow_fdm_hybrid = true;
 }
 
 static uint32_t instance_count = 0;
