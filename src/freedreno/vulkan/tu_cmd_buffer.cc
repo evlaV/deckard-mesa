@@ -3891,6 +3891,88 @@ tu_identity_frag_area(struct tu_cmd_buffer *cmd,
       tile->frag_areas[i] = (VkExtent2D) { 1, 1 };
 }
 
+/* TU_DEBUG=fdmstat: one line per FDM render pass saying how much of the
+ * framebuffer was shaded at full density (1x1 fragment area) and how many
+ * fragments the pass shaded in total. The density map is sampled once per
+ * bin, so both numbers move with the bin grid, and a performance comparison
+ * between two tilings is only meaningful next to the fine area each of them
+ * actually delivered.
+ *
+ * tiles == NULL means the pass rendered in sysmem, where the density map is
+ * not applied and everything is shaded at full density.
+ */
+static void
+tu_log_fdm_stat(struct tu_cmd_buffer *cmd,
+                const struct tu_vsc_config *vsc,
+                const struct tu_tile_config *tiles,
+                const VkOffset2D *fdm_offsets)
+{
+   const struct tu_framebuffer *fb = cmd->state.framebuffer;
+   const unsigned views = tu_fdm_num_layers(cmd);
+   const uint64_t fb_px = (uint64_t) fb->width * fb->height;
+   uint64_t fine_px[MAX_VIEWS] = {}, frags[MAX_VIEWS] = {};
+
+   if (!tiles) {
+      for (unsigned v = 0; v < views; v++)
+         fine_px[v] = frags[v] = fb_px;
+   } else {
+      const struct tu_tiling_config *tiling = cmd->state.tiling;
+      const unsigned bins = vsc->tile_count.width * vsc->tile_count.height;
+
+      for (unsigned v = 0; v < views; v++) {
+         /* Bins slide left/up by less than a bin per view under FDM offset;
+          * count the framebuffer pixels each one covers after that slide.
+          */
+         VkOffset2D slide = { 0, 0 };
+         if (fdm_offsets && !cmd->state.rp.shared_viewport)
+            slide = tu_bin_offset(fdm_offsets[v], tiling);
+
+         for (unsigned i = 0; i < bins; i++) {
+            const struct tu_tile_config *tile = &tiles[i];
+            if (!(tile->visible_views & (1u << v)))
+               continue;
+
+            int32_t x1 = (int32_t) (tiling->tile0.width * tile->pos.x) - slide.x;
+            int32_t y1 = (int32_t) (tiling->tile0.height * tile->pos.y) - slide.y;
+            int32_t x2 = MIN2(x1 + (int32_t) tiling->tile0.width, (int32_t) fb->width);
+            int32_t y2 = MIN2(y1 + (int32_t) tiling->tile0.height, (int32_t) fb->height);
+            x1 = MAX2(x1, 0);
+            y1 = MAX2(y1, 0);
+            if (x2 <= x1 || y2 <= y1)
+               continue;
+
+            uint64_t px = (uint64_t) (x2 - x1) * (y2 - y1);
+            VkExtent2D fa = tile->frag_areas[v];
+            if (fa.width == 1 && fa.height == 1)
+               fine_px[v] += px;
+            frags[v] += px / (fa.width * fa.height);
+         }
+      }
+   }
+
+   uint64_t fine_total = 0, frags_total = 0;
+   char per_view[MAX_VIEWS * 32];
+   int len = 0;
+   for (unsigned v = 0; v < views; v++) {
+      fine_total += fine_px[v];
+      frags_total += frags[v];
+      len += snprintf(per_view + len, sizeof(per_view) - len, "%s%" PRIu64 "/%" PRIu64,
+                      v ? " " : "", fine_px[v], frags[v]);
+   }
+
+   mesa_logi("TU_FDMSTAT: mode=%s fb=%ux%u views=%u tile0=%ux%u bins=%ux%u "
+             "fine_px=%" PRIu64 " (%.1f%%) frags=%" PRIu64 " (%.1f%%) "
+             "per_view(fine/frags)=%s",
+             tiles ? "gmem" : "sysmem", fb->width, fb->height, views,
+             tiles ? cmd->state.tiling->tile0.width : fb->width,
+             tiles ? cmd->state.tiling->tile0.height : fb->height,
+             tiles ? vsc->tile_count.width : 1,
+             tiles ? vsc->tile_count.height : 1,
+             fine_total, 100.0 * fine_total / (fb_px * views),
+             frags_total, 100.0 * frags_total / (fb_px * views),
+             per_view);
+}
+
 static VkResult
 tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
 {
@@ -4027,8 +4109,11 @@ tu_cmd_render_tiles(struct tu_cmd_buffer *cmd,
       fdm_offsets = NULL;
 
    struct tu_tile_config *tiles = NULL;
-   if (has_fdm)
+   if (has_fdm) {
       tiles = tu_calc_tile_config(cmd, vsc, fdm, fdm_offsets);
+      if (TU_DEBUG(FDMSTAT))
+         tu_log_fdm_stat(cmd, vsc, tiles, fdm_offsets);
+   }
 
    /* Create gmem stores now (at EndRenderPass time)) because they needed to
     * know whether to allow their conditional execution, which was tied to a
@@ -4155,6 +4240,10 @@ tu_cmd_render_sysmem(struct tu_cmd_buffer *cmd,
    }
 
    tu_trace_start_render_pass(cmd);
+
+   if (TU_DEBUG(FDMSTAT) &&
+       cmd->state.pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED)
+      tu_log_fdm_stat(cmd, NULL, NULL, NULL);
 
    tu6_sysmem_render_begin<CHIP>(cmd, &cmd->cs, rp_ctx);
 
