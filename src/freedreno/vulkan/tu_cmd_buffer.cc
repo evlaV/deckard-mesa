@@ -3906,6 +3906,13 @@ tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
            rp->attachments[i].load_stencil ||
            rp->attachments[i].store ||
            rp->attachments[i].store_stencil ||
+           /* A demoted colour attachment is written straight to memory by the
+            * CCU while the pass still tiles, and its custom resolve means
+            * neither a load nor a store asks for backing on its behalf. Without
+            * this a lazily-backed one keeps the uncommitted sparse VMA it was
+            * allocated with and every write to it faults away.
+            */
+           rp->attachments[i].hybrid_demoted ||
            iview == cmd->state.lrz.image_view)) {
          VkResult result = tu_allocate_lazy_memory(cmd->device,
                                                    iview->image->mem);

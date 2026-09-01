@@ -830,6 +830,7 @@ tu_render_pass_apply_hybrid(struct tu_device *device,
          struct tu_render_pass_attachment *att = &pass->attachments[a];
          if (att->gmem && !resolve_src[a]) {
             att->gmem = false;
+            att->hybrid_demoted = true;
             demoted[a] = true;
             count++;
          }

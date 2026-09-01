@@ -119,6 +119,10 @@ struct tu_render_pass_attachment
    bool load;
    bool store;
    bool gmem;
+   /* Hybrid placement took this colour attachment out of GMEM, so a tiled pass
+    * writes it straight to memory and it needs backing even without a store.
+    */
+   bool hybrid_demoted;
    int32_t gmem_offset[TU_GMEM_LAYOUT_COUNT];
    bool will_be_resolved;
    /* for D32S8 separate stencil: */
