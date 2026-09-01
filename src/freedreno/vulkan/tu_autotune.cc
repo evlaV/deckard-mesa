@@ -1356,19 +1356,22 @@ struct tu_autotune::rp_history {
       uint64_t latency_update_ts = 0;
       /* The next timestamp where it's allowed to decrement the divisor. */
       uint64_t divisor_decrement_ts = 0;
-      /* The next timestamp where it's allowed to mark the RP as no longer latency sensitive. */
-      uint64_t latency_switch_ts = 0;
+      /* The next timestamp where it's allowed to mark the RP as no longer latency sensitive. Atomic because
+       * mark_as_latency_sensitive() arms it from the submit path while update_gmem() reads it when processing.
+       */
+      std::atomic<uint64_t> latency_switch_ts = 0;
 
       /* Threshold of longest non-preemptible duration before activating latency optimization: 1.5ms */
       static constexpr uint64_t TARGET_THRESHOLD = GPU_TICKS_PER_US * 1500;
+      /* How long a fresh latency-sensitive mark is held before it may be cleared again. */
+      static constexpr uint64_t LATENCY_INSENSITIVE_DURATION_NS = 30'000'000'000; /* 30s */
 
     public:
       void update_gmem(rp_history &history, uint64_t tile_duration)
       {
-         constexpr uint64_t default_update_duration_ns = 100'000'000;         /* 100ms */
-         constexpr uint64_t change_update_duration_ns = 500'000'000;          /* 500ms */
-         constexpr uint64_t downward_update_duration_ns = 10'000'000'000;     /* 10s */
-         constexpr uint64_t latency_insensitive_duration_ns = 30'000'000'000; /* 30s */
+         constexpr uint64_t default_update_duration_ns = 100'000'000;     /* 100ms */
+         constexpr uint64_t change_update_duration_ns = 500'000'000;      /* 500ms */
+         constexpr uint64_t downward_update_duration_ns = 10'000'000'000; /* 10s */
 
          gmem_tile_average.add(tile_duration);
 
@@ -1387,7 +1390,7 @@ struct tu_autotune::rp_history {
             if (!l_latency_risk) {
                if (avg_gmem_tile > TARGET_THRESHOLD) {
                   latency_risk.store(true, std::memory_order_relaxed);
-                  latency_switch_ts = now + latency_insensitive_duration_ns;
+                  latency_switch_ts.store(now + LATENCY_INSENSITIVE_DURATION_NS, std::memory_order_relaxed);
 
                   at_log_preempt_h("high gmem tile duration %" PRIu64 ", marking as latency sensitive", history.hash,
                                    avg_gmem_tile);
@@ -1420,9 +1423,9 @@ struct tu_autotune::rp_history {
                    * oscillation.
                    */
                   delta = -1;
-                  latency_switch_ts = now + latency_insensitive_duration_ns;
+                  latency_switch_ts.store(now + LATENCY_INSENSITIVE_DURATION_NS, std::memory_order_relaxed);
                } else if (avg_gmem_tile * 10 < TARGET_THRESHOLD && l_tile_size_divisor == 1 &&
-                          latency_switch_ts <= now) {
+                          latency_switch_ts.load(std::memory_order_relaxed) <= now) {
                   /* If the average tile duration is low enough that we no longer consider the RP latency sensitive, we
                    * can switch it back to non-latency sensitive.
                    */
@@ -1463,6 +1466,11 @@ struct tu_autotune::rp_history {
       void mark_as_latency_sensitive()
       {
          latency_risk.store(true, std::memory_order_relaxed);
+         /* Hold the mark, the way the tile-duration path above does. Without this the RP is switched to GMEM and
+          * then, at the very next evaluation, judged latency-insensitive on the strength of the small tiles the
+          * mark itself produced, undoing the mark the spike detector just earned.
+          */
+         latency_switch_ts.store(os_time_get_nano() + LATENCY_INSENSITIVE_DURATION_NS, std::memory_order_relaxed);
       }
 
       uint32_t get_tile_size_divisor() const
