@@ -819,7 +819,7 @@ lower_intrinsic(nir_builder *b, nir_intrinsic_instr *instr,
          UNREACHABLE("bad intrinsic");
       }
 
-      unsigned base = param - IR3_DP_FS_DYNAMIC;
+      unsigned base = param - IR3_DP_FS_FDM;
 
       nir_def *view = instr->src[0].ssa;
       nir_def *offset = nir_imul_imm(b, view, 2);
@@ -840,7 +840,7 @@ lower_intrinsic(nir_builder *b, nir_intrinsic_instr *instr,
          IR3_DP_FS(frag_invocation_count) :
          IR3_DP_FS(alpha_to_coverage_enable);
       nir_def *result =
-         ir3_load_driver_ubo(b, 1, &shader->const_state.fdm_ubo,
+         ir3_load_driver_ubo(b, 1, &shader->const_state.dynamic_fs_param_ubo,
                              offset - IR3_DP_FS_DYNAMIC);
 
       nir_def_replace(&instr->def, result);
@@ -3280,6 +3280,7 @@ tu_shader_init(struct tu_device *dev, const void *key_data, size_t key_size)
    vk_pipeline_cache_object_init(&dev->vk, &shader->base,
                                  &tu_shader_ops, obj_key_data, key_size);
 
+   shader->const_state.dynamic_fs_param_ubo.idx = -1;
    shader->const_state.fdm_ubo.idx = -1;
    shader->const_state.dynamic_offsets_ubo.idx = -1;
    shader->const_state.inline_uniforms_ubo.idx = -1;

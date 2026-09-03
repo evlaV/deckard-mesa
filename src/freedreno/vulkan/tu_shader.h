@@ -53,6 +53,7 @@ struct tu_const_state
    uint32_t num_bindless_base_addresses;
    uint32_t bindless_base_const_offset_vec4;
 
+   struct ir3_driver_ubo dynamic_fs_param_ubo;
    struct ir3_driver_ubo fdm_ubo;
    struct ir3_driver_ubo dynamic_offsets_ubo;
    struct ir3_driver_ubo inline_uniforms_ubo;

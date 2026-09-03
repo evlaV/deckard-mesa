@@ -8420,9 +8420,8 @@ fdm_apply_fs_params(struct tu_cmd_buffer *cmd,
 }
 
 static void
-tu_emit_fdm_params(struct tu_cmd_buffer *cmd,
-                   struct tu_cs *cs, struct tu_shader *fs,
-                   unsigned num_units)
+tu_emit_dynamic_fs_params(struct tu_cmd_buffer *cmd,
+                          struct tu_cs *cs, struct tu_shader *fs)
 {
    STATIC_ASSERT(IR3_DP_FS(frag_invocation_count) == IR3_DP_FS_DYNAMIC);
    tu_cs_emit(cs, fs->fs.sample_shading ?
@@ -8430,30 +8429,35 @@ tu_emit_fdm_params(struct tu_cmd_buffer *cmd,
    tu_cs_emit(cs, cmd->vk.dynamic_graphics_state.ms.alpha_to_coverage_enable);
    tu_cs_emit(cs, 0);
    tu_cs_emit(cs, 0);
+   STATIC_ASSERT(IR3_DP_FS_FDM == IR3_DP_FS_DYNAMIC + 4);
+}
 
-   STATIC_ASSERT(IR3_DP_FS(frag_size) == IR3_DP_FS_DYNAMIC + 4);
-   STATIC_ASSERT(IR3_DP_FS(frag_offset) == IR3_DP_FS_DYNAMIC + 6);
-   if (num_units > 1) {
-      if (fs->fs.has_fdm) {
-         struct apply_fs_params_state state = {
-            .num_consts = num_units - 1,
-            .custom_resolve = cmd->state.subpass->custom_resolve,
-         };
-         tu_create_fdm_bin_patchpoint(cmd, cs, 4 * (num_units - 1),
-                                      TU_FDM_SKIP_BINNING,
-                                      fdm_apply_fs_params, state);
-      } else {
-         for (unsigned i = 0; i < DIV_ROUND_UP((num_units - 1), 2); i++) {
-            tu_cs_emit(cs, 1);
-            tu_cs_emit(cs, 1);
-            tu_cs_emit(cs, fui(0.0f));
-            tu_cs_emit(cs, fui(0.0f));
-            if (i * 2 + 1 < num_units - 1) {
-               tu_cs_emit(cs, fui(1.0));
-               tu_cs_emit(cs, fui(1.0));
-               tu_cs_emit(cs, fui(0.0));
-               tu_cs_emit(cs, fui(0.0));
-            }
+static void
+tu_emit_fdm_params(struct tu_cmd_buffer *cmd,
+                   struct tu_cs *cs, struct tu_shader *fs,
+                   unsigned num_units)
+{
+   STATIC_ASSERT(IR3_DP_FS(frag_size) == IR3_DP_FS_FDM);
+   STATIC_ASSERT(IR3_DP_FS(frag_offset) == IR3_DP_FS_FDM + 2);
+   if (fs->fs.has_fdm) {
+      struct apply_fs_params_state state = {
+         .num_consts = num_units,
+         .custom_resolve = cmd->state.subpass->custom_resolve,
+      };
+      tu_create_fdm_bin_patchpoint(cmd, cs, 4 * num_units,
+                                   TU_FDM_SKIP_BINNING,
+                                   fdm_apply_fs_params, state);
+   } else {
+      for (unsigned i = 0; i < DIV_ROUND_UP(num_units, 2); i++) {
+         tu_cs_emit(cs, 1);
+         tu_cs_emit(cs, 1);
+         tu_cs_emit(cs, fui(0.0f));
+         tu_cs_emit(cs, fui(0.0f));
+         if (i * 2 + 1 < num_units) {
+            tu_cs_emit(cs, fui(1.0));
+            tu_cs_emit(cs, fui(1.0));
+            tu_cs_emit(cs, fui(0.0));
+            tu_cs_emit(cs, fui(0.0));
          }
       }
    }
@@ -8493,7 +8497,10 @@ tu6_emit_fs_params(struct tu_cmd_buffer *cmd)
    tu_cs_emit(&cs, 0);
    tu_cs_emit(&cs, 0);
 
-   tu_emit_fdm_params(cmd, &cs, fs, num_units);
+   tu_emit_dynamic_fs_params(cmd, &cs, fs);
+
+   if (num_units > 1)
+      tu_emit_fdm_params(cmd, &cs, fs, num_units - 1);
 
    cmd->state.fs_params = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
 
@@ -8506,51 +8513,92 @@ tu7_emit_fs_params(struct tu_cmd_buffer *cmd)
 {
    struct tu_shader *fs = cmd->state.shaders[MESA_SHADER_FRAGMENT];
 
-   int ubo_offset = fs->const_state.fdm_ubo.idx;
-   if (ubo_offset < 0) {
+   int dynamic_ubo_offset = fs->const_state.dynamic_fs_param_ubo.idx;
+   int fdm_ubo_offset = fs->const_state.fdm_ubo.idx;
+   if (dynamic_ubo_offset < 0 && fdm_ubo_offset < 0) {
       cmd->state.fs_params = (struct tu_draw_state) {};
       return;
    }
 
-   unsigned num_units = DIV_ROUND_UP(fs->const_state.fdm_ubo.size, 4);
+   unsigned dynamic_num_units =
+      DIV_ROUND_UP(fs->const_state.dynamic_fs_param_ubo.size, 4);
 
-   if (fs->fs.has_fdm)
-      tu_cs_set_writeable(&cmd->sub_cs, true);
+   struct tu_draw_state dynamic_ubo;
+   if (dynamic_num_units > 0) {
+      struct tu_cs cs;
+      VkResult result =
+         tu_cs_begin_sub_stream_aligned(&cmd->sub_cs, dynamic_num_units, 4, &cs);
+      if (result != VK_SUCCESS) {
+         vk_command_buffer_set_error(&cmd->vk, result);
+         return;
+      }
 
+      tu_emit_dynamic_fs_params(cmd, &cs, fs);
+
+      dynamic_ubo = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
+   }
+
+   unsigned fdm_num_units = DIV_ROUND_UP(fs->const_state.fdm_ubo.size, 4);
+
+   struct tu_draw_state fdm_ubo;
+   if (fdm_num_units > 0) {
+      if (fs->fs.has_fdm)
+         tu_cs_set_writeable(&cmd->sub_cs, true);
+
+      struct tu_cs cs;
+      VkResult result =
+         tu_cs_begin_sub_stream_aligned(&cmd->sub_cs, fdm_num_units, 4, &cs);
+      if (result != VK_SUCCESS) {
+         tu_cs_set_writeable(&cmd->sub_cs, false);
+         vk_command_buffer_set_error(&cmd->vk, result);
+         return;
+      }
+
+      tu_emit_fdm_params(cmd, &cs, fs, fdm_num_units);
+
+      fdm_ubo = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
+
+      if (fs->fs.has_fdm)
+         tu_cs_set_writeable(&cmd->sub_cs, false);
+   }
+
+   unsigned ubo_count = (dynamic_num_units > 0) + (fdm_num_units > 0);
    struct tu_cs cs;
-   VkResult result =
-      tu_cs_begin_sub_stream_aligned(&cmd->sub_cs, num_units, 4, &cs);
-   if (result != VK_SUCCESS) {
-      tu_cs_set_writeable(&cmd->sub_cs, false);
-      vk_command_buffer_set_error(&cmd->vk, result);
-      return;
-   }
-
-   tu_emit_fdm_params(cmd, &cs, fs, num_units);
-
-   struct tu_draw_state fdm_ubo = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
-
-   if (fs->fs.has_fdm)
-      tu_cs_set_writeable(&cmd->sub_cs, false);
-
-   result = tu_cs_begin_sub_stream(&cmd->sub_cs, 6, &cs);
+   VkResult result = tu_cs_begin_sub_stream(&cmd->sub_cs, 6 * ubo_count, &cs);
    if (result != VK_SUCCESS) {
       vk_command_buffer_set_error(&cmd->vk, result);
       return;
    }
 
-   tu_cs_emit_pkt7(&cs, CP_LOAD_STATE6_FRAG, 5);
-   tu_cs_emit(&cs,
-              CP_LOAD_STATE6_0_DST_OFF(ubo_offset) |
-              CP_LOAD_STATE6_0_STATE_TYPE(ST6_UBO)|
-              CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
-              CP_LOAD_STATE6_0_STATE_BLOCK(SB6_FS_SHADER) |
-              CP_LOAD_STATE6_0_NUM_UNIT(1));
-   tu_cs_emit(&cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
-   tu_cs_emit(&cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
-   tu_cs_emit_qw(&cs,
-                 fdm_ubo.iova |
-                 (uint64_t)A6XX_UBO_1_SIZE(num_units) << 32);
+   if (dynamic_num_units > 0) {
+      tu_cs_emit_pkt7(&cs, CP_LOAD_STATE6_FRAG, 5);
+      tu_cs_emit(&cs,
+                 CP_LOAD_STATE6_0_DST_OFF(dynamic_ubo_offset) |
+                 CP_LOAD_STATE6_0_STATE_TYPE(ST6_UBO)|
+                 CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
+                 CP_LOAD_STATE6_0_STATE_BLOCK(SB6_FS_SHADER) |
+                 CP_LOAD_STATE6_0_NUM_UNIT(1));
+      tu_cs_emit(&cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
+      tu_cs_emit(&cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
+      tu_cs_emit_qw(&cs,
+                    dynamic_ubo.iova |
+                    (uint64_t)A6XX_UBO_1_SIZE(dynamic_num_units) << 32);
+   }
+
+   if (fdm_num_units > 0) {
+      tu_cs_emit_pkt7(&cs, CP_LOAD_STATE6_FRAG, 5);
+      tu_cs_emit(&cs,
+                 CP_LOAD_STATE6_0_DST_OFF(fdm_ubo_offset) |
+                 CP_LOAD_STATE6_0_STATE_TYPE(ST6_UBO)|
+                 CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
+                 CP_LOAD_STATE6_0_STATE_BLOCK(SB6_FS_SHADER) |
+                 CP_LOAD_STATE6_0_NUM_UNIT(1));
+      tu_cs_emit(&cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
+      tu_cs_emit(&cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
+      tu_cs_emit_qw(&cs,
+                    fdm_ubo.iova |
+                    (uint64_t)A6XX_UBO_1_SIZE(fdm_num_units) << 32);
+   }
 
    cmd->state.fs_params = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
 }

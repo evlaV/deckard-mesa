@@ -105,6 +105,8 @@ struct ir3_driver_params_fs {
    uint32_t frag_invocation_count;
    uint32_t alpha_to_coverage_enable;
    uint32_t __pad_06_07[2];
+   /* FDM params */
+#define IR3_DP_FS_FDM dword_offsetof(struct ir3_driver_params_fs, frag_size)
    uint32_t frag_size;
    uint32_t __pad_09;
    uint32_t frag_offset;
