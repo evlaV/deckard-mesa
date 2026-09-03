@@ -8541,7 +8541,17 @@ tu7_emit_fs_params(struct tu_cmd_buffer *cmd)
    unsigned fdm_num_units = DIV_ROUND_UP(fs->const_state.fdm_ubo.size, 4);
 
    struct tu_draw_state fdm_ubo;
-   if (fdm_num_units > 0) {
+   if (fs->fs.has_fdm && fdm_num_units > 0 &&
+       /* Only re-use the UBO if we've already emitted it */
+       cmd->state.fs_fdm_ubo.size > 0 &&
+       !cmd->state.fdm_ubo_reemit) {
+      /* fdm_num_units is derived from the number of views, or max_fdm_layers
+       * in the layered case, which dirties FDM when changed.
+       */
+      assert(DIV_ROUND_UP(cmd->state.fs_fdm_ubo.size, 4) == fdm_num_units);
+
+      fdm_ubo = cmd->state.fs_fdm_ubo;
+   } else if (fdm_num_units > 0) {
       if (fs->fs.has_fdm)
          tu_cs_set_writeable(&cmd->sub_cs, true);
 
@@ -8558,8 +8568,11 @@ tu7_emit_fs_params(struct tu_cmd_buffer *cmd)
 
       fdm_ubo = tu_cs_end_draw_state(&cmd->sub_cs, &cs);
 
-      if (fs->fs.has_fdm)
+      if (fs->fs.has_fdm) {
          tu_cs_set_writeable(&cmd->sub_cs, false);
+         cmd->state.fs_fdm_ubo = fdm_ubo;
+         cmd->state.fdm_ubo_reemit = false;
+      }
    }
 
    unsigned ubo_count = (dynamic_num_units > 0) + (fdm_num_units > 0);
@@ -8863,6 +8876,11 @@ tu6_draw_common(struct tu_cmd_buffer *cmd,
        BITSET_TEST(cmd->vk.dynamic_graphics_state.dirty,
                    MESA_VK_DYNAMIC_MS_ALPHA_TO_COVERAGE_ENABLE) ||
        (cmd->state.dirty & (TU_CMD_DIRTY_PROGRAM | TU_CMD_DIRTY_FDM))) {
+      /* We may not emit FDM FS params right away, but if FDM is dirtied then
+       * we will need to re-emit them the next time an FS uses them.
+       */
+      if (cmd->state.dirty & TU_CMD_DIRTY_FDM)
+         cmd->state.fdm_ubo_reemit = true;
       tu_emit_fs_params(cmd);
       dirty_fs_params = true;
    }

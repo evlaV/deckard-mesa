@@ -525,6 +525,9 @@ struct tu_cmd_state
    struct tu_draw_state vs_params;
    struct tu_draw_state fs_params;
 
+   struct tu_draw_state fs_fdm_ubo;
+   bool fdm_ubo_reemit;
+
    /* Index buffer */
    uint64_t index_va;
    uint32_t max_index_count;
