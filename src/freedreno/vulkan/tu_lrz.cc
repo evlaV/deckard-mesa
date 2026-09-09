@@ -1420,8 +1420,7 @@ tu6_calculate_lrz_state(struct tu_cmd_buffer *cmd,
     * test will also pass, but if it may be written when the depth or stencil
     * test fails then we need to disable the LRZ test for the draw as well.
     */
-   if (cmd->state.stencil_written_based_on_depth_test &&
-       !cmd->device->instance->drirc.misc.allow_lrz_writes_with_stencil_based_on_depth_test) {
+   if (cmd->state.stencil_written_based_on_depth_test) {
       tu_lrz_disable_write_for_rp(cmd, "stencil write based on depth test");
    }
 
