@@ -11,6 +11,7 @@
 #include "spirv/nir_spirv.h"
 #include "util/macros.h"
 #include "util/mesa-blake3.h"
+#include "util/log.h"
 #include "vk_nir.h"
 #include "vk_nir_convert_ycbcr.h"
 #include "vk_pipeline.h"
@@ -3614,12 +3615,28 @@ tu_shader_create(struct tu_device *dev,
    shader->variant =
       ir3_shader_create_variant(ir3_shader, ir3_key, executable_info);
 
+   if (!shader->variant) {
+      mesa_loge("tu: failed to compile %s shader variant",
+                _mesa_shader_stage_to_string(nir->info.stage));
+      ir3_shader_destroy(ir3_shader);
+      vk_free(&dev->vk.alloc, shader);
+      return VK_ERROR_UNKNOWN;
+   }
+
    if (ir3_exceeds_safe_constlen(shader->variant)) {
       struct ir3_shader_key safe_constlen_key = *ir3_key;
       safe_constlen_key.safe_constlen = true;
       shader->safe_const_variant =
          ir3_shader_create_variant(ir3_shader, &safe_constlen_key,
                                    executable_info);
+      if (!shader->safe_const_variant) {
+         mesa_loge("tu: failed to compile %s safe-constlen shader variant",
+                   _mesa_shader_stage_to_string(nir->info.stage));
+         ir3_shader_destroy(ir3_shader);
+         ralloc_free((void *)shader->variant);
+         vk_free(&dev->vk.alloc, shader);
+         return VK_ERROR_UNKNOWN;
+      }
    }
 
    ir3_shader_destroy(ir3_shader);
