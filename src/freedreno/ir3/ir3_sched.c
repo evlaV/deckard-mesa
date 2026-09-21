@@ -533,6 +533,16 @@ check_instr(struct ir3_sched_ctx *ctx, struct ir3_sched_notes *notes,
          struct ir3_instruction *baryf = ir->baryfs[i];
          if (baryf->flags & IR3_INSTR_UNUSED)
             continue;
+         /* Only bary.f's in the same block can be ordered before this
+          * instruction by the per-block scheduler: earlier blocks are
+          * already scheduled and later blocks never will be, so waiting
+          * for those deadlocks the scheduler ("nothing schedulable").
+          * This happens when ir3_nir_move_varying_inputs() cannot hoist
+          * the inputs, e.g. interpolateAt*() with a computed offset in a
+          * block after a demote/kill.
+          */
+         if (baryf->block != instr->block)
+            continue;
          if (!is_scheduled(baryf)) {
             notes->blocked_kill = true;
             return false;
