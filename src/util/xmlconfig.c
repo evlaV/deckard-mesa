@@ -325,22 +325,22 @@ findOption(const driOptionCache *cache, const char *name)
 UNUSED static bool
 checkValue(const driOptionValue *v, const driOptionInfo *info)
 {
+   if (!info->has_range)
+      return true;
+
    switch (info->type) {
    case DRI_ENUM: /* enum is just a special integer */
    case DRI_INT:
-      return (info->range.start._int == info->range.end._int ||
-              (v->_int >= info->range.start._int &&
-               v->_int <= info->range.end._int));
+      return v->_int >= info->range.start._int &&
+             v->_int <= info->range.end._int;
 
    case DRI_UINT64:
-      return (info->range.start._uint64 == info->range.end._uint64 ||
-              (v->_uint64 >= info->range.start._uint64 &&
-               v->_uint64 <= info->range.end._uint64));
+      return v->_uint64 >= info->range.start._uint64 &&
+             v->_uint64 <= info->range.end._uint64;
 
    case DRI_FLOAT:
-      return (info->range.start._float == info->range.end._float ||
-              (v->_float >= info->range.start._float &&
-               v->_float <= info->range.end._float));
+      return v->_float >= info->range.start._float &&
+             v->_float <= info->range.end._float;
 
    default:
       return true;
@@ -390,6 +390,7 @@ driParseOptionInfo(driOptionCache *info,
       }
 
       optinfo->type = opt->info.type;
+      optinfo->has_range = opt->info.has_range;
       optinfo->range = opt->info.range;
 
       switch (opt->info.type) {
@@ -531,7 +532,11 @@ driGetOptionsXml(const driOptionDescription *configOptions, unsigned numOptions)
       switch (opt->info.type) {
       case DRI_INT:
       case DRI_ENUM:
-         if (opt->info.range.start._int < opt->info.range.end._int) {
+         if (opt->info.has_range &&
+             opt->info.range.start._int == opt->info.range.end._int) {
+            ralloc_asprintf_append(&str, " valid=\"%d\"",
+                                   opt->info.range.start._int);
+         } else if (opt->info.has_range) {
             ralloc_asprintf_append(&str, " valid=\"%d:%d\"",
                                    opt->info.range.start._int,
                                    opt->info.range.end._int);
@@ -539,7 +544,11 @@ driGetOptionsXml(const driOptionDescription *configOptions, unsigned numOptions)
          break;
 
       case DRI_UINT64:
-         if (opt->info.range.start._uint64 < opt->info.range.end._uint64) {
+         if (opt->info.has_range &&
+             opt->info.range.start._uint64 == opt->info.range.end._uint64) {
+            ralloc_asprintf_append(&str, " valid=\"%" PRIu64 "\"",
+                                   opt->info.range.start._uint64);
+         } else if (opt->info.has_range) {
             ralloc_asprintf_append(&str, " valid=\"%" PRIu64 ":%" PRIu64 "\"",
                                    opt->info.range.start._uint64,
                                    opt->info.range.end._uint64);
@@ -547,7 +556,11 @@ driGetOptionsXml(const driOptionDescription *configOptions, unsigned numOptions)
          break;
 
       case DRI_FLOAT:
-         if (opt->info.range.start._float < opt->info.range.end._float) {
+         if (opt->info.has_range &&
+             opt->info.range.start._float == opt->info.range.end._float) {
+            ralloc_asprintf_append(&str, " valid=\"%f\"",
+                                   opt->info.range.start._float);
+         } else if (opt->info.has_range) {
             ralloc_asprintf_append(&str, " valid=\"%f:%f\"",
                                    opt->info.range.start._float,
                                    opt->info.range.end._float);
@@ -680,13 +693,17 @@ parseRange(driOptionInfo *info, const char *string)
 {
    char *cp;
 
+   info->has_range = false;
    XSTRDUP(cp, string);
 
    char *sep;
    sep = strchr(cp, ':');
    if (!sep) {
+      bool valid = parseValue(&info->range.start, info->type, cp);
+      info->range.end = info->range.start;
+      info->has_range = valid;
       free(cp);
-      return false;
+      return valid;
    }
 
    *sep = '\0';
@@ -712,6 +729,7 @@ parseRange(driOptionInfo *info, const char *string)
    }
 
    free(cp);
+   info->has_range = true;
    return true;
 }
 
