@@ -62,6 +62,7 @@ static const struct debug_control tu_debug_options[] = {
    { "forcecb", TU_DEBUG_FORCE_CONCURRENT_BINNING },
    { "computeroundrobin", TU_DEBUG_COMPUTE_ROUND_ROBIN },
    { "gmem_warmup", TU_DEBUG_GMEM_WARMUP },
+   { "lpac", TU_DEBUG_LPAC },
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "logsocket", TU_DEBUG_LOGSOCKET },
    { NULL, 0 }
