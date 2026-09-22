@@ -1901,7 +1901,7 @@ tu_physical_device_init(struct tu_physical_device *device,
             &tu_gfx_queue_family_properties,
       };
 
-   if (device->has_lpac) {
+   if (device->has_lpac && TU_DEBUG(LPAC)) {
       device->queue_families[device->num_queue_families++] =
          (struct tu_queue_family) {
             .type = TU_QUEUE_COMPUTE,
