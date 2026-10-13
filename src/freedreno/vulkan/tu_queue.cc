@@ -421,6 +421,9 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
    struct util_dynarray dump_cmds;
    struct tu_cs *autotune_cs = NULL;
    bool fallback_to_gfx = false;
+   uint32_t wait_count, signal_count;
+   struct vk_sync_wait *waits;
+   struct vk_sync_signal *signals;
 
    if (vk_submit->buffer_bind_count ||
        vk_submit->image_bind_count ||
@@ -558,11 +561,46 @@ queue_submit(struct vk_queue *_queue, struct vk_queue_submit *vk_submit)
    }
 #endif
 
+   wait_count = vk_submit->wait_count;
+   waits = vk_submit->waits;
+   signal_count = vk_submit->signal_count;
+   signals = vk_submit->signals;
+   if (queue->type == TU_QUEUE_COMPUTE) {
+      if (queue->gfx_semaphore_timepoint) {
+         struct vk_sync_wait compute_wait = {
+            .sync = &queue->gfx_semaphore,
+            .stage_mask = ~(VkPipelineStageFlags2)0,
+            .wait_value = queue->gfx_semaphore_timepoint - 1,
+         };
+         wait_count++;
+         waits = (struct vk_sync_wait *)calloc(wait_count, sizeof waits[0]);
+         memcpy(waits, vk_submit->waits, sizeof(waits[0]) * (wait_count - 1));
+         waits[wait_count - 1] = compute_wait;
+      }
+
+      struct vk_sync_signal compute_signal = {
+         .sync = &queue->gfx_semaphore,
+         .stage_mask = ~(VkPipelineStageFlags2)0,
+         .signal_value = queue->gfx_semaphore_timepoint,
+      };
+      signal_count++;
+      signals = (struct vk_sync_signal *)calloc(signal_count, sizeof signals[0]);
+      memcpy(signals, vk_submit->signals, sizeof(signals[0]) * (signal_count - 1));
+      signals[signal_count - 1] = compute_signal;
+
+      queue->gfx_semaphore_timepoint++;
+   }
+
    result =
       tu_queue_submit(fallback_to_gfx ? queue->fallback_gfx : queue, submit,
-                      vk_submit->waits, vk_submit->wait_count,
-                      vk_submit->signals, vk_submit->signal_count,
+                      waits, wait_count,
+                      signals, signal_count,
                       u_trace_submission_data);
+
+   if (vk_submit->waits != waits)
+      free(waits);
+   if (vk_submit->signals != signals)
+      free(signals);
 
    if (result != VK_SUCCESS) {
       pthread_mutex_unlock(&device->submit_mutex);
@@ -675,20 +713,52 @@ tu_queue_init(struct tu_device *device,
       return ret;
 
    if (type == TU_QUEUE_COMPUTE) {
+      const struct vk_sync_type *sync_type = NULL;
+      enum vk_sync_features req_features = static_cast<enum vk_sync_features>(
+         VK_SYNC_FEATURE_GPU_WAIT |
+         VK_SYNC_FEATURE_TIMELINE |
+         VK_SYNC_FEATURE_CPU_WAIT);
+
+      for (const struct vk_sync_type *const *t =
+           device->vk.physical->supported_sync_types; *t; t++) {
+         if (req_features & ~(*t)->features)
+            continue;
+
+         sync_type = *t;
+      }
+      assert(sync_type);
+
+      ret = vk_sync_init(&device->vk, &queue->gfx_semaphore, sync_type, VK_SYNC_IS_TIMELINE, 0);
+      queue->gfx_semaphore_timepoint = 0;
+
+      if (ret)
+         goto fail_free_queue;
+
       queue->fallback_gfx = (struct tu_queue*) calloc(1, sizeof(struct tu_queue));
 
       VkResult ret = tu_queue_init_inner(device, queue->fallback_gfx, TU_QUEUE_GFX, priority, NULL);
 
       if (ret)
-         return ret;
+         goto fail_free_queue;
    }
 
    return VK_SUCCESS;
+
+fail_free_queue:
+   tu_queue_finish(queue);
+
+   return ret;
 }
 
 void
 tu_queue_finish(struct tu_queue *queue)
 {
+   if (queue->fallback_gfx)
+      tu_queue_finish(queue->fallback_gfx);
+
+   if (queue->gfx_semaphore.type)
+      vk_sync_finish(&queue->device->vk, &queue->gfx_semaphore);
+
    bool emulated = vk_queue_is_emulated(&queue->vk);
    vk_queue_finish(&queue->vk);
    if (!emulated)

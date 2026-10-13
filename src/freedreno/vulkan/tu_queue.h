@@ -12,6 +12,7 @@
 
 #include "tu_common.h"
 
+#include "vk_semaphore.h"
 enum tu_queue_type
 {
    TU_QUEUE_GFX,
@@ -33,6 +34,10 @@ struct tu_queue
 
    uint32_t sparse_syncobj, gfx_syncobj;
    uint64_t sparse_timepoint, gfx_timepoint;
+
+   struct vk_sync gfx_semaphore;
+   uint32_t _pad; 			/*make room for different semaphore types*/
+   uint64_t gfx_semaphore_timepoint;
 
    unsigned render_pass_idx;
 
