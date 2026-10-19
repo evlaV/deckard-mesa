@@ -7,7 +7,7 @@ stages:
     PKGDEST: "${CI_PROJECT_DIR}/local_repo"
     GIT_STRATEGY: "none"
   before_script:
-    - git clone https://gitlab.steamos.cloud/deckard/deckardos/holo .
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.steamos.cloud/deckard/deckardos/holo .
     - sed -i -e "s/_commit=.*/_commit=${CI_COMMIT_SHA}/" deckard/deckard-mesa-linux-aarch64/mesa_common.pkgbuild
     - ulimit -c 0
   artifacts:
