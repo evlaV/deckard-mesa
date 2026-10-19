@@ -16,7 +16,7 @@ stages:
 
 deckard-mesa-android-aarch64_build:
   extends: .mesa-base
-  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/android-arm64-package-builder:latest
+  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/android-arm64-package-builder-main:latest
   script:
     - ./.ci_scripts/build_package.sh deckard/deckard-mesa-android-aarch64
   tags:
@@ -24,7 +24,7 @@ deckard-mesa-android-aarch64_build:
 
 deckard-mesa-linux-aarch64_build:
   extends: .mesa-base
-  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/steamos-arm64-package-builder:latest
+  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/steamos-arm64-package-builder-main:latest
   script:
     - ./.ci_scripts/build_package.sh deckard/deckard-mesa-linux-aarch64
   tags:
@@ -32,7 +32,7 @@ deckard-mesa-linux-aarch64_build:
 
 deckard-mesa-linux-x86_64_build:
   extends: .mesa-base
-  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/steamos-x86_64-package-builder:latest
+  image: registry.gitlab.steamos.cloud/deckard/deckardos/holo/steamos-x86_64-package-builder-main:latest
   script:
     - ./.ci_scripts/build_package.sh deckard/deckard-mesa-linux-x86_64
   tags:
