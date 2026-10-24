@@ -121,6 +121,46 @@ struct ir3_driver_params_fs {
 };
 #define IR3_DP_FS(name) dword_offsetof(struct ir3_driver_params_fs, name)
 
+/**
+ * Driver params for mesh shaders.
+ *
+ * These are provided by the AQE. They always start at offset 0.
+ */
+struct ir3_driver_params_mesh {
+   uint32_t chunk_idx;
+   uint32_t mesh_per_chunk;
+   uint64_t payload;
+   uint64_t varyings_base;
+   uint64_t primitive_varyings_base;
+   uint64_t index_base;
+   uint64_t primitive_count_base;
+   uint64_t primitive_cull_base;
+   uint32_t task_id;
+   uint32_t wgcount_x;
+   uint32_t wgcount_y;
+   uint32_t wgcount_z;
+   uint32_t padding;
+   uint32_t varying_size;
+   uint32_t primitive_varying_size;
+   uint32_t primitive_cull_size;
+};
+#define IR3_DP_MESH(name) dword_offsetof(struct ir3_driver_params_mesh, name)
+
+/**
+ * Driver params for task shaders.
+ *
+ * These are provided by the AQE. They always start at offset 0.
+ */
+struct ir3_driver_params_task {
+   uint32_t chunk_idx;
+   uint32_t tasks_per_chunk;
+   uint64_t mesh_count;
+   uint64_t payload;
+   uint32_t wgcount_x;
+   uint32_t wgcount_y;
+   uint32_t wgcount_z;
+};
+
 #define IR3_MAX_SHADER_BUFFERS  32
 #define IR3_MAX_SHADER_IMAGES   32
 #define IR3_MAX_SO_BUFFERS      4

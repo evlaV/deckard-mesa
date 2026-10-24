@@ -64,14 +64,20 @@ struct tu_shader
    struct vk_pipeline_cache_object base;
 
    const struct ir3_shader_variant *variant;
-   const struct ir3_shader_variant *safe_const_variant;
+
+   union {
+      const struct ir3_shader_variant *safe_const_variant;
+      const struct ir3_shader_variant *passthrough_vs;
+   };
 
    struct tu_suballoc_bo bo;
    struct tu_cs cs;
    struct tu_bo *pvtmem_bo;
 
    struct tu_draw_state state;
-   struct tu_draw_state safe_const_state;
+   union {
+      struct tu_draw_state safe_const_state;
+   };
    struct tu_draw_state binning_state;
    struct tu_draw_state safe_const_binning_state;
 
@@ -123,6 +129,20 @@ struct tu_shader
           */
          bool read_only_input_attachments;
       } fs;
+
+      struct {
+         uint32_t num_per_vertex_outputs;
+
+         /* The map of attributes and their offset in the vertex buffer. This is created when compiling the mesh shader
+          * and used to emit the VFD configuration for the passthrough VS. Indexed by the attribute number.
+          */
+         struct {
+            uint8_t num_components;
+            uint8_t dword_offset;
+         } per_vertex_outputs[32];
+
+         uint32_t per_prim_map_size;
+      } mesh;
    };
 };
 
