@@ -993,10 +993,10 @@ lower_tex_immutable(struct tu_device *dev,
    unsigned array_index = 0;
    if (deref->deref_type != nir_deref_type_var) {
       assert(deref->deref_type == nir_deref_type_array);
-      if (!nir_src_is_const(deref->arr.index))
-         return;
-      array_index = nir_src_as_uint(deref->arr.index);
-      array_index = MIN2(array_index, binding->array_size - 1);
+      if (nir_src_is_const(deref->arr.index)) {
+         array_index = nir_src_as_uint(deref->arr.index);
+         array_index = MIN2(array_index, binding->array_size - 1);
+      }
    }
 
    const struct vk_ycbcr_conversion_state *ycbcr_samplers =
