@@ -2965,6 +2965,7 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       emit_intrinsic_barycentric(ctx, intr, dst);
       break;
    case nir_intrinsic_load_interpolated_input:
+   case nir_intrinsic_load_per_primitive_input:
    case nir_intrinsic_load_input:
       setup_input(ctx, intr);
       break;
@@ -5156,6 +5157,8 @@ setup_input(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       compile_assert(ctx, slot != VARYING_SLOT_POS);
 
       so->inputs[n].bary = true;
+      so->inputs[n].per_prim = intr->intrinsic ==
+         nir_intrinsic_load_per_primitive_input;
       unsigned idx = (n * 4) + frac;
       struct ir3_instruction_rpt instr =
          create_frag_input(ctx, coord, idx, ncomp);
@@ -5271,6 +5274,9 @@ pack_inlocs(struct ir3_context *ctx)
    for (unsigned i = 0; i < so->inputs_count; i++) {
       unsigned compmask = 0, maxcomp = 0;
 
+      if (so->inputs[i].per_prim)
+         continue;
+
       so->inputs[i].inloc = inloc;
       so->inputs[i].bary = false;
 
@@ -5305,7 +5311,37 @@ pack_inlocs(struct ir3_context *ctx)
    }
 
    /*
-    * Third Step: reassign packed inloc's:
+    * Third Step: reassign varying locs for per-primitive varyings. These don't
+    * go through the normal VPC linkage and so must be contiguous. We put them
+    * after "normal" varyings.
+    */
+   so->per_prim_start = inloc;
+   for (unsigned i = 0; i < so->inputs_count; i++) {
+      if (!so->inputs[i].per_prim)
+         continue;
+
+      so->inputs[i].inloc = inloc;
+      so->inputs[i].bary = false;
+
+      if (!used_components[i])
+         continue;
+
+      so->inputs[i].bary = true;
+      so->varying_in++;
+      so->inputs[i].compmask = (1 << util_last_bit(used_components[i])) - 1;
+
+      /* We don't know when compiling how many components are written in the
+       * mesh shader. And unlike normal varyings, we're less flexible here with
+       * linkage, since we can only remap locations and can't reduce the number
+       * of components from either side. Therefore, reserve all 4 components for
+       * every varying.
+       */
+      inloc += 4;
+   }
+   so->per_prim_count = inloc - so->per_prim_start;
+
+   /*
+    * Fourth Step: reassign packed inloc's:
     */
 
    foreach_block (block, &ctx->ir->block_list) {

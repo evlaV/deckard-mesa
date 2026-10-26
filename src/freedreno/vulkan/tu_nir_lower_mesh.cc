@@ -35,9 +35,9 @@ lower_task_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
       case nir_intrinsic_store_task_payload:
          nir_store_global_offset(b, intrin->src[0].ssa, ptr_base, offset,
                                  .base = nir_intrinsic_base(intrin),
-                                 .align_mul = intrin->src[0].ssa->bit_size / 8,
                                  .write_mask = nir_intrinsic_write_mask(intrin),
-                                 .access = nir_intrinsic_access(intrin));
+                                 .access = nir_intrinsic_access(intrin),
+                                 .align_mul = intrin->src[0].ssa->bit_size / 8);
          return NIR_LOWER_INSTR_PROGRESS_REPLACE;
       case nir_intrinsic_load_task_payload:
          return nir_load_global_offset(b, intrin->def.num_components, intrin->def.bit_size,
@@ -59,12 +59,15 @@ lower_task_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
       }
       }
    } else if (intrin->intrinsic == nir_intrinsic_launch_mesh_workgroups) {
+      /* This must be workgroup uniform, but different invocations are allowed to have different values. Just write out
+       * the counts from the first invocation in the workgroup.
+       */
       nir_if *if_elected = nir_push_if(b, nir_ieq_imm(b, nir_load_local_invocation_index(b), 0));
       {
-         /* The mesh count buffer is 6 dwords per invocation, but the last 3 are unused. */
+         /* The mesh count payload buffer is 6 dwords per invocation, but the last 3 are unused. */
          nir_def *task_idx = nir_channel(b, nir_load_workgroup_id(b), 0);
          nir_def *offset = nir_umul24(b, task_idx, nir_imm_int(b, 6 * 4));
-         nir_def *ptr_base = nir_load_prim_count_base_ir3(b);
+         nir_def *ptr_base = nir_load_mesh_count_base_ir3(b);
 
          /* Calculate the total workgroup count. This is bounded by maxMeshWorkGroupTotalCount so we can use 24-bit
           * multiplication.
@@ -74,19 +77,63 @@ lower_task_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
          nir_def *wgcount_z = nir_channel(b, intrin->src[0].ssa, 2);
          nir_def *wgsize = nir_umul24(b, wgcount_x, nir_umul24(b, wgcount_y, wgcount_z));
 
-         /* The firmware expects 16-bit workgroup sizes, and adds 1 to them. If any component is 0 then the overall size
-          * will be 0 and it will skip.
+         /* The firmware expects 16-bit workgroup sizes, and adds 1 to them. If any component is 0 then the overall
+          * count will be 0 and it will skip, so we don't need to worry about that case here.
           */
          nir_def *wgcount_encoded = nir_u2u16(b, nir_iadd_imm(b, intrin->src[0].ssa, -1));
+
+         /* The actual payload read by the firmware is:
+          * word 0: total workgroup count (x * y * z)
+          * word 1: encoded x in low 16 bits and y in high 16 bits
+          * word 2: encoded z in low 16 bits
+          * words 3-5: ??? unused
+          */
          nir_def *payload = nir_vec3(b, wgsize, nir_pack_32_2x16(b, nir_trim_vector(b, wgcount_encoded, 2)),
                                      nir_u2u32(b, nir_channel(b, wgcount_encoded, 2)));
          nir_store_global_offset(b, payload, ptr_base, offset, .align_mul = 4);
       }
       nir_pop_if(b, if_elected);
       return NIR_LOWER_INSTR_PROGRESS_REPLACE;
+   } else if (intrin->intrinsic == nir_intrinsic_load_workgroup_index) {
+      return get_mesh_workgroup_index(b);
    }
 
    return NULL;
+}
+
+static bool
+filter_task_intrinsic(const nir_instr *instr, UNUSED const void *_state)
+{
+   if (instr->type != nir_instr_type_intrinsic)
+      return false;
+
+   nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+   return intrin->intrinsic == nir_intrinsic_load_task_payload ||
+          intrin->intrinsic == nir_intrinsic_store_task_payload ||
+          intrin->intrinsic == nir_intrinsic_task_payload_atomic ||
+          intrin->intrinsic == nir_intrinsic_task_payload_atomic_swap ||
+          intrin->intrinsic == nir_intrinsic_load_workgroup_index ||
+          intrin->intrinsic == nir_intrinsic_launch_mesh_workgroups;
+}
+
+bool
+tu_nir_lower_task(nir_shader *nir)
+{
+   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
+
+   const nir_lower_task_shader_options task_options = {};
+   bool progress = nir_lower_task_shader(nir, task_options);
+
+   /* Lower workgroup index to a linear ID, which will then get lowered to the HW workgroup index plus the chunk offset.
+    */
+   const nir_lower_compute_system_values_options options = {
+      .lower_workgroup_id_to_index = true,
+   };
+   progress |= nir_lower_compute_system_values(nir, &options);
+
+   progress |= nir_shader_lower_instructions(nir, filter_task_intrinsic, lower_task_intrinsic, NULL);
+
+   return nir_progress(progress, impl, nir_metadata_control_flow);
 }
 
 struct mesh_state {
@@ -112,7 +159,6 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
       nir_io_semantics sem = nir_intrinsic_io_semantics(intrin);
 
       nir_def *ptr_base, *ptr_offset;
-      unsigned bit_size = 32;
 
       unsigned component_offset = nir_intrinsic_component(intrin);
       unsigned write_mask = nir_intrinsic_write_mask(intrin);
@@ -134,11 +180,12 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
          /* TODO */
       } else if (intrin->intrinsic == nir_intrinsic_store_per_vertex_output) {
          ptr_base = nir_load_varying_base_ir3(b);
+         meshlet_stride = nir_imm_int(b, state->num_per_vertex_outputs * 16);
          ptr_offset = nir_iadd_imm(b, nir_imul_imm(b, arr_index, 16),
                (state->per_vertex_outputs[sem.location].dword_offset + component_offset) * 4);
       } else {
          ptr_base = nir_load_prim_varying_base_ir3(b);
-         ptr_offset = nir_iadd_imm(b, nir_load_per_primitive_location_ir3(b, base_off_src,
+         ptr_offset = nir_iadd_imm(b, nir_load_per_primitive_location_ir3(b, base_off_src->ssa,
                .driver_location = sem.location - VARYING_SLOT_VAR0), component_offset);
          meshlet_stride = nir_load_per_primitive_stride_ir3(b);
 
@@ -241,16 +288,16 @@ create_passthrough_vs(const struct mesh_state *state, nir_shader *shader)
    return b->shader;
 }
 
-static bool
-tu_nir_lower_mesh(nir_shader *shader, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out)
+bool
+tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out)
 {
    struct mesh_state state = {};
-   nir_function_impl *impl = nir_shader_get_entrypoint(shader);
+   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
 
    /* These outputs are written to different buffers from the normal varying buffer. */
    const uint64_t special_outputs = VARYING_BIT_CULL_PRIMITIVE | VARYING_BIT_PRIMITIVE_INDICES;
 
-   uint64_t per_vertex_outputs = shader->info.outputs_written & ~shader->info.per_primitive_outputs & ~special_outputs;
+   uint64_t per_vertex_outputs = nir->info.outputs_written & ~nir->info.per_primitive_outputs & ~special_outputs;
 
    u_foreach_bit64(slot, per_vertex_outputs) {
       state.per_vertex_outputs[state.num_per_vertex_outputs].dword_offset =
@@ -259,21 +306,23 @@ tu_nir_lower_mesh(nir_shader *shader, struct tu_shader *tu_shader, nir_shader **
       state.num_per_vertex_outputs++;
    }
 
+   /* Lower workgroup index to a linear ID, which will then get lowered to the HW workgroup index plus the chunk offset.
+    */
    const nir_lower_compute_system_values_options options = {
       .lower_workgroup_id_to_index = true,
    };
-   bool progress = nir_lower_compute_system_values(shader, &options);
+   bool progress = nir_lower_compute_system_values(nir, &options);
 
-   progress |= nir_shader_lower_instructions(shader, filter_mesh_intrinsic, lower_mesh_intrinsic, &state);
+   progress |= nir_shader_lower_instructions(nir, filter_mesh_intrinsic, lower_mesh_intrinsic, &state);
 
-   *passthrough_vs_out = create_passthrough_vs(&state, shader);
+   *passthrough_vs_out = create_passthrough_vs(&state, nir);
 
    tu_shader->mesh.num_per_vertex_outputs = state.num_per_vertex_outputs;
    for (unsigned i = 0; i < tu_shader->mesh.num_per_vertex_outputs; i++) {
       tu_shader->mesh.per_vertex_outputs[i].num_components = state.per_vertex_outputs[i].num_components;
       tu_shader->mesh.per_vertex_outputs[i].dword_offset = state.per_vertex_outputs[i].dword_offset;
    }
-   tu_shader->mesh.per_prim_map_size = util_last_bit(shader->info.per_primitive_outputs >> VARYING_SLOT_VAR0);
+   tu_shader->mesh.per_prim_map_size = util_last_bit(nir->info.per_primitive_outputs >> VARYING_SLOT_VAR0);
 
    return nir_progress(progress, impl, nir_metadata_none);
 }

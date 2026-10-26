@@ -129,7 +129,7 @@ struct ir3_driver_params_fs {
 struct ir3_driver_params_mesh {
    uint32_t chunk_idx;
    uint32_t mesh_per_chunk;
-   uint64_t payload;
+   uint64_t task_payload_base;
    uint64_t varyings_base;
    uint64_t primitive_varyings_base;
    uint64_t index_base;
@@ -154,12 +154,13 @@ struct ir3_driver_params_mesh {
 struct ir3_driver_params_task {
    uint32_t chunk_idx;
    uint32_t tasks_per_chunk;
-   uint64_t mesh_count;
-   uint64_t payload;
+   uint64_t mesh_count_base;
+   uint64_t task_payload_base;
    uint32_t wgcount_x;
    uint32_t wgcount_y;
    uint32_t wgcount_z;
 };
+#define IR3_DP_TASK(name) dword_offsetof(struct ir3_driver_params_task, name)
 
 #define IR3_MAX_SHADER_BUFFERS  32
 #define IR3_MAX_SHADER_IMAGES   32
@@ -863,6 +864,7 @@ struct ir3_shader_variant {
       bool rasterflat : 1; /* special handling for emit->rasterflat */
       bool half       : 1;
       bool flat       : 1;
+      bool per_prim   : 1;
       /* inputs[] array is sized for 32 FS input varyings plus sysvals.  Vulkan
        * says that the built-ins (face, coord, etc.) count against the input
        * components limit, so we shouldn't need to have space for them, but GL
@@ -877,6 +879,10 @@ struct ir3_shader_variant {
    bool reads_primid;
    bool reads_shading_rate;
    bool reads_smask;
+
+   /* First location and count of per-primitive inputs. In units of components. */
+   unsigned per_prim_start;
+   unsigned per_prim_count;
 
    /* sum of input components (scalar).  For frag shaders, it only counts
     * the varying inputs:

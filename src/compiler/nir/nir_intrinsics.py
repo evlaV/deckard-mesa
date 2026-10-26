@@ -1671,16 +1671,13 @@ system_value("index_base_ir3", 1, bit_sizes=[64])
 system_value("prim_count_base_ir3", 1, bit_sizes=[64])
 system_value("prim_cull_base_ir3", 1, bit_sizes=[64])
 system_value("task_id_ir3", 1)
-system_value("vertex_buffer_size_ir3", 1)
-system_value("primitive_buffer_size_ir3", 1)
-system_value("prim_cull_size_ir3", 1)
 intrinsic("load_per_primitive_location_ir3", src_comp=[1], dest_comp=1, flags=[CAN_ELIMINATE, CAN_REORDER], indices=[DRIVER_LOCATION],
           bit_sizes=[32])
 system_value("per_primitive_stride_ir3", 1)
 
 
 # System values for freedreno task shaders.
-system_value("mesh_count_ir3", 1, bit_sizes=[64])
+system_value("mesh_count_base_ir3", 1, bit_sizes=[64])
 
 # System values for freedreno compute shaders.
 system_value("subgroup_id_shift_ir3", 1)

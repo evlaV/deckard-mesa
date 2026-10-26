@@ -167,7 +167,8 @@ tu_msaa_samples(uint32_t samples)
 static inline uint32_t
 tu6_stage2opcode(mesa_shader_stage stage)
 {
-   if (stage == MESA_SHADER_FRAGMENT || stage == MESA_SHADER_COMPUTE)
+   if (stage == MESA_SHADER_FRAGMENT || stage == MESA_SHADER_COMPUTE || stage == MESA_SHADER_MESH ||
+       stage == MESA_SHADER_TASK)
       return CP_LOAD_STATE6_FRAG;
    return CP_LOAD_STATE6_GEOM;
 }
@@ -181,6 +182,8 @@ tu6_stage2texsb(mesa_shader_stage stage)
 static inline enum a6xx_state_block
 tu6_stage2shadersb(mesa_shader_stage stage)
 {
+   if (stage == MESA_SHADER_MESH || stage == MESA_SHADER_TASK)
+      return SB6_CS_SHADER;
    return (enum a6xx_state_block) (SB6_VS_SHADER + stage);
 }
 

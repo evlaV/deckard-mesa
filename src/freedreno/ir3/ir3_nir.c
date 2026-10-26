@@ -1862,6 +1862,42 @@ ir3_get_driver_param_info(const nir_shader *shader,
          break;
       }
       return false;
+   case nir_intrinsic_load_chunk_idx_ir3:
+      if (shader->info.stage == MESA_SHADER_MESH)
+         param_info->offset = IR3_DP_MESH(chunk_idx);
+      else
+         param_info->offset = IR3_DP_TASK(chunk_idx);
+      break;
+   case nir_intrinsic_load_workgroups_per_chunk_ir3:
+      if (shader->info.stage == MESA_SHADER_MESH)
+         param_info->offset = IR3_DP_MESH(mesh_per_chunk);
+      else
+         param_info->offset = IR3_DP_TASK(tasks_per_chunk);
+      break;
+   case nir_intrinsic_load_task_payload_base_ir3:
+      if (shader->info.stage == MESA_SHADER_MESH)
+         param_info->offset = IR3_DP_MESH(task_payload_base);
+      else
+         param_info->offset = IR3_DP_TASK(task_payload_base);
+      break;
+   case nir_intrinsic_load_varying_base_ir3:
+      param_info->offset = IR3_DP_MESH(varyings_base);
+      break;
+   case nir_intrinsic_load_index_base_ir3:
+      param_info->offset = IR3_DP_MESH(index_base);
+      break;
+   case nir_intrinsic_load_prim_count_base_ir3:
+      param_info->offset = IR3_DP_MESH(primitive_count_base);
+      break;
+   case nir_intrinsic_load_prim_cull_base_ir3:
+      param_info->offset = IR3_DP_MESH(primitive_cull_base);
+      break;
+   case nir_intrinsic_load_task_id_ir3:
+      param_info->offset = IR3_DP_MESH(primitive_cull_base);
+      break;
+   case nir_intrinsic_load_mesh_count_base_ir3:
+      param_info->offset = IR3_DP_TASK(mesh_count_base);
+      break;
    default:
       return false;
    }

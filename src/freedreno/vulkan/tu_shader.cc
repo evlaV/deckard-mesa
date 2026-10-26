@@ -806,6 +806,36 @@ lower_intrinsic(nir_builder *b, nir_intrinsic_instr *instr,
       return true;
    }
 
+   case nir_intrinsic_load_per_primitive_location_ir3: {
+      nir_def *result =
+         nir_load_ubo(b, 1, 32, nir_imm_int(b, 0 /* UBO */),
+                      nir_iadd_imm(b, nir_ishl_imm(b, instr->src[0].ssa, 2),
+                                      offsetof(struct tu_prim_varying_map, location) +
+                                      sizeof(uint32_t) * nir_intrinsic_driver_location(instr)),
+                      .access = ACCESS_CAN_SPECULATE,
+                      .align_mul = 4,
+                      .align_offset = 0,
+                      .range_base = offsetof(struct tu_prim_varying_map, location),
+                      .range = 32 /* max varyings */ * sizeof(uint32_t));
+      nir_def_replace(&instr->def, result);
+      b->shader->info.num_ubos = MAX2(b->shader->info.num_ubos, 1);
+      return true;
+   }
+
+   case nir_intrinsic_load_per_primitive_stride_ir3: {
+      nir_def *result =
+         nir_load_ubo(b, 1, 32, nir_imm_int(b, 0 /* UBO */),
+                      nir_imm_int(b, offsetof(struct tu_prim_varying_map, buffer_stride)),
+                      .access = ACCESS_CAN_SPECULATE,
+                      .align_mul = 16,
+                      .align_offset = offsetof(struct tu_prim_varying_map, buffer_stride) % 16,
+                      .range_base = offsetof(struct tu_prim_varying_map, buffer_stride),
+                      .range = sizeof(uint32_t));
+      nir_def_replace(&instr->def, result);
+      b->shader->info.num_ubos = MAX2(b->shader->info.num_ubos, 1);
+      return true;
+   }
+
    default:
       return false;
    }
@@ -1478,10 +1508,20 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
     *
     * To not rely on undefined behaviour, we will always allocate enough space
     * to upload driver params.
+    *
+    * In addition, mesh and task shaders must upload their driver params at an offset of 0.
     */
-   if (shader->info.stage == MESA_SHADER_VERTEX) {
-      uint32_t num_driver_params =
-         ir3_nir_scan_driver_consts(dev->compiler, shader, ir3_key, nullptr);
+   if (shader->info.stage == MESA_SHADER_VERTEX || 
+       shader->info.stage == MESA_SHADER_MESH ||
+       shader->info.stage == MESA_SHADER_TASK) {
+      uint32_t num_driver_params;
+      if (shader->info.stage == MESA_SHADER_VERTEX) {
+         num_driver_params = ir3_nir_scan_driver_consts(dev->compiler, shader, ir3_key, nullptr);
+      } else if (shader->info.stage == MESA_SHADER_MESH) {
+         num_driver_params = sizeof(struct ir3_driver_params_mesh) / 4;
+      } else {
+         num_driver_params = sizeof(struct ir3_driver_params_task) / 4;
+      }
       ir3_alloc_driver_params(const_allocs, &num_driver_params, dev->compiler,
                               shader->info.stage);
    }
@@ -3436,6 +3476,10 @@ tu_shader_cache_process_blob(IO &io, struct tu_shader *shader)
    case MESA_SHADER_FRAGMENT:
       io.bytes(&shader->fs, sizeof(shader->fs));
       break;
+   case MESA_SHADER_MESH:
+      io.variant(shader->passthrough_vs);
+      io.bytes(&shader->mesh, sizeof(shader->mesh));
+      break;
    default:
       break;
    }
@@ -3656,6 +3700,39 @@ tu_lower_nir(struct tu_device *dev,
       lower_alpha_to_coverage(nir);
 }
 
+static struct ir3_shader_variant *
+compile_passthrough_vs(struct tu_device *dev,
+                       nir_shader *nir,
+                       bool executable_info)
+{
+   struct ir3_shader_nir_options nir_options = {};
+
+   ir3_finalize_nir(dev->compiler, &nir_options, nir);
+
+   struct ir3_const_allocations const_allocs = {};
+   const struct ir3_shader_options options = {
+      .api_wavesize = IR3_SINGLE_ONLY,
+      .real_wavesize = IR3_SINGLE_ONLY,
+      .const_allocs = const_allocs,
+      .nir_options = nir_options,
+   };
+
+   struct ir3_shader *ir3_shader =
+      ir3_shader_from_nir(dev->compiler, nir, &options);
+
+   struct ir3_shader_key ir3_key = {
+      /* Passthrough VS shouldn't use enough constants to consider compiling a non-safeconst variant. */
+      .safe_constlen = true,
+   };
+
+   struct ir3_shader_variant *variant =
+      ir3_shader_create_variant(ir3_shader, &ir3_key, executable_info);
+
+   ir3_shader_destroy(ir3_shader);
+
+   return variant;
+}
+
 VkResult
 tu_shader_create(struct tu_device *dev,
                  struct tu_shader **shader_out,
@@ -3691,6 +3768,15 @@ tu_shader_create(struct tu_device *dev,
       } else {
          shader->dynamic_descriptor_sizes[i] = -1;
       }
+   }
+
+   if (nir->info.stage == MESA_SHADER_MESH) {
+      nir_shader *passthrough_vs = NULL;
+
+      NIR_PASS(_, nir, tu_nir_lower_mesh, shader, &passthrough_vs);
+      shader->passthrough_vs = compile_passthrough_vs(dev, passthrough_vs, executable_info);
+   } else if (nir->info.stage == MESA_SHADER_TASK) {
+      NIR_PASS(_, nir, tu_nir_lower_task);
    }
 
    struct ir3_const_allocations const_allocs = {};

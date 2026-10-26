@@ -32,6 +32,17 @@ struct tu_inline_ubo
    unsigned size_vec4;
 };
 
+/* Define the layout of the mesh shader per-primitive varying map UBO. This lets us dynamically link per-primitive
+ * varyings between mesh shaders and fragment shaders. This currently uses UBO 0 which is reserved by the driver UBO
+ * code.
+ */
+struct tu_prim_varying_map
+{
+   uint32_t buffer_stride;
+   uint32_t padding[3];
+   uint32_t location[];
+};
+
 /* The meaning of the range depends on "type". If it's
  * IR3_PUSH_CONSTS_PER_STAGE, then it's the range used by this shader. If
  * it's IR3_PUSH_CONSTS_SHARED then it's the overall range as provided by
@@ -77,6 +88,7 @@ struct tu_shader
    struct tu_draw_state state;
    union {
       struct tu_draw_state safe_const_state;
+      struct tu_draw_state passthrough_vs_state;
    };
    struct tu_draw_state binning_state;
    struct tu_draw_state safe_const_binning_state;
@@ -196,6 +208,12 @@ tu_nir_lower_ray_queries(nir_shader *nir);
 
 bool
 tu_nir_lower_demote_samples(nir_shader *nir);
+
+bool
+tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out);
+
+bool
+tu_nir_lower_task(nir_shader *nir);
 
 nir_shader *
 tu_spirv_to_nir(struct tu_device *dev,

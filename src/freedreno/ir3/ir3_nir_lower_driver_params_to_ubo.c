@@ -81,6 +81,7 @@ lower_driver_param_to_ubo(nir_builder *b, nir_intrinsic_instr *intr, void *in)
    case nir_intrinsic_load_tess_factor_base_ir3:
       result = load_primitive_param_ubo(b, v, components, 6);
       break;
+      /* Mesh/task params are pushed directly by the AQE, don't lower them. */
    default: {
       struct driver_param_info param_info;
       if (!ir3_get_driver_param_info(b->shader, &v->key, intr, &param_info))

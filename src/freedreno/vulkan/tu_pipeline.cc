@@ -2321,13 +2321,16 @@ tu_emit_program_state(struct tu_cs *sub_cs,
    struct tu_device *dev = sub_cs->device;
    struct tu_cs prog_cs;
 
-   const struct ir3_shader_variant *variants[MESA_SHADER_STAGES];
-   struct tu_draw_state draw_states[MESA_SHADER_STAGES];
+   const struct ir3_shader_variant *variants[MESA_SHADER_MESH_STAGES];
+   struct tu_draw_state draw_states[MESA_SHADER_MESH_STAGES];
 
    for (mesa_shader_stage stage = MESA_SHADER_VERTEX;
         stage < ARRAY_SIZE(variants); stage = static_cast<mesa_shader_stage>(stage + 1)) {
       variants[stage] = shaders[stage] ? shaders[stage]->variant : NULL;
    }
+
+   if (shaders[MESA_SHADER_MESH])
+      variants[MESA_SHADER_VERTEX] = shaders[MESA_SHADER_MESH]->passthrough_vs;
 
    uint32_t safe_variants =
       ir3_trim_constlen(variants, dev->compiler);

@@ -407,6 +407,15 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
    case nir_intrinsic_load_multisampled_pan:
    case nir_intrinsic_load_rt_conversion_pan:
    case nir_intrinsic_subgroup_barrier_index_intel:
+   case nir_intrinsic_load_chunk_idx_ir3:
+   case nir_intrinsic_load_varying_base_ir3:
+   case nir_intrinsic_load_prim_varying_base_ir3:
+   case nir_intrinsic_load_index_base_ir3:
+   case nir_intrinsic_load_prim_count_base_ir3:
+   case nir_intrinsic_load_prim_cull_base_ir3:
+   case nir_intrinsic_load_task_id_ir3:
+   case nir_intrinsic_load_per_primitive_stride_ir3:
+   case nir_intrinsic_load_mesh_count_base_ir3:
       is_divergent = false;
       break;
 
