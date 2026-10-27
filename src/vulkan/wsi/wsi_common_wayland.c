@@ -44,7 +44,7 @@
 #include "wsi_common_private.h"
 #include "fifo-v1-client-protocol.h"
 #include "commit-timing-v1-client-protocol.h"
-#include "linux-dmabuf-v1-client-protocol.h"
+#include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "linux-drm-syncobj-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
@@ -115,7 +115,7 @@ struct wsi_wl_display {
 
    struct wp_color_manager_v1 *color_manager;
 
-   struct dmabuf_feedback dmabuf_feedback;
+   struct dmabuf_feedback_format_table format_table;
 
    struct u_vector color_primaries;
    struct u_vector color_transfer_funcs;
@@ -138,7 +138,7 @@ struct wsi_wl_display {
 
    bool sw;
 
-   dev_t display_device_dev;
+   dev_t main_device;
    bool same_gpu;
 
    clockid_t presentation_clock_id;
@@ -921,10 +921,9 @@ default_dmabuf_feedback_format_table(void *data,
                                      int32_t fd, uint32_t size)
 {
    struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
 
-   feedback->format_table.size = size;
-   feedback->format_table.data = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+   display->format_table.size = size;
+   display->format_table.data = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 
    close(fd);
 }
@@ -935,10 +934,9 @@ default_dmabuf_feedback_main_device(void *data,
                                     struct wl_array *device)
 {
    struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
 
    assert(device->size == sizeof(dev_t));
-   memcpy(&feedback->main_device, device->data, device->size);
+   memcpy(&display->main_device, device->data, device->size);
 }
 
 static void
@@ -946,11 +944,7 @@ default_dmabuf_feedback_tranche_target_device(void *data,
                                               struct zwp_linux_dmabuf_feedback_v1 *dmabuf_feedback,
                                               struct wl_array *device)
 {
-   struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
-
-   memcpy(&feedback->pending_tranche.target_device, device->data,
-          sizeof(feedback->pending_tranche.target_device));
+   /* ignore this event */
 }
 
 static void
@@ -958,10 +952,7 @@ default_dmabuf_feedback_tranche_flags(void *data,
                                       struct zwp_linux_dmabuf_feedback_v1 *dmabuf_feedback,
                                       uint32_t flags)
 {
-   struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
-
-   feedback->pending_tranche.flags = flags;
+   /* ignore this event */
 }
 
 static void
@@ -970,20 +961,19 @@ default_dmabuf_feedback_tranche_formats(void *data,
                                         struct wl_array *indices)
 {
    struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
    uint32_t format;
    uint64_t modifier;
    uint16_t *index;
 
    /* We couldn't map the format table or the compositor didn't advertise it,
     * so we have to ignore the feedback. */
-   if (feedback->format_table.data == MAP_FAILED ||
-       feedback->format_table.data == NULL)
+   if (display->format_table.data == MAP_FAILED ||
+       display->format_table.data == NULL)
       return;
 
    wl_array_for_each(index, indices) {
-      format = feedback->format_table.data[*index].format;
-      modifier = feedback->format_table.data[*index].modifier;
+      format = display->format_table.data[*index].format;
+      modifier = display->format_table.data[*index].modifier;
       wsi_wl_display_add_drm_format_modifier(display, &display->formats,
                                              format, modifier);
    }
@@ -993,19 +983,14 @@ static void
 default_dmabuf_feedback_tranche_done(void *data,
                                      struct zwp_linux_dmabuf_feedback_v1 *dmabuf_feedback)
 {
-   struct wsi_wl_display *display = data;
-   struct dmabuf_feedback *feedback = &display->dmabuf_feedback;
-
-   /* Add tranche to array of tranches. */
-   util_dynarray_append(&feedback->tranches, feedback->pending_tranche);
-
-   dmabuf_feedback_tranche_init(&feedback->pending_tranche);
+   /* ignore this event */
 }
 
 static void
 default_dmabuf_feedback_done(void *data,
                              struct zwp_linux_dmabuf_feedback_v1 *dmabuf_feedback)
 {
+   /* ignore this event */
 }
 
 static const struct zwp_linux_dmabuf_feedback_v1_listener
@@ -1512,7 +1497,7 @@ registry_handle_global(void *data, struct wl_registry *registry,
       if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0 && version >= 3) {
          display->wl_dmabuf =
             wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface,
-                             MIN2(version, ZWP_LINUX_BUFFER_PARAMS_V1_SET_SAMPLING_DEVICE_SINCE_VERSION));
+                             MIN2(version, ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION));
          zwp_linux_dmabuf_v1_add_listener(display->wl_dmabuf,
                                           &dmabuf_listener, display);
       } else if (strcmp(interface, wp_linux_drm_syncobj_manager_v1_interface.name) == 0) {
@@ -1676,7 +1661,7 @@ wsi_wl_display_init(struct wsi_wayland *wsi_wl,
    /* Get the default dma-buf feedback */
    if (display->wl_dmabuf && zwp_linux_dmabuf_v1_get_version(display->wl_dmabuf) >=
                              ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
-         dmabuf_feedback_init(&display->dmabuf_feedback);
+         dmabuf_feedback_format_table_init(&display->format_table);
          display->wl_dmabuf_feedback =
             zwp_linux_dmabuf_v1_get_default_feedback(display->wl_dmabuf);
          zwp_linux_dmabuf_feedback_v1_add_listener(display->wl_dmabuf_feedback,
@@ -1690,44 +1675,13 @@ wsi_wl_display_init(struct wsi_wayland *wsi_wl,
             /* Apparently some wayland compositor do not send the render
              * device node but the primary, so test against both.
              */
-            if (wl_proxy_get_version((struct wl_proxy *)display->wl_dmabuf) >=
-               ZWP_LINUX_BUFFER_PARAMS_V1_SET_SAMPLING_DEVICE_SINCE_VERSION)
-            {
-               /*
-                  For dmabuf v6 we don't get a main device, so we use the first one the compositor can sample from
-                  as default and then try to figure out, if we can use our gpu directly.
-               */
-               util_dynarray_foreach(&display->dmabuf_feedback.tranches,
-                                     struct dmabuf_feedback_tranche, tranche) {
-                  if ((tranche->flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SAMPLING) != 0
-                      && !display->display_device_dev) {
-                     display->same_gpu = false; // if this actually is the same_gpu, we'll figure out in the next loop
-                     display->display_device_dev = tranche->target_device;
-                  }
-
-                  if ((tranche->flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SAMPLING) != 0 &&
-                     ((wsi_wl->wsi->drm_info.hasRender &&
-                     major(tranche->target_device) == wsi_wl->wsi->drm_info.renderMajor &&
-                     minor(tranche->target_device) == wsi_wl->wsi->drm_info.renderMinor) ||
-                     (wsi_wl->wsi->drm_info.hasPrimary &&
-                     major(tranche->target_device) == wsi_wl->wsi->drm_info.primaryMajor &&
-                     minor(tranche->target_device) == wsi_wl->wsi->drm_info.primaryMinor)))
-                  {
-                     display->display_device_dev = tranche->target_device;
-                     display->same_gpu = true;
-                     break;
-                  }
-               }
-            } else {
-               display->same_gpu =
-                  (wsi_wl->wsi->drm_info.hasRender &&
-                  major(display->dmabuf_feedback.main_device) == wsi_wl->wsi->drm_info.renderMajor &&
-                  minor(display->dmabuf_feedback.main_device) == wsi_wl->wsi->drm_info.renderMinor) ||
-                  (wsi_wl->wsi->drm_info.hasPrimary &&
-                  major(display->dmabuf_feedback.main_device) == wsi_wl->wsi->drm_info.primaryMajor &&
-                  minor(display->dmabuf_feedback.main_device) == wsi_wl->wsi->drm_info.primaryMinor);
-               display->display_device_dev = display->dmabuf_feedback.main_device;
-            }
+            display->same_gpu =
+               (wsi_wl->wsi->drm_info.hasRender &&
+                major(display->main_device) == wsi_wl->wsi->drm_info.renderMajor &&
+                minor(display->main_device) == wsi_wl->wsi->drm_info.renderMinor) ||
+               (wsi_wl->wsi->drm_info.hasPrimary &&
+                major(display->main_device) == wsi_wl->wsi->drm_info.primaryMajor &&
+                minor(display->main_device) == wsi_wl->wsi->drm_info.primaryMinor);
          }
    }
 
@@ -1765,7 +1719,7 @@ out:
    if (display->wl_dmabuf_feedback) {
       zwp_linux_dmabuf_feedback_v1_destroy(display->wl_dmabuf_feedback);
       display->wl_dmabuf_feedback = NULL;
-      dmabuf_feedback_fini(&display->dmabuf_feedback);
+      dmabuf_feedback_format_table_fini(&display->format_table);
    }
 
    return VK_SUCCESS;
@@ -3665,17 +3619,6 @@ wsi_wl_image_init(struct wsi_wl_swapchain *chain,
          zwp_linux_dmabuf_v1_create_params(display->wl_dmabuf);
       if (!params)
          goto fail_image;
-
-      if (wl_proxy_get_version((struct wl_proxy *)display->wl_dmabuf) >=
-         ZWP_LINUX_BUFFER_PARAMS_V1_SET_SAMPLING_DEVICE_SINCE_VERSION)
-      {
-         struct wl_array dev;
-         wl_array_init(&dev);
-         wl_array_add(&dev, sizeof(dev_t));
-         memcpy(dev.data, &display->display_device_dev, sizeof(dev_t));
-         zwp_linux_buffer_params_v1_set_sampling_device(params, &dev);
-         wl_array_release(&dev);
-      }
 
       for (int i = 0; i < image->base.num_planes; i++) {
          zwp_linux_buffer_params_v1_add(params,

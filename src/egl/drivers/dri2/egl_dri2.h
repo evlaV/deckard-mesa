@@ -278,9 +278,8 @@ struct dri2_egl_display {
    struct wp_presentation *wp_presentation;
    struct dri2_wl_formats formats;
    struct zwp_linux_dmabuf_feedback_v1 *wl_dmabuf_feedback;
-   struct dmabuf_feedback dmabuf_feedback;
+   struct dmabuf_feedback_format_table format_table;
    char *device_name;
-   dev_t display_device_dev;
    bool is_render_node;
    clockid_t presentation_clock_id;
 #endif

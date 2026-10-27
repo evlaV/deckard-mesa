@@ -466,20 +466,13 @@ static char *drm_get_id_path_tag_for_fd(int fd)
    return tag;
 }
 
-bool loader_drm_devices_match(drmDevicePtr dev1, drmDevicePtr dev2)
-{
-   char *tag = drm_construct_id_path_tag(dev1);
-   bool ret = drm_device_matches_tag(dev2, tag);
-   free(tag);
-   return ret;
-}
-
-bool loader_get_user_preferred_device(drmDevicePtr default_dev, drmDevicePtr preferred_dev)
+bool loader_get_user_preferred_fd(int *fd_render_gpu, int *original_fd)
 {
    const char *dri_prime = os_get_option("DRI_PRIME");
    bool debug = debug_get_bool_option("DRI_PRIME_DEBUG", false);
+   char *default_tag = NULL;
    drmDevicePtr devices[MAX_DRM_DEVICES];
-   int i, num_devices = -1;
+   int i, num_devices, fd = -1;
    struct {
       enum {
          PRIME_IS_INTEGER,
@@ -525,6 +518,10 @@ bool loader_get_user_preferred_device(drmDevicePtr default_dev, drmDevicePtr pre
       }
    }
 
+   default_tag = drm_get_id_path_tag_for_fd(*fd_render_gpu);
+   if (default_tag == NULL)
+      goto err;
+
    num_devices = drmGetDevices2(0, devices, MAX_DRM_DEVICES);
    if (num_devices <= 0)
       goto err;
@@ -549,7 +546,7 @@ bool loader_get_user_preferred_device(drmDevicePtr default_dev, drmDevicePtr pre
          }
          log_(_LOADER_WARNING, " %s", devices[i]->nodes[DRM_NODE_RENDER]);
 
-         if (loader_drm_devices_match(devices[i], default_dev)) {
+         if (drm_device_matches_tag(devices[i], default_tag)) {
             log_(_LOADER_WARNING, " [default]");
          }
          log_(_LOADER_WARNING, "\n");
@@ -580,7 +577,7 @@ bool loader_get_user_preferred_device(drmDevicePtr default_dev, drmDevicePtr pre
       switch (prime.semantics) {
          case PRIME_IS_INTEGER: {
             /* Skip the default device */
-            if (loader_drm_devices_match(devices[i], default_dev)) {
+            if (drm_device_matches_tag(devices[i], default_tag)) {
                log_(debug ? _LOADER_WARNING : _LOADER_INFO,
                     "skipped (default device)\n");
                continue;
@@ -626,50 +623,20 @@ bool loader_get_user_preferred_device(drmDevicePtr default_dev, drmDevicePtr pre
 
       log_(debug ? _LOADER_WARNING : _LOADER_INFO,
            "selected (%s)\n", devices[i]->nodes[DRM_NODE_RENDER]);
-      memcpy(preferred_dev, devices[i], sizeof(drmDevice));
+      fd = loader_open_device(devices[i]->nodes[DRM_NODE_RENDER]);
+      if (fd < 0) {
+         log_(debug ? _LOADER_WARNING : _LOADER_INFO,
+              "DRI_PRIME: failed to open '%s'\n",
+              devices[i]->nodes[DRM_NODE_RENDER]);
+      }
       break;
    }
    drmFreeDevices(devices, num_devices);
 
-   if (i == num_devices)
+   if (i == num_devices || fd < 0)
       goto err;
 
-   free(prime.str);
-   return !loader_drm_devices_match(default_dev, preferred_dev);
- err:
-   log_(debug ? _LOADER_WARNING : _LOADER_INFO,
-        "DRI_PRIME: error. Using the default GPU\n");
-   free(prime.str);
- no_prime_gpu_offloading:
-   return false;
-}
-
-bool loader_get_user_preferred_fd(int *fd_render_gpu, int *original_fd)
-{
-   int fd = -1;
-   bool is_render_and_display_gpu_diff;
-   drmDevicePtr render_dev, preferred_dev;
-   bool debug = debug_get_bool_option("DRI_PRIME_DEBUG", false);
-
-   if (drmGetDevice2(*fd_render_gpu, 0, &render_dev) != 0)
-      return false;
-   if (drmGetDevice2(*fd_render_gpu, 0, &preferred_dev) != 0) {
-      drmFreeDevice(&render_dev);
-      return false;
-   };
-   is_render_and_display_gpu_diff = loader_get_user_preferred_device(
-      render_dev, preferred_dev);
-   fd = loader_open_device(preferred_dev->nodes[DRM_NODE_RENDER]);
-
-   if (fd < 0) {
-      log_(debug ? _LOADER_WARNING : _LOADER_INFO,
-           "DRI_PRIME: failed to open '%s'\n",
-           render_dev->nodes[DRM_NODE_RENDER]);
-      drmFreeDevice(&render_dev);
-      drmFreeDevice(&preferred_dev);
-      return false;
-   }
-
+   bool is_render_and_display_gpu_diff = !!strcmp(default_tag, prime.str);
    if (original_fd) {
       if (is_render_and_display_gpu_diff) {
          *original_fd = *fd_render_gpu;
@@ -683,9 +650,18 @@ bool loader_get_user_preferred_fd(int *fd_render_gpu, int *original_fd)
       *fd_render_gpu = fd;
    }
 
-   drmFreeDevice(&render_dev);
-   drmFreeDevice(&preferred_dev);
+   free(default_tag);
+   free(prime.str);
    return is_render_and_display_gpu_diff;
+ err:
+   log_(debug ? _LOADER_WARNING : _LOADER_INFO,
+        "DRI_PRIME: error. Using the default GPU\n");
+   free(default_tag);
+   free(prime.str);
+ no_prime_gpu_offloading:
+   if (original_fd)
+      *original_fd = *fd_render_gpu;
+   return false;
 }
 
 static bool
