@@ -3146,6 +3146,18 @@ by a particular renderpass/blit.
 	<reg32 offset="0x9236" name="VPC_REPLACE_MODE_CNTL" type="a6xx_vpc_replace_mode_cntl" variants="A6XX-A7XX" usage="cmd"/>
 	<reg32 offset="0x9310" name="VPC_REPLACE_MODE_CNTL" type="a6xx_vpc_replace_mode_cntl" variants="A8XX-" usage="cmd"/>
 
+	<bitset name="a7xx_vpc_pa_cntl" inline="yes">
+		<bitfield name="NUMTOTALPAVAR" low="0" high="7" type="uint"/>
+		<bitfield name="STARTVARYID4PA" low="8" high="15" type="uint"/>
+		<bitfield name="VPCPAFETCHEN" pos="16" type="boolean"/>
+	</bitset>
+
+	<reg32 offset="0x9237" name="VPC_PA_CNTL" type="a7xx_vpc_pa_cntl" variants="A7XX" usage="cmd"/>
+	<reg32 offset="0x9311" name="VPC_PA_CNTL" type="a7xx_vpc_pa_cntl" variants="A8XX-" usage="cmd"/>
+
+	<reg32 offset="0x923b" name="VPC_PA_BUFFER_STRIDE" type="uint" variants="A7XX" usage="cmd"/>
+	<reg32 offset="0x927b" name="VPC_PA_BUFFER_STRIDE" type="uint" variants="A8XX-" usage="cmd"/>
+
 	<reg32 offset="0x9300" name="VPC_ROTATION_CNTL" low="0" high="2" variants="A6XX-A7XX" usage="cmd"/>
 	<reg32 offset="0x9312" name="VPC_ROTATION_CNTL" low="0" high="2" variants="A8XX-" usage="cmd"/>
 
@@ -3242,8 +3254,8 @@ by a particular renderpass/blit.
 	<reg32 offset="0x9b17" name="PC_POS_BUF_GMEM_SIZE" variants="A8XX-" type="uint" usage="cmd"/>
 	<reg32 offset="0x9b18" name="PC_BV_POS_BUF_GMEM_SIZE" variants="A8XX-" type="uint" usage="cmd"/>
 
-	<reg32 offset="0x930a" name="VPC_UNKNOWN_CNTL" variants="A7XX" usage="draw"/>
-	<reg32 offset="0x9313" name="VPC_UNKNOWN_CNTL" variants="A8XX-" usage="draw"/>
+	<reg32 offset="0x930a" name="VPC_MESH_CNTL" type="a7xx_pc_mesh_cntl" variants="A7XX" usage="draw"/>
+	<reg32 offset="0x9313" name="VPC_MESH_CNTL" type="a7xx_pc_mesh_cntl" variants="A8XX-" usage="draw"/>
 
 	<reg32 offset="0x9e17" name="PC_UNKNOWN_9E17" variants="A8XX-" usage="draw"/>
 

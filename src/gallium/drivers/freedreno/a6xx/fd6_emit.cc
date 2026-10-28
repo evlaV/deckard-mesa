@@ -1032,7 +1032,7 @@ fd6_emit_static_context_regs(struct fd_context *ctx, fd_cs &cs)
    crb.add(PC_DGEN_SU_CONSERVATIVE_RAS_CNTL(CHIP));
 
    if (CHIP >= A7XX) {
-      crb.add(VPC_UNKNOWN_CNTL(CHIP));
+      crb.add(VPC_MESH_CNTL(CHIP));
 
       /* Blob sets these two per draw. */
       crb.add(PC_HS_BUFFER_SIZE(CHIP, FD6_TESS<CHIP>::PARAM_SIZE));
