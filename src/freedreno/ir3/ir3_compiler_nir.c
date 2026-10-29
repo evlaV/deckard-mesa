@@ -183,6 +183,13 @@ create_driver_param(struct ir3_context *ctx, uint32_t dp)
 }
 
 static struct ir3_instruction *
+create_driver_param_64b(struct ir3_context *ctx, uint32_t dp)
+{
+   return ir3_64b(&ctx->build, create_driver_param(ctx, dp),
+                  create_driver_param(ctx, dp + 1));
+}
+
+static struct ir3_instruction *
 create_driver_param_indirect(struct ir3_context *ctx, uint32_t dp,
                              struct ir3_instruction *address)
 {
@@ -3246,6 +3253,46 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       }
       break;
    }
+   case nir_intrinsic_load_chunk_idx_ir3:
+      if (ctx->so->type == MESA_SHADER_MESH)
+         dst[0] = create_driver_param(ctx, IR3_DP_MESH(chunk_idx));
+      else
+         dst[0] = create_driver_param(ctx, IR3_DP_TASK(chunk_idx));
+      break;
+   case nir_intrinsic_load_workgroups_per_chunk_ir3:
+      if (ctx->so->type == MESA_SHADER_MESH)
+         dst[0] = create_driver_param(ctx, IR3_DP_MESH(mesh_per_chunk));
+      else
+         dst[0] = create_driver_param(ctx, IR3_DP_TASK(tasks_per_chunk));
+      break;
+   case nir_intrinsic_load_task_payload_base_ir3:
+      if (ctx->so->type == MESA_SHADER_MESH) {
+         dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(task_payload_base));
+      } else {
+         dst[0] = create_driver_param_64b(ctx, IR3_DP_TASK(task_payload_base));
+      }
+      break;
+   case nir_intrinsic_load_varying_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(varyings_base));
+      break;
+   case nir_intrinsic_load_prim_varying_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(primitive_varyings_base));
+      break;
+   case nir_intrinsic_load_index_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(index_base));
+      break;
+   case nir_intrinsic_load_prim_count_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(primitive_count_base));
+      break;
+   case nir_intrinsic_load_mesh_vis_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_MESH(mesh_vis_base));
+      break;
+   case nir_intrinsic_load_task_id_ir3:
+      dst[0] = create_driver_param(ctx, IR3_DP_MESH(task_id));
+      break;
+   case nir_intrinsic_load_mesh_count_base_ir3:
+      dst[0] = create_driver_param_64b(ctx, IR3_DP_TASK(mesh_count_base));
+      break;
    case nir_intrinsic_demote:
    case nir_intrinsic_demote_if:
    case nir_intrinsic_terminate:
@@ -5093,6 +5140,58 @@ emit_function(struct ir3_context *ctx, nir_function_impl *impl)
    }
 }
 
+static uint64_t
+per_prim_inputs(struct ir3_context *ctx)
+{
+   /* Some builtin inputs can be used with or without mesh shaders, and when
+    * used with mesh-shaders are implicitly converted to per-primitive inputs.
+    * Always consider them per-primitive so that it just works when compiling FS
+    * and mesh separately.
+    */
+   const uint64_t per_prim_builtins =
+      VARYING_BIT_VIEWPORT | VARYING_BIT_LAYER |
+      VARYING_BIT_PRIMITIVE_SHADING_RATE | VARYING_BIT_PRIMITIVE_ID;
+   
+   return ctx->s->info.per_primitive_inputs |
+      (ctx->s->info.inputs_read & per_prim_builtins);
+}
+
+static uint64_t
+non_per_prim_inputs(struct ir3_context *ctx)
+{
+   const uint64_t per_prim_builtins =
+      VARYING_BIT_VIEWPORT | VARYING_BIT_LAYER |
+      VARYING_BIT_PRIMITIVE_SHADING_RATE | VARYING_BIT_PRIMITIVE_ID;
+   
+   return ctx->s->info.inputs_read & ~per_prim_builtins;
+}
+
+static void
+setup_frag_inputs(struct ir3_context *ctx)
+{
+   /* Per-primitive varyings go after normal varyings. */
+   ctx->so->per_prim_start = util_bitcount64(non_per_prim_inputs(ctx)) * 4;
+   ctx->so->per_prim_count = util_bitcount64(per_prim_inputs(ctx)) * 4;
+}
+
+static unsigned
+input_loc(struct ir3_context *ctx, nir_intrinsic_instr *intr,
+          unsigned offset)
+{
+   unsigned slot = nir_intrinsic_io_semantics(intr).location + offset;
+   if (intr->intrinsic == nir_intrinsic_load_per_primitive_input ||
+       (ctx->so->type == MESA_SHADER_FRAGMENT &&
+        (slot == VARYING_SLOT_VIEWPORT || slot == VARYING_SLOT_LAYER ||
+         slot == VARYING_SLOT_PRIMITIVE_SHADING_RATE))) {
+      return util_bitcount64(non_per_prim_inputs(ctx)) +
+         util_bitcount64(per_prim_inputs(ctx) & BITFIELD64_MASK(slot));
+   } else if (ctx->so->type == MESA_SHADER_FRAGMENT) {
+      return util_bitcount64(non_per_prim_inputs(ctx) & BITFIELD64_MASK(slot));
+   } else {
+      return nir_intrinsic_base(intr) + offset;
+   }
+}
+
 static void
 setup_input(struct ir3_context *ctx, nir_intrinsic_instr *intr)
 {
@@ -5108,7 +5207,7 @@ setup_input(struct ir3_context *ctx, nir_intrinsic_instr *intr)
    unsigned frac = nir_intrinsic_component(intr);
    unsigned offset = nir_src_as_uint(intr->src[coord ? 1 : 0]);
    unsigned ncomp = nir_intrinsic_dest_components(intr);
-   unsigned n = nir_intrinsic_base(intr) + offset;
+   unsigned n = input_loc(ctx, intr, offset);
    unsigned slot = nir_intrinsic_io_semantics(intr).location + offset;
    unsigned compmask = BITFIELD_MASK(ncomp + frac);
 
@@ -5311,37 +5410,7 @@ pack_inlocs(struct ir3_context *ctx)
    }
 
    /*
-    * Third Step: reassign varying locs for per-primitive varyings. These don't
-    * go through the normal VPC linkage and so must be contiguous. We put them
-    * after "normal" varyings.
-    */
-   so->per_prim_start = inloc;
-   for (unsigned i = 0; i < so->inputs_count; i++) {
-      if (!so->inputs[i].per_prim)
-         continue;
-
-      so->inputs[i].inloc = inloc;
-      so->inputs[i].bary = false;
-
-      if (!used_components[i])
-         continue;
-
-      so->inputs[i].bary = true;
-      so->varying_in++;
-      so->inputs[i].compmask = (1 << util_last_bit(used_components[i])) - 1;
-
-      /* We don't know when compiling how many components are written in the
-       * mesh shader. And unlike normal varyings, we're less flexible here with
-       * linkage, since we can only remap locations and can't reduce the number
-       * of components from either side. Therefore, reserve all 4 components for
-       * every varying.
-       */
-      inloc += 4;
-   }
-   so->per_prim_count = inloc - so->per_prim_start;
-
-   /*
-    * Fourth Step: reassign packed inloc's:
+    * Third Step: reassign packed inloc's:
     */
 
    foreach_block (block, &ctx->ir->block_list) {
@@ -5520,6 +5589,8 @@ uses_store_output(struct ir3_shader_variant *so)
    case MESA_SHADER_TESS_CTRL:
    case MESA_SHADER_COMPUTE:
    case MESA_SHADER_KERNEL:
+   case MESA_SHADER_MESH:
+   case MESA_SHADER_TASK:
       return false;
    default:
       UNREACHABLE("unknown stage");
@@ -5652,6 +5723,9 @@ emit_instructions(struct ir3_context *ctx)
 
    ctx->so->pvtmem_size = ctx->s->scratch_size;
    ctx->so->shared_size = ctx->s->info.shared_size;
+
+   if (ctx->so->type == MESA_SHADER_FRAGMENT)
+      setup_frag_inputs(ctx);
 
    /* NOTE: need to do something more clever when we support >1 fxn */
    nir_foreach_reg_decl (decl, fxn) {

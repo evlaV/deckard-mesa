@@ -494,7 +494,7 @@ struct tu_cmd_state
 {
    uint32_t dirty;
 
-   struct tu_shader *shaders[MESA_SHADER_STAGES];
+   struct tu_shader *shaders[MESA_SHADER_MESH_STAGES];
 
    struct tu_program_state program;
 

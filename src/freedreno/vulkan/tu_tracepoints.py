@@ -167,6 +167,10 @@ begin_end_tp('draw',
                   copy_func='strcpy'),
               Arg(type='tu_sha1_str', var='fs_sha1',  c_format='%s',
                   copy_func='strcpy'),
+              Arg(type='tu_sha1_str', var='task_sha1',  c_format='%s',
+                  copy_func='strcpy'),
+              Arg(type='tu_sha1_str', var='mesh_sha1',  c_format='%s',
+                  copy_func='strcpy'),
               ], tp_default_enabled=False)
 
 begin_end_tp('binning_ib')

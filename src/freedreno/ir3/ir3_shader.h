@@ -134,7 +134,7 @@ struct ir3_driver_params_mesh {
    uint64_t primitive_varyings_base;
    uint64_t index_base;
    uint64_t primitive_count_base;
-   uint64_t primitive_cull_base;
+   uint64_t mesh_vis_base;
    uint32_t task_id;
    uint32_t wgcount_x;
    uint32_t wgcount_y;
@@ -1069,6 +1069,10 @@ ir3_shader_stage(struct ir3_shader_variant *v)
    case MESA_SHADER_COMPUTE:
    case MESA_SHADER_KERNEL:
       return "CL";
+   case MESA_SHADER_MESH:
+      return "MESH";
+   case MESA_SHADER_TASK:
+      return "TASK";
    default:
       UNREACHABLE("invalid type");
       return NULL;
@@ -1474,7 +1478,10 @@ ir3_link_shaders(struct ir3_shader_linkage *l,
       if (fs->inputs[j].inloc >= fs->total_in)
          continue;
 
-      k = ir3_find_output(vs, (gl_varying_slot)fs->inputs[j].slot);
+      if (fs->inputs[j].per_prim)
+         k = -1;
+      else
+         k = ir3_find_output(vs, (gl_varying_slot)fs->inputs[j].slot);
 
       if (fs->inputs[j].slot == VARYING_SLOT_PRIMITIVE_ID) {
          l->primid_loc = fs->inputs[j].inloc;

@@ -324,6 +324,16 @@ lower_load_push_constant(struct tu_device *dev,
    nir_def_replace(&instr->def, load);
 }
 
+/* Task and mesh shaders share the same non-bindless UBO space. In order to make sure that they don't step on each
+ * other, we have to make sure that the indices for driver UBOs don't overlap. Currently these are:
+ * - driver params
+ * - bindless base addresses
+ * - inline uniform base addresses
+ * - dynamic descriptor offsets
+ * We reserve these 4 indices for the mesh shader when compiling the task shader.
+ */
+#define TU_MAX_MESH_DRIVER_UBOS 4
+
 static void
 lower_vulkan_resource_index(struct tu_device *dev, nir_builder *b,
                             nir_intrinsic_instr *instr,
@@ -807,16 +817,16 @@ lower_intrinsic(nir_builder *b, nir_intrinsic_instr *instr,
    }
 
    case nir_intrinsic_load_per_primitive_location_ir3: {
+      unsigned base = offsetof(struct tu_prim_varying_map, location) +
+         sizeof(uint32_t) * nir_intrinsic_driver_location(instr);
       nir_def *result =
          nir_load_ubo(b, 1, 32, nir_imm_int(b, 0 /* UBO */),
-                      nir_iadd_imm(b, nir_ishl_imm(b, instr->src[0].ssa, 2),
-                                      offsetof(struct tu_prim_varying_map, location) +
-                                      sizeof(uint32_t) * nir_intrinsic_driver_location(instr)),
+                      nir_iadd_imm(b, nir_ishl_imm(b, instr->src[0].ssa, 2), base),
                       .access = ACCESS_CAN_SPECULATE,
                       .align_mul = 4,
                       .align_offset = 0,
-                      .range_base = offsetof(struct tu_prim_varying_map, location),
-                      .range = 32 /* max varyings */ * sizeof(uint32_t));
+                      .range_base = base,
+                      .range = nir_intrinsic_range(instr) * sizeof(uint32_t));
       nir_def_replace(&instr->def, result);
       b->shader->info.num_ubos = MAX2(b->shader->info.num_ubos, 1);
       return true;
@@ -1526,6 +1536,10 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
                               shader->info.stage);
    }
 
+   if (shader->info.stage == MESA_SHADER_TASK) {
+      shader->info.num_ubos = MAX2(shader->info.num_ubos, TU_MAX_MESH_DRIVER_UBOS + 1);
+   }
+
    struct tu_const_state *const_state = &tu_shader->const_state;
    const_state->push_consts = (struct tu_push_constant_range) {
       .lo_dwords = 0,
@@ -1695,6 +1709,10 @@ tu_lower_io(nir_shader *shader, struct tu_device *dev,
 
    if (progress)
       nir_opt_dce(shader);
+
+   if (shader->info.stage == MESA_SHADER_MESH) {
+      assert(shader->info.num_ubos <= TU_MAX_MESH_DRIVER_UBOS + 1);
+   }
 
    progress |=
       nir_remove_dead_variables(shader,
@@ -2928,7 +2946,8 @@ template <chip CHIP>
 void
 tu6_emit_vs(struct tu_cs *cs,
             const struct ir3_shader_variant *vs,
-            uint32_t view_mask)
+            uint32_t view_mask,
+            bool passthrough)
 {
    bool multi_pos_output = vs->multi_pos_output;
 
@@ -3124,10 +3143,21 @@ tu6_emit_variant(struct tu_cs *cs,
                  const struct ir3_shader_variant *xs,
                  struct tu_pvtmem_config *pvtmem_config,
                  uint32_t view_mask,
-                 uint64_t binary_iova)
+                 uint64_t binary_iova,
+                 bool passthrough_vs)
 {
-   if (stage == MESA_SHADER_COMPUTE) {
+   if (stage == MESA_SHADER_COMPUTE || stage == MESA_SHADER_MESH || stage == MESA_SHADER_TASK) {
       tu6_emit_cs_config<CHIP>(cs, xs, pvtmem_config, binary_iova);
+      /* Normally we set SP_CS_NDRANGE_0 with the other registers, as that is more efficient. But for mesh/task the AQE
+       * expects us to set it ourselves.
+       */
+      if (stage == MESA_SHADER_MESH || stage == MESA_SHADER_TASK) {
+         tu_cs_emit_regs(cs,
+                         SP_CS_NDRANGE_0(CHIP, .kerneldim = 3,
+                                                 .localsizex = xs->local_size[0] - 1,
+                                                 .localsizey = xs->local_size[1] - 1,
+                                                 .localsizez = xs->local_size[2] - 1));
+      }
       return;
    }
 
@@ -3137,7 +3167,7 @@ tu6_emit_variant(struct tu_cs *cs,
 
    switch (stage) {
    case MESA_SHADER_VERTEX:
-      tu6_emit_vs<CHIP>(cs, xs, view_mask);
+      tu6_emit_vs<CHIP>(cs, xs, view_mask, passthrough_vs);
       break;
    case MESA_SHADER_TESS_CTRL:
       tu6_emit_hs<CHIP>(cs, xs);
@@ -3156,6 +3186,42 @@ tu6_emit_variant(struct tu_cs *cs,
    }
 
    tu6_emit_xs_constants(cs, stage, xs, binary_iova);
+}
+
+static enum a6xx_format
+get_format_for_comps(unsigned num_components) {
+   switch (num_components) {
+   case 1:
+      return FMT6_32_UINT;
+   case 2:
+      return FMT6_32_32_UINT;
+   case 3:
+      return FMT6_32_32_32_UINT;
+   case 4:
+      return FMT6_32_32_32_32_UINT;
+   default:
+      UNREACHABLE("bad component count");
+   }
+}
+
+static void
+tu7_emit_passthrough_vs(struct tu_cs *cs, struct tu_shader *shader)
+{
+   if (shader->mesh.num_per_vertex_outputs) {
+      tu_cs_emit_pkt4(cs, REG_A6XX_VFD_FETCH_INSTR(0), 2 * shader->mesh.num_per_vertex_outputs);
+      for (unsigned i = 0; i < shader->mesh.num_per_vertex_outputs; i++) {
+         tu_cs_emit(cs, A6XX_VFD_FETCH_INSTR_INSTR(0,
+                           .idx = 0,
+                           .offset = shader->mesh.per_vertex_outputs[i].dword_offset * 4,
+                           .format = get_format_for_comps(shader->mesh.per_vertex_outputs[i].num_components),
+                           .unk30 = 1).value);
+         tu_cs_emit(cs, 1); /* step rate */
+      }
+   }
+
+   tu_cs_emit_regs(cs, A6XX_VFD_VERTEX_BUFFER_STRIDE(0, shader->mesh.num_per_vertex_outputs * 16));
+
+
 }
 
 static VkResult
@@ -3247,7 +3313,10 @@ tu_upload_shader(struct tu_device *dev,
 {
    const struct ir3_shader_variant *v = shader->variant;
    const struct ir3_shader_variant *binning = v ? v->binning : NULL;
-   const struct ir3_shader_variant *safe_const = shader->safe_const_variant;
+   const struct ir3_shader_variant *safe_const =
+      (v->type != MESA_SHADER_MESH && v->type != MESA_SHADER_TASK) ? shader->safe_const_variant : NULL;
+   const struct ir3_shader_variant *passthrough_vs =
+      v->type == MESA_SHADER_MESH ? shader->passthrough_vs : NULL;
    const struct ir3_shader_variant *safe_const_binning =
       safe_const && v->type == MESA_SHADER_VERTEX ? safe_const->binning : NULL;
 
@@ -3263,7 +3332,7 @@ tu_upload_shader(struct tu_device *dev,
    const unsigned xs_size = 128;
    const unsigned vpc_size = 64 + (v->stream_output.num_outputs != 0 ? 256 : 0);
 
-   for (auto& variant : {v, binning, safe_const, safe_const_binning}) {
+   for (auto& variant : {v, binning, safe_const, safe_const_binning, passthrough_vs}) {
       if (variant) {
          size += xs_size + tu_xs_get_additional_cs_size_dwords(variant);
          size += variant->info.size / 4;
@@ -3329,6 +3398,7 @@ tu_upload_shader(struct tu_device *dev,
    uint64_t binning_iova = tu_upload_variant(&shader->cs, binning);
    uint64_t safe_const_iova = tu_upload_variant(&shader->cs, safe_const);
    uint64_t safe_const_binning_iova = tu_upload_variant(&shader->cs, safe_const_binning);
+   uint64_t passthrough_vs_iova = tu_upload_variant(&shader->cs, passthrough_vs);
 
    struct tu_cs sub_cs;
    tu_cs_begin_sub_stream(&shader->cs, xs_size +
@@ -3342,7 +3412,7 @@ tu_upload_shader(struct tu_device *dev,
 
    TU_CALLX(dev, tu6_emit_variant)(
       &sub_cs, shader->variant->type, shader->variant, &pvtmem_config,
-      hw_view_mask, iova);
+      hw_view_mask, iova, false);
    shader->state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
 
    if (safe_const) {
@@ -3350,7 +3420,7 @@ tu_upload_shader(struct tu_device *dev,
                              tu_xs_get_additional_cs_size_dwords(safe_const), &sub_cs);
       TU_CALLX(dev, tu6_emit_variant)(
          &sub_cs, v->type, safe_const, &pvtmem_config, hw_view_mask,
-         safe_const_iova);
+         safe_const_iova, false);
       shader->safe_const_state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
    }
 
@@ -3359,9 +3429,9 @@ tu_upload_shader(struct tu_device *dev,
                              tu_xs_get_additional_cs_size_dwords(binning), &sub_cs);
       TU_CALLX(dev, tu6_emit_variant)(
          &sub_cs, v->type, binning, &pvtmem_config, hw_view_mask,
-         binning_iova);
+         binning_iova, false);
       /* emit an empty VPC */
-      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, binning, NULL, NULL, NULL, NULL);
+      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, binning, NULL, NULL, NULL, NULL, NULL);
       shader->binning_state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
    }
 
@@ -3370,9 +3440,9 @@ tu_upload_shader(struct tu_device *dev,
          tu_xs_get_additional_cs_size_dwords(safe_const_binning), &sub_cs);
       TU_CALLX(dev, tu6_emit_variant)(
          &sub_cs, v->type, safe_const_binning, &pvtmem_config, hw_view_mask,
-         safe_const_binning_iova);
+         safe_const_binning_iova, false);
       /* emit an empty VPC */
-      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, safe_const_binning, NULL, NULL, NULL, NULL);
+      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, safe_const_binning, NULL, NULL, NULL, NULL, NULL);
       shader->safe_const_binning_state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
    }
 
@@ -3383,15 +3453,26 @@ tu_upload_shader(struct tu_device *dev,
     */
    if (v->type == MESA_SHADER_GEOMETRY) {
       tu_cs_begin_sub_stream(&shader->cs, vpc_size, &sub_cs);
-      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, NULL, NULL, NULL, v, NULL);
+      TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, NULL, NULL, NULL, v, NULL, NULL);
       shader->binning_state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
 
       if (safe_const) {
          tu_cs_begin_sub_stream(&shader->cs, vpc_size, &sub_cs);
-         TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, NULL, NULL, NULL, safe_const, NULL);
+         TU_CALLX(dev, tu6_emit_vpc)(&sub_cs, NULL, NULL, NULL, safe_const, NULL, NULL);
          shader->safe_const_binning_state =
             tu_cs_end_draw_state(&shader->cs, &sub_cs);
       }
+   }
+
+   if (passthrough_vs) {
+      struct tu_cs sub_cs;
+      tu_cs_begin_sub_stream(&shader->cs, xs_size +
+                             tu_xs_get_additional_cs_size_dwords(passthrough_vs), &sub_cs);
+      TU_CALLX(dev, tu6_emit_variant)(
+         &sub_cs, MESA_SHADER_VERTEX, passthrough_vs, &pvtmem_config, 0, passthrough_vs_iova,
+         true);
+      tu7_emit_passthrough_vs(&sub_cs, shader);
+      shader->passthrough_vs_state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
    }
 
    return VK_SUCCESS;
@@ -3929,12 +4010,15 @@ tu_link_shaders(struct tu_device *dev,
                 nir_shader **shaders,
                 unsigned shaders_count)
 {
-   nir_shader *link_shaders[MESA_SHADER_STAGES] = {};
+   nir_shader *link_shaders[MESA_SHADER_MESH_STAGES] = {};
    assert(shaders_count <= ARRAY_SIZE(link_shaders));
 
    unsigned link_shaders_count = 0;
 
-   for (unsigned i = 0; i < shaders_count; i++) {
+   if (shaders[MESA_SHADER_MESH])
+      link_shaders[link_shaders_count++] = shaders[MESA_SHADER_MESH];
+
+   for (unsigned i = 0; i < MESA_SHADER_STAGES; i++) {
       if (shaders[i]) {
          link_shaders[link_shaders_count++] = shaders[i];
       }
@@ -3992,7 +4076,7 @@ tu_compile_shaders(struct tu_device *device,
    VkResult result = VK_SUCCESS;
    void *mem_ctx = ralloc_context(NULL);
 
-   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_STAGES;
+   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_MESH_STAGES;
         stage = static_cast<mesa_shader_stage>(stage + 1)) {
       const VkPipelineShaderStageCreateInfo *stage_info = stage_infos[stage];
       if (!stage_info)
@@ -4032,7 +4116,7 @@ tu_compile_shaders(struct tu_device *device,
 
    if (nir_initial_disasm) {
       for (mesa_shader_stage stage = MESA_SHADER_VERTEX;
-           stage < MESA_SHADER_STAGES;
+           stage < MESA_SHADER_MESH_STAGES;
            stage = static_cast<mesa_shader_stage>(stage + 1)) {
       if (!nir[stage])
          continue;
@@ -4042,7 +4126,7 @@ tu_compile_shaders(struct tu_device *device,
       }
    }
 
-   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_STAGES;
+   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_MESH_STAGES;
         stage = static_cast<mesa_shader_stage>(stage + 1)) {
       if (!nir[stage])
          continue;
@@ -4054,11 +4138,11 @@ tu_compile_shaders(struct tu_device *device,
       stage_feedbacks[stage].duration += os_time_get_nano() - stage_start;
    }
 
-   tu_link_shaders(device, nir, MESA_SHADER_STAGES);
+   tu_link_shaders(device, nir, MESA_SHADER_MESH_STAGES);
 
    if (nir_out) {
       for (mesa_shader_stage stage = MESA_SHADER_VERTEX;
-           stage < MESA_SHADER_STAGES; stage = static_cast<mesa_shader_stage>(stage + 1)) {
+           stage < MESA_SHADER_MESH_STAGES; stage = static_cast<mesa_shader_stage>(stage + 1)) {
          if (!nir[stage])
             continue;
 
@@ -4094,7 +4178,7 @@ tu_compile_shaders(struct tu_device *device,
       ir3_key.tessellation = tu6_get_tessmode(tes);
    }
 
-   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_STAGES;
+   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_MESH_STAGES;
         stage = static_cast<mesa_shader_stage>(stage + 1)) {
       if (!nir[stage])
          continue;
@@ -4116,7 +4200,7 @@ tu_compile_shaders(struct tu_device *device,
    if (nir[MESA_SHADER_TESS_CTRL] && !nir[MESA_SHADER_FRAGMENT])
       ir3_key.tcs_store_primid = true;
 
-   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_STAGES;
+   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_MESH_STAGES;
         stage = static_cast<mesa_shader_stage>(stage + 1)) {
       if (!nir[stage] || shaders[stage])
          continue;
@@ -4146,7 +4230,7 @@ tu_compile_shaders(struct tu_device *device,
 fail:
    ralloc_free(mem_ctx);
 
-   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_STAGES;
+   for (mesa_shader_stage stage = MESA_SHADER_VERTEX; stage < MESA_SHADER_MESH_STAGES;
         stage = static_cast<mesa_shader_stage>(stage + 1)) {
       if (shaders[stage]) {
          tu_shader_destroy(device, shaders[stage]);
@@ -4236,7 +4320,7 @@ tu_empty_shader_create(struct tu_device *dev,
 
    struct tu_cs sub_cs;
    tu_cs_begin_sub_stream(&shader->cs, 32, &sub_cs);
-   TU_CALLX(dev, tu6_emit_variant)(&sub_cs, stage, NULL, &pvtmem_config, 0, 0);
+   TU_CALLX(dev, tu6_emit_variant)(&sub_cs, stage, NULL, &pvtmem_config, 0, 0, false);
    shader->state = tu_cs_end_draw_state(&shader->cs, &sub_cs);
 
    *shader_out = shader;

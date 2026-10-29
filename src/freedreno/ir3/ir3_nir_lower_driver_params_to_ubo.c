@@ -81,7 +81,20 @@ lower_driver_param_to_ubo(nir_builder *b, nir_intrinsic_instr *intr, void *in)
    case nir_intrinsic_load_tess_factor_base_ir3:
       result = load_primitive_param_ubo(b, v, components, 6);
       break;
-      /* Mesh/task params are pushed directly by the AQE, don't lower them. */
+   /* Mesh/task params are pushed directly by the AQE, don't lower them, except
+    * for driver params that are shared with CS (subgroup size/shift).
+    */
+   case nir_intrinsic_load_chunk_idx_ir3:
+   case nir_intrinsic_load_workgroups_per_chunk_ir3:
+   case nir_intrinsic_load_task_payload_base_ir3:
+   case nir_intrinsic_load_varying_base_ir3:
+   case nir_intrinsic_load_prim_varying_base_ir3:
+   case nir_intrinsic_load_index_base_ir3:
+   case nir_intrinsic_load_prim_count_base_ir3:
+   case nir_intrinsic_load_mesh_vis_base_ir3:
+   case nir_intrinsic_load_task_id_ir3:
+   case nir_intrinsic_load_mesh_count_base_ir3:
+      return false;
    default: {
       struct driver_param_info param_info;
       if (!ir3_get_driver_param_info(b->shader, &v->key, intr, &param_info))
@@ -99,6 +112,13 @@ lower_driver_param_to_ubo(nir_builder *b, nir_intrinsic_instr *intr, void *in)
           (param_info.offset < IR3_DP_VS(is_indexed_draw))) {
          return false;
       }
+
+      /* Workgroup count is loaded via a constant provided by the AQE on
+       * mesh/task shaders:
+       */
+      if ((v->type == MESA_SHADER_MESH || v->type == MESA_SHADER_TASK) &&
+          intr->intrinsic == nir_intrinsic_load_num_workgroups)
+         return false;
 
       result = load_driver_params_ubo(b, v, components, param_info.offset);
    }

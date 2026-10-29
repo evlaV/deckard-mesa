@@ -1094,7 +1094,7 @@ ir3_nir_post_finalize(struct ir3_shader *shader)
       OPT(s, ir3_nir_lower_shuffle, shader);
    }
 
-   if (mesa_shader_stage_is_compute(s->info.stage)) {
+   if (mesa_shader_stage_uses_workgroup(s->info.stage)) {
       bool progress = false;
       NIR_PASS(progress, s, ir3_nir_lower_subgroup_id_cs, shader);
 
@@ -1432,7 +1432,7 @@ ir3_nir_set_threadsize(struct ir3_shader_variant *v, const nir_shader *s)
    if (v->shader_options.real_wavesize != IR3_SINGLE_OR_DOUBLE)
       return;
 
-   if (mesa_shader_stage_is_compute(v->type)) {
+   if (mesa_shader_stage_uses_workgroup(v->type)) {
       struct ir3_compiler *compiler = v->compiler;
       const shader_info *info = &s->info;
       unsigned threads_per_wg = info->workgroup_size[0] *
@@ -1785,7 +1785,7 @@ ir3_get_driver_param_info(const nir_shader *shader,
       param_info->offset = IR3_DP_CS(local_group_size_x);
       break;
    case nir_intrinsic_load_subgroup_size:
-      if (mesa_shader_stage_is_compute(shader->info.stage)) {
+      if (mesa_shader_stage_uses_workgroup(shader->info.stage)) {
          param_info->offset = IR3_DP_CS(subgroup_size);
       } else if (shader->info.stage == MESA_SHADER_FRAGMENT) {
          param_info->offset = IR3_DP_FS(subgroup_size);
@@ -1889,11 +1889,11 @@ ir3_get_driver_param_info(const nir_shader *shader,
    case nir_intrinsic_load_prim_count_base_ir3:
       param_info->offset = IR3_DP_MESH(primitive_count_base);
       break;
-   case nir_intrinsic_load_prim_cull_base_ir3:
-      param_info->offset = IR3_DP_MESH(primitive_cull_base);
+   case nir_intrinsic_load_mesh_vis_base_ir3:
+      param_info->offset = IR3_DP_MESH(mesh_vis_base);
       break;
    case nir_intrinsic_load_task_id_ir3:
-      param_info->offset = IR3_DP_MESH(primitive_cull_base);
+      param_info->offset = IR3_DP_MESH(task_id);
       break;
    case nir_intrinsic_load_mesh_count_base_ir3:
       param_info->offset = IR3_DP_TASK(mesh_count_base);

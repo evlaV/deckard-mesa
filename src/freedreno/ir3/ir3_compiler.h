@@ -313,12 +313,14 @@ enum ir3_shader_debug {
    IR3_DBG_EXPANDRPT = BITFIELD_BIT(19),
    IR3_DBG_ASM_ROUNDTRIP = BITFIELD_BIT(20),
    IR3_DBG_THREAD64 = BITFIELD_BIT(21),
+   IR3_DBG_SHADER_MESH = BITFIELD_BIT(22),
+   IR3_DBG_SHADER_TASK = BITFIELD_BIT(23),
 
    /* MESA_DEBUG-only options: */
-   IR3_DBG_SCHEDMSGS = BITFIELD_BIT(22),
-   IR3_DBG_RAMSGS = BITFIELD_BIT(23),
-   IR3_DBG_NOALIASTEX = BITFIELD_BIT(24),
-   IR3_DBG_NOALIASRT = BITFIELD_BIT(25),
+   IR3_DBG_SCHEDMSGS = BITFIELD_BIT(24),
+   IR3_DBG_RAMSGS = BITFIELD_BIT(25),
+   IR3_DBG_NOALIASTEX = BITFIELD_BIT(26),
+   IR3_DBG_NOALIASRT = BITFIELD_BIT(27),
 };
 
 extern enum ir3_shader_debug ir3_shader_debug;
@@ -347,6 +349,10 @@ shader_debug_enabled(mesa_shader_stage type, bool internal)
    case MESA_SHADER_COMPUTE:
    case MESA_SHADER_KERNEL:
       return !!(ir3_shader_debug & IR3_DBG_SHADER_CS);
+   case MESA_SHADER_MESH:
+      return !!(ir3_shader_debug & IR3_DBG_SHADER_MESH);
+   case MESA_SHADER_TASK:
+      return !!(ir3_shader_debug & IR3_DBG_SHADER_TASK);
    default:
       assert(0);
       return false;
@@ -374,7 +380,8 @@ ir3_shader_debug_hash_key()
       ~(IR3_DBG_SHADER_VS | IR3_DBG_SHADER_TCS | IR3_DBG_SHADER_TES |
         IR3_DBG_SHADER_GS | IR3_DBG_SHADER_FS | IR3_DBG_SHADER_CS |
         IR3_DBG_DISASM | IR3_DBG_OPTMSGS | IR3_DBG_NOCACHE |
-        IR3_DBG_SHADER_INTERNAL | IR3_DBG_SCHEDMSGS | IR3_DBG_RAMSGS));
+        IR3_DBG_SHADER_INTERNAL | IR3_DBG_SCHEDMSGS | IR3_DBG_RAMSGS |
+        IR3_DBG_SHADER_MESH | IR3_DBG_SHADER_TASK));
 }
 
 /* Returns a pointer to internal static tmp buffer. */

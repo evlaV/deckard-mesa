@@ -366,6 +366,7 @@ get_device_extensions(const struct tu_physical_device *device,
       .EXT_load_store_op_none = true,
       .EXT_map_memory_placed = true,
       .EXT_memory_budget = true,
+      .EXT_mesh_shader = device->has_aqe,
       .EXT_multi_draw = true,
       .EXT_multisampled_render_to_single_sampled = true,
       .EXT_mutable_descriptor_type = true,
@@ -959,6 +960,13 @@ tu_get_features(struct tu_physical_device *pdevice,
 
    /* VALVE_buffer_device_address_allocation_alignment */
    features->bufferDeviceAddressAllocationAlignment = true;
+
+   /* VK_EXT_mesh_shader */
+   features->meshShader = true;
+   features->taskShader = true;
+   features->multiviewMeshShader = false; /* TODO */
+   features->primitiveFragmentShadingRateMeshShader = true;
+   features->meshShaderQueries = false; /* TODO */
 }
 
 static void
@@ -1124,7 +1132,9 @@ tu_get_physical_device_properties_1_3(struct tu_physical_device *pdevice,
    p->requiredSubgroupSizeStages =
       p->minSubgroupSize == p->maxSubgroupSize
          ? VK_SHADER_STAGE_ALL
-         : (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+         : (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+            (pdevice->has_aqe ? (VK_SHADER_STAGE_MESH_BIT_EXT |
+                                 VK_SHADER_STAGE_TASK_BIT_EXT) : 0));
 
    p->maxInlineUniformBlockSize = MAX_INLINE_UBO_RANGE;
    p->maxPerStageDescriptorInlineUniformBlocks = MAX_INLINE_UBOS;
@@ -1363,7 +1373,7 @@ tu_get_properties(struct tu_physical_device *pdevice,
    tu_get_physical_device_properties_1_3(pdevice, props);
 
    /* VK_KHR_compute_shader_derivatives */
-   props->meshAndTaskShaderDerivatives = false;
+   props->meshAndTaskShaderDerivatives = pdevice->has_aqe;
 
    /* VK_KHR_fragment_shading_rate */
    if (pdevice->info->props.has_attachment_shading_rate) {
@@ -1680,6 +1690,44 @@ tu_get_properties(struct tu_physical_device *pdevice,
     * larger alignments anyway.
     */
    props->maxBufferDeviceAddressAllocationAlignment = 1 << 20;
+
+   /* VK_EXT_mesh_shader */
+   props->maxTaskWorkGroupTotalCount = 1u << 22;
+   props->maxTaskWorkGroupCount[0] =
+      props->maxTaskWorkGroupCount[1] =
+      props->maxTaskWorkGroupCount[2] = 65535;
+   props->maxTaskWorkGroupInvocations = props->maxComputeWorkGroupInvocations;
+   props->maxTaskWorkGroupSize[0] = props->maxComputeWorkGroupSize[0];
+   props->maxTaskWorkGroupSize[1] = props->maxComputeWorkGroupSize[1];
+   props->maxTaskWorkGroupSize[2] = props->maxComputeWorkGroupSize[2];
+   /* This limit is arbitrary, but too-large task payloads will not perform well since it will limit occupancy. */
+   props->maxTaskPayloadSize = 16384;
+   props->maxTaskSharedMemorySize = props->maxComputeSharedMemorySize;
+   props->maxTaskPayloadAndSharedMemorySize = props->maxTaskSharedMemorySize + props->maxTaskPayloadSize;
+   /* Limited so that we can use 24-bit multiplies in the task shader. */
+   props->maxMeshWorkGroupTotalCount = 1u << 22;
+   /* This is limited since the mesh shader workgroup count from the task shader is 16 bits per component. */
+   props->maxMeshWorkGroupCount[0] =
+      props->maxMeshWorkGroupCount[1] =
+      props->maxMeshWorkGroupCount[2] = 65535;
+   props->maxMeshWorkGroupInvocations = props->maxComputeWorkGroupInvocations;
+   props->maxMeshWorkGroupSize[0] = props->maxComputeWorkGroupSize[0];
+   props->maxMeshWorkGroupSize[1] = props->maxComputeWorkGroupSize[1];
+   props->maxMeshWorkGroupSize[2] = props->maxComputeWorkGroupSize[2];
+   props->maxMeshSharedMemorySize = props->maxComputeSharedMemorySize;
+   props->maxMeshOutputComponents = 128;
+   props->maxMeshOutputVertices = 256;
+   props->maxMeshOutputPrimitives = 256; /* limited by max size of meshlet visibility stream */
+   props->maxMeshOutputLayers = UINT32_MAX;
+   props->maxMeshMultiviewViewCount = MAX_VIEWS;
+   props->meshOutputPerVertexGranularity = 1;
+   props->meshOutputPerPrimitiveGranularity = 1;
+   props->maxPreferredTaskWorkGroupInvocations = 1024;
+   props->maxPreferredMeshWorkGroupInvocations = 256;
+   props->prefersLocalInvocationVertexOutput = false;
+   props->prefersLocalInvocationPrimitiveOutput = false;
+   props->prefersCompactVertexOutput = false;
+   props->prefersCompactPrimitiveOutput = false;
 }
 
 static const struct vk_pipeline_cache_object_ops *const cache_import_ops[] = {
@@ -3120,6 +3168,7 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
 
    global = static_cast<struct tu6_global *>(device->global_bo->map);
    device->global_bo_map = global;
+   global->always_one = 1;
    tu_init_clear_blit_shaders(device);
 
    if (device->vk.enabled_features.accelerationStructure &&
@@ -3436,6 +3485,9 @@ tu_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
 
    if (device->null_accel_struct_bo)
       tu_bo_finish(device, device->null_accel_struct_bo);
+
+   if (device->mesh_bo)
+      tu_bo_finish(device, device->mesh_bo);
 
    list_for_each_entry_safe(struct tu_copy_timestamp_data, data,
                             &device->copy_timestamp_cs_pool, node)

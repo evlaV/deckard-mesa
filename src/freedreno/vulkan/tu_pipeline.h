@@ -70,7 +70,7 @@ struct tu_nir_shaders
    /* This is optional, and is only filled out when a library pipeline is
     * compiled with RETAIN_LINK_TIME_OPTIMIZATION_INFO.
     */
-   nir_shader *nir[MESA_SHADER_STAGES];
+   nir_shader *nir[MESA_SHADER_MESH_STAGES];
 };
 
 extern const struct vk_pipeline_cache_object_ops tu_nir_shaders_ops;
@@ -96,6 +96,33 @@ struct tu_program_descriptor_linkage
    struct tu_const_state tu_const_state;
 };
 
+struct tu_mesh_buffer_layout
+{
+   uint32_t varying_offset;
+   uint32_t varying_size;
+
+   uint32_t per_prim_varying_offset;
+   uint32_t per_prim_varying_size;
+
+   uint32_t index_buffer_offset;
+   uint32_t index_buffer_size;
+
+   uint32_t mesh_vis_offset;
+   uint32_t mesh_vis_size;
+
+   uint32_t prim_count_offset;
+   uint32_t prim_count_size;
+
+   uint32_t task_payload_offset;
+   uint32_t task_payload_size;
+
+   uint32_t mesh_count_offset;
+   uint32_t mesh_count_size;
+
+   uint32_t mesh_chunk_count;
+   uint32_t task_chunk_count;
+};
+
 struct tu_program_state
 {
       struct tu_draw_state config_state;
@@ -106,11 +133,14 @@ struct tu_program_state
       struct tu_draw_state vpc_state;
       struct tu_draw_state fs_state;
 
+      uint64_t mesh_shader_descriptor;
+      struct tu_mesh_buffer_layout mesh_layout;
+
       struct tu_push_constant_range shared_consts;
 
-      struct tu_program_descriptor_linkage link[MESA_SHADER_STAGES];
+      struct tu_program_descriptor_linkage link[MESA_SHADER_MESH_STAGES];
 
-      char stage_blake3[MESA_SHADER_STAGES][BLAKE3_HEX_LEN];
+      char stage_blake3[MESA_SHADER_MESH_STAGES][BLAKE3_HEX_LEN];
 
       unsigned dynamic_descriptor_offsets[MAX_SETS];
 
@@ -321,7 +351,8 @@ tu6_emit_vpc(struct tu_cs *cs,
              const struct ir3_shader_variant *hs,
              const struct ir3_shader_variant *ds,
              const struct ir3_shader_variant *gs,
-             const struct ir3_shader_variant *fs);
+             const struct ir3_shader_variant *fs,
+             const struct tu_per_prim_layout *per_prim);
 
 void
 tu_fill_render_pass_state(struct vk_render_pass_state *rp,

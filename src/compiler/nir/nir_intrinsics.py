@@ -1669,10 +1669,10 @@ system_value("varying_base_ir3", 1, bit_sizes=[64])
 system_value("prim_varying_base_ir3", 1, bit_sizes=[64])
 system_value("index_base_ir3", 1, bit_sizes=[64])
 system_value("prim_count_base_ir3", 1, bit_sizes=[64])
-system_value("prim_cull_base_ir3", 1, bit_sizes=[64])
+system_value("mesh_vis_base_ir3", 1, bit_sizes=[64])
 system_value("task_id_ir3", 1)
-intrinsic("load_per_primitive_location_ir3", src_comp=[1], dest_comp=1, flags=[CAN_ELIMINATE, CAN_REORDER], indices=[DRIVER_LOCATION],
-          bit_sizes=[32])
+intrinsic("load_per_primitive_location_ir3", src_comp=[1], dest_comp=1, flags=[CAN_ELIMINATE, CAN_REORDER],
+          indices=[DRIVER_LOCATION, RANGE], bit_sizes=[32])
 system_value("per_primitive_stride_ir3", 1)
 
 

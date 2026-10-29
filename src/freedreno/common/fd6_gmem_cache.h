@@ -34,6 +34,10 @@ struct fd6_gmem_config {
    uint32_t color_cache_fraction;
    uint32_t depth_cache_size;
    uint32_t color_cache_size;
+
+   /* sysmem only, the allocation used for mesh shaders */
+   uint32_t mesh_offset;
+   uint32_t mesh_size;
 };
 
 static inline unsigned
@@ -56,6 +60,10 @@ __calc_gmem_cache_offsets(const struct fd_dev_info *info, unsigned offset,
 
    config->depth_ccu_offset = offset - (num_ccu * config->depth_cache_size);
    offset = config->depth_ccu_offset;
+
+   /* Use remaining space for mesh shaders. */
+   config->mesh_offset = 0;
+   config->mesh_size = offset;
 
    return offset;
 }
@@ -103,6 +111,10 @@ fd6_calc_gmem_cache_offsets(const struct fd_dev_info *info, unsigned gmemsize_by
    } else if (info->props.has_gmem_vpc_attr_buf) {
       sysmem->vpc_attr_buf_size = info->props.sysmem_vpc_attr_buf_size;
       sysmem->vpc_attr_buf_offset = sysmem->color_ccu_offset + color_cache_size;
+
+      sysmem->mesh_offset = sysmem->vpc_attr_buf_offset +
+         sysmem->vpc_attr_buf_size;
+      sysmem->mesh_size = gmemsize_bytes - sysmem->mesh_offset;
 
       gmem->vpc_attr_buf_size = info->props.gmem_vpc_attr_buf_size;
       gmem->vpc_attr_buf_offset = gmemsize_bytes -

@@ -126,6 +126,21 @@
 
 #define A6XX_TEX_SAMP_DWORDS 4
 
+#define A8XX_MESH_SHADER_DWORDS 26
+
+/* The AQE has two contexts for mesh shaders. */
+#define A8XX_MESH_SHADER_CTXTS 2
+
+/* We use a fixed size buffer for mesh shader data in sysmem:
+ * - Index buffer (produced by mesh shader)
+ * - Primitive count buffer (produced by mesh shader, the # of primitives for each mesh)
+ * - Mesh count buffer (produced by task shader)
+ * - Task payload data (produced by task shader)
+ *
+ * However we can dynamically carve it up.
+ */
+#define TU_MESH_SYSMEM_BUFFER_SIZE (512 * 1024)
+
 /* We sample the fragment density map on the CPU, so technically the
  * minimum/maximum texel size is arbitrary. However sizes smaller than the
  * minimum tile width alignment of 32 are likely pointless, so we use that as

@@ -225,7 +225,7 @@ struct tu6_global
    uint32_t shaders[TU_BLIT_SHADER_SIZE];
 
    uint32_t seqno_dummy;          /* dummy seqno for CP_EVENT_WRITE */
-   uint32_t _pad0;
+   uint32_t always_one;
    volatile uint32_t vsc_draw_overflow;
    uint32_t _pad1;
    volatile uint32_t vsc_prim_overflow;
@@ -380,6 +380,9 @@ struct tu_device
 
    /* Lazily allocated, protected by the device mutex. */
    struct tu_bo *tess_bo;
+
+   /* Similar to tess_bo but for mesh shaders. */
+   struct tu_bo *mesh_bo;
 
    struct ir3_shader_variant *global_shader_variants[GLOBAL_SH_COUNT];
    struct ir3_shader *global_shaders[GLOBAL_SH_COUNT];

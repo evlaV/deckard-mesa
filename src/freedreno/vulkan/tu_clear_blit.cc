@@ -1232,7 +1232,7 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
       tu_cs_emit_regs(cs, VPC_PC_CNTL(CHIP));
    }
 
-   tu6_emit_vpc<CHIP>(cs, vs, NULL, NULL, NULL, fs);
+   tu6_emit_vpc<CHIP>(cs, vs, NULL, NULL, NULL, fs, NULL);
 
    if (CHIP >= A7XX) {
       tu_cs_emit_regs(cs, SP_RENDER_CNTL(CHIP, .fs_disable = false));
@@ -1242,7 +1242,7 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
    tu_cs_emit_regs(cs, VPC_VARYING_INTERP_MODE_MODE(CHIP, 0, 0));
    tu_cs_emit_regs(cs, VPC_VARYING_REPLACE_MODE_MODE(CHIP, 0, 2 << 2 | 1 << 0));
 
-   tu6_emit_vs<CHIP>(cs, vs, 0);
+   tu6_emit_vs<CHIP>(cs, vs, 0, false);
    tu6_emit_hs<CHIP>(cs, NULL);
    tu6_emit_ds<CHIP>(cs, NULL);
    tu6_emit_gs<CHIP>(cs, NULL);
@@ -1267,7 +1267,6 @@ r3d_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs, enum r3d_type type,
    if (CHIP >= A7XX || cs->device->physical_device->info->props.is_a702) {
       tu_cs_emit_regs(cs, VPC_PS_RAST_CNTL(CHIP, POLYMODE6_TRIANGLES));
    }
-
 
    if (CHIP >= A8XX) {
       tu_cs_emit_regs(cs, GRAS_SU_STEREO_CNTL(CHIP));

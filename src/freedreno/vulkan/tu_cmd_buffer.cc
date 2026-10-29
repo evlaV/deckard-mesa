@@ -2464,7 +2464,6 @@ void
 tu_init_hw_rp(struct tu_cs *cs)
 {
    if (CHIP >= A7XX) {
-      tu_cs_emit_regs(cs, VPC_MESH_CNTL(CHIP));
       tu_cs_emit_regs(cs, RB_A2D_DEST_BUFFER_ARRAY_PITCH(CHIP));
    }
 }
@@ -4811,9 +4810,11 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
    uint32_t sp_bindless_base_reg, hlsq_bindless_base_reg;
    struct tu_cs *cs, state_cs;
 
+   bool emit_gfx_as_cs = false;
    if (bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
       sp_bindless_base_reg = __SP_GFX_BINDLESS_BASE_DESCRIPTOR<CHIP>(0, {}).reg;
       hlsq_bindless_base_reg = REG_A6XX_HLSQ_BINDLESS_BASE(0);
+      emit_gfx_as_cs = cmd->state.shaders[MESA_SHADER_MESH];
 
       unsigned bindless_pkt_size = descriptors_state->max_sets_bound ?
          1 + 2 * descriptors_state->max_sets_bound :
@@ -4827,8 +4828,8 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
       } else {
          cmd->state.desc_sets =
             tu_cs_draw_state(&cmd->sub_cs, &state_cs,
-                             2 + bindless_pkt_size +
-                             (descriptors_state->max_dynamic_offset_size ? 3 : 0));
+                             2 + (emit_gfx_as_cs ? 2 : 1) *
+                              (bindless_pkt_size + (descriptors_state->max_dynamic_offset_size ? 3 : 0)));
       }
       cs = &state_cs;
    } else {
@@ -4844,6 +4845,11 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
       tu_cs_emit_pkt4(cs, sp_bindless_base_reg, 2 * descriptors_state->max_sets_bound);
       tu_cs_emit_array(cs, reinterpret_cast<const uint32_t*>(descriptors_state->set_iova),
                        2 * descriptors_state->max_sets_bound);
+      if (emit_gfx_as_cs) {
+         tu_cs_emit_pkt4(cs, __SP_CS_BINDLESS_BASE_DESCRIPTOR<CHIP>(0, {}).reg, 2 * descriptors_state->max_sets_bound);
+         tu_cs_emit_array(cs, reinterpret_cast<const uint32_t*>(descriptors_state->set_iova),
+                          2 * descriptors_state->max_sets_bound);
+      }
       if (CHIP == A6XX) {
          tu_cs_emit_pkt4(cs, hlsq_bindless_base_reg, 2 * descriptors_state->max_sets_bound);
          tu_cs_emit_array(cs, reinterpret_cast<const uint32_t*>(descriptors_state->set_iova),
@@ -4858,6 +4864,10 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
 
       tu_cs_emit_pkt4(cs, sp_bindless_base_reg + reserved_set_idx * 2, 2);
       tu_cs_emit_qw(cs, descriptors_state->set_iova[reserved_set_idx]);
+      if (emit_gfx_as_cs) {
+         tu_cs_emit_pkt4(cs, __SP_CS_BINDLESS_BASE_DESCRIPTOR<CHIP>(reserved_set_idx, {}).reg, 2);
+         tu_cs_emit_qw(cs, descriptors_state->set_iova[reserved_set_idx]);
+      }
       if (CHIP == A6XX) {
          tu_cs_emit_pkt4(cs, hlsq_bindless_base_reg + reserved_set_idx * 2, 2);
          tu_cs_emit_qw(cs, descriptors_state->set_iova[reserved_set_idx]);
@@ -4865,7 +4875,7 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
    }
 
    tu_cs_emit_regs(cs, SP_UPDATE_CNTL(CHIP,
-      .cs_bindless = bind_point == VK_PIPELINE_BIND_POINT_COMPUTE ? CHIP == A6XX ? 0x1f : 0xff : 0,
+      .cs_bindless = (bind_point == VK_PIPELINE_BIND_POINT_COMPUTE || emit_gfx_as_cs) ? CHIP == A6XX ? 0x1f : 0xff : 0,
       .gfx_bindless = bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS ? CHIP == A6XX ? 0x1f : 0xff : 0,
    ));
 
@@ -4879,6 +4889,11 @@ tu6_emit_descriptor_sets(struct tu_cmd_buffer *cmd,
          tu_cs_emit_draw_state(&cmd->draw_cs, TU_DRAW_STATE_DESC_SETS, cmd->state.desc_sets);
       }
    }
+
+   /* Now that we've emitted CS bindless state, we need to re-emit the next time there is an actual compute shader.
+    */
+   if (emit_gfx_as_cs)
+      cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_DESC_SETS;
 }
 
 /* We lazily emit the draw state for desciptor sets at draw time, so that we can
@@ -5598,6 +5613,16 @@ tu_bind_fs(struct tu_cmd_buffer *cmd, struct tu_shader *fs)
    }
 }
 
+static void
+tu_bind_mesh(struct tu_cmd_buffer *cmd, struct tu_shader *mesh)
+{
+   if (cmd->state.shaders[MESA_SHADER_MESH] != mesh) {
+      if (!!cmd->state.shaders[MESA_SHADER_MESH] != !!mesh)
+         cmd->state.dirty |= TU_CMD_DIRTY_DESC_SETS;
+      cmd->state.shaders[MESA_SHADER_MESH] = mesh;
+   }
+}
+
 /* We cannot do this only at pipeline bind time since pipeline
  * could have been bound at any time before current renderpass,
  * e.g. in the previous renderpass.
@@ -5669,6 +5694,8 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    tu_bind_tes(cmd, pipeline->shaders[MESA_SHADER_TESS_EVAL]);
    tu_bind_gs(cmd, pipeline->shaders[MESA_SHADER_GEOMETRY]);
    tu_bind_fs(cmd, pipeline->shaders[MESA_SHADER_FRAGMENT]);
+   tu_bind_mesh(cmd, pipeline->shaders[MESA_SHADER_MESH]);
+   cmd->state.shaders[MESA_SHADER_TASK] = pipeline->shaders[MESA_SHADER_TASK];
 
    /* We precompile static state and count it as dynamic, so we have to
     * manually clear bitset that tells which dynamic state is set, in order to
@@ -8020,11 +8047,14 @@ tu6_const_size(struct tu_cmd_buffer *cmd,
                               load_shader_consts_via_preamble,
                               MESA_SHADER_COMPUTE);
    } else {
-      for (uint32_t type = MESA_SHADER_VERTEX; type <= MESA_SHADER_FRAGMENT; type++)
+      for (uint32_t type = MESA_SHADER_VERTEX; type <= MESA_SHADER_MESH; type++) {
+         if (!cmd->state.shaders[type])
+            continue;
          dwords += tu6_user_consts_size(&cmd->state.shaders[type]->const_state,
                                         ldgk,
                                         load_shader_consts_via_preamble,
                                         static_cast<mesa_shader_stage>(type));
+      }
    }
 
    return dwords;
@@ -8163,7 +8193,7 @@ tu_emit_consts(struct tu_cmd_buffer *cmd, bool compute)
    } else {
       struct tu_descriptor_state *descriptors =
          tu_get_descriptors_state(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
-      for (uint32_t type = MESA_SHADER_VERTEX; type <= MESA_SHADER_FRAGMENT; type++) {
+      for (uint32_t type = MESA_SHADER_VERTEX; type <= MESA_SHADER_MESH; type++) {
          const struct tu_program_descriptor_linkage *link =
             &cmd->state.program.link[type];
          tu6_emit_per_stage_push_consts(&cs, &link->tu_const_state,
@@ -8701,7 +8731,9 @@ tu6_draw_common(struct tu_cmd_buffer *cmd,
       cmd->state.program.stage_blake3[MESA_SHADER_TESS_CTRL],
       cmd->state.program.stage_blake3[MESA_SHADER_TESS_EVAL],
       cmd->state.program.stage_blake3[MESA_SHADER_GEOMETRY],
-      cmd->state.program.stage_blake3[MESA_SHADER_FRAGMENT]);
+      cmd->state.program.stage_blake3[MESA_SHADER_FRAGMENT],
+      cmd->state.program.stage_blake3[MESA_SHADER_TASK],
+      cmd->state.program.stage_blake3[MESA_SHADER_MESH]);
 
    /* Emit state first, because it's needed for bandwidth calculations */
    uint32_t dynamic_draw_state_dirty = 0;
@@ -9841,6 +9873,141 @@ tu_CmdDrawIndirectByteCountEXT(VkCommandBuffer commandBuffer,
    trace_end_draw(&cmd->rp_trace, cs);
 }
 TU_GENX(tu_CmdDrawIndirectByteCountEXT);
+
+static uint64_t
+tu_get_mesh_iova(struct tu_device *dev)
+{
+   if (!dev->mesh_bo) {
+      mtx_lock(&dev->mutex);
+      if (!dev->mesh_bo) {
+         tu_bo_init_new(dev, NULL, &dev->mesh_bo, TU_MESH_SYSMEM_BUFFER_SIZE, TU_BO_ALLOC_INTERNAL_RESOURCE,
+                        "mesh");
+      }
+      mtx_unlock(&dev->mutex);
+   }
+
+   return dev->mesh_bo->iova;
+}
+
+static void
+tu_emit_mesh_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+{
+   uint64_t sysmem_base = tu_get_mesh_iova(cmd->device);
+   uint64_t gmem_base = cmd->device->physical_device->gmem_base;
+
+   struct tu_mesh_buffer_layout *layout = &cmd->state.program.mesh_layout;
+
+   tu_cs_emit_qw(cs, cmd->state.program.mesh_shader_descriptor);
+   tu_cs_emit(cs, 0); /* PC_MESH_STEREO_RENDERING_CNTL */
+   tu_cs_emit(cs, 0); /* unknown */
+   tu_cs_emit(cs, layout->task_chunk_count);
+   tu_cs_emit(cs, layout->mesh_chunk_count);
+   tu_cs_emit_qw(cs, sysmem_base + layout->prim_count_offset);
+   tu_cs_emit(cs, layout->prim_count_size);
+   tu_cs_emit_qw(cs, sysmem_base + layout->index_buffer_offset);
+   tu_cs_emit(cs, layout->index_buffer_size);
+   tu_cs_emit_qw(cs, gmem_base + layout->varying_offset);
+   tu_cs_emit(cs, layout->varying_size);
+   tu_cs_emit_qw(cs, gmem_base + layout->per_prim_varying_offset);
+   tu_cs_emit(cs, layout->per_prim_varying_size);
+   tu_cs_emit_qw(cs, sysmem_base + layout->mesh_vis_offset);
+   tu_cs_emit(cs, layout->mesh_vis_size);
+   tu_cs_emit_qw(cs, sysmem_base + layout->task_payload_offset);
+   tu_cs_emit(cs, layout->task_payload_size);
+   tu_cs_emit_qw(cs, sysmem_base + layout->mesh_count_offset);
+   tu_cs_emit(cs, layout->mesh_count_size);
+}
+
+template <chip CHIP>
+VKAPI_ATTR void VKAPI_CALL
+tu_CmdDrawMeshTasksEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    groupCountX,
+    uint32_t                                    groupCountY,
+    uint32_t                                    groupCountZ)
+{
+   VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   struct tu_cs *cs = &cmd->draw_cs;
+
+   tu6_draw_common<CHIP>(cmd, cs, false, 0);
+
+   tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
+   tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+   tu_cs_emit(cs, groupCountX);
+   tu_cs_emit(cs, groupCountY);
+   tu_cs_emit(cs, groupCountZ);
+   tu_emit_mesh_common(cmd, cs);
+}
+TU_GENX(tu_CmdDrawMeshTasksEXT);
+
+template <chip CHIP>
+VKAPI_ATTR void VKAPI_CALL
+tu_CmdDrawMeshTasksIndirectEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    buffer,
+    VkDeviceSize                                offset,
+    uint32_t                                    drawCount,
+    uint32_t                                    stride)
+{
+   VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   VK_FROM_HANDLE(tu_buffer, buf, buffer);
+   struct tu_cs *cs = &cmd->draw_cs;
+
+   tu6_draw_common<CHIP>(cmd, cs, false, 0);
+
+   uint64_t iova = buf->vk.device_address + offset;
+
+   for (uint32_t i = 0; i < drawCount; i++, iova += stride) {
+      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
+      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+      tu_cs_emit_qw(cs, iova);
+      tu_emit_mesh_common(cmd, cs);
+   }
+}
+TU_GENX(tu_CmdDrawMeshTasksIndirectEXT);
+
+template <chip CHIP>
+VKAPI_ATTR void VKAPI_CALL
+tu_CmdDrawMeshTasksIndirectCountEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    buffer,
+    VkDeviceSize                                offset,
+    VkBuffer                                    countBuffer,
+    VkDeviceSize                                countBufferOffset,
+    uint32_t                                    maxDrawCount,
+    uint32_t                                    stride)
+{
+   VK_FROM_HANDLE(tu_cmd_buffer, cmd, commandBuffer);
+   VK_FROM_HANDLE(tu_buffer, buf, buffer);
+   VK_FROM_HANDLE(tu_buffer, count_buf, countBuffer);
+   struct tu_cs *cs = &cmd->draw_cs;
+
+   tu6_draw_common<CHIP>(cmd, cs, false, 0);
+
+   uint64_t iova = buf->vk.device_address + offset;
+   uint64_t count_iova = count_buf->vk.device_address + countBufferOffset;
+
+   for (uint32_t i = 0; i < maxDrawCount; i++, iova += stride) {
+      tu_cs_reserve_space(cs, 7 + 1 + 32);
+
+      tu_cs_emit_pkt7(cs, CP_COND_EXEC, 6);
+      tu_cs_emit_qw(cs, global_iova(cmd, always_one));
+      tu_cs_emit_qw(cs, count_iova);
+      tu_cs_emit(cs, i);
+      tu_cs_emit(cs, 1); /* dword count */
+
+      /* if (i - *count_iova < (1u << 31)) { ... } */
+      tu_cs_emit_pkt7(cs, CP_NOP, 32);
+      
+      /* } else { ... */
+      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
+      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+      tu_cs_emit_qw(cs, iova);
+      tu_emit_mesh_common(cmd, cs);
+   }
+}
+
+TU_GENX(tu_CmdDrawMeshTasksIndirectCountEXT);
 
 /* Devices without HW multiview emulate it by replaying every draw once per
  * view, with the view index handed to the VS through a driver param which the

@@ -417,7 +417,7 @@ tu6_emit_dynamic_offset(struct tu_cs *cs,
 {
    const struct tu_physical_device *phys_dev = cs->device->physical_device;
 
-   if (!xs)
+   if (!xs || !shader)
       return;
 
    if (cs->device->physical_device->info->props.load_shader_consts_via_preamble) {
@@ -673,6 +673,85 @@ tu6_emit_link_map(struct tu_cs *cs,
                   const_state, consumer->constlen, sb, 0, size, producer->output_loc);
 }
 
+/* Information on location of built-in per-primitive varyings. This is decided when building the primitive map, and then
+ * used when emitting VPC state.
+ */
+struct tu_per_prim_layout {
+   unsigned layer_loc;
+   unsigned view_loc;
+   unsigned shading_rate_loc;
+   unsigned buffer_stride;
+};
+
+template <chip CHIP>
+static void
+tu6_emit_prim_varying_map(struct tu_cs *cs,
+                          const struct tu_shader *producer,
+                          const struct ir3_shader_variant *consumer,
+                          struct tu_per_prim_layout *per_prim_out)
+{
+   struct tu_prim_varying_map map = {};
+   
+   per_prim_out->layer_loc = 0xff;
+   per_prim_out->view_loc = 0xff;
+   per_prim_out->shading_rate_loc = 0xff;
+   
+   unsigned start_loc = consumer ? consumer->per_prim_start : 0;
+   unsigned num_locs = consumer ? consumer->per_prim_count : 0;
+   unsigned sink_loc = 0xff;
+   unsigned index = 0;
+   u_foreach_bit64 (slot, producer->mesh.per_prim_varyings_written) {
+      unsigned loc = consumer ? ir3_find_input_loc(consumer, (gl_varying_slot)slot) : 0xff;
+      if (loc == 0xff) {
+         if (slot == VARYING_SLOT_LAYER || slot == VARYING_SLOT_VIEWPORT ||
+             slot == VARYING_SLOT_PRIMITIVE_SHADING_RATE) {
+            loc = start_loc + num_locs;
+            num_locs++;
+         } else {
+            /* Reserve an extra vec4 as a sink for the unused output. */
+            if (sink_loc == 0xff) {
+               sink_loc = start_loc + num_locs;
+               num_locs += 4;
+            }
+            loc = sink_loc;
+         }
+      }
+
+      if (slot == VARYING_SLOT_LAYER)
+         per_prim_out->layer_loc = loc;
+      else if (slot == VARYING_SLOT_VIEWPORT)
+         per_prim_out->view_loc = loc;
+      else if (slot == VARYING_SLOT_PRIMITIVE_SHADING_RATE)
+         per_prim_out->shading_rate_loc = loc;
+
+      map.location[index] = (loc - start_loc) * sizeof(uint32_t);
+      index++;
+   }
+
+   map.buffer_stride = per_prim_out->buffer_stride = num_locs * sizeof(uint32_t);
+
+   /* A7XX TODO: Emit data via sub_cs instead of NOP */
+   unsigned size = 4 + index;
+   uint64_t iova = tu_cs_emit_data_nop(cs, reinterpret_cast<const uint32_t *>(&map), size, 4);
+
+   tu_cs_emit_pkt7(cs, CP_LOAD_STATE6_FRAG, 5);
+   tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(0) |
+            CP_LOAD_STATE6_0_STATE_TYPE(ST6_UBO) |
+            CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
+            CP_LOAD_STATE6_0_STATE_BLOCK(SB6_CS_SHADER) |
+            CP_LOAD_STATE6_0_NUM_UNIT(1));
+   tu_cs_emit(cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
+   tu_cs_emit(cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
+   int size_vec4s = DIV_ROUND_UP(size, 4);
+   tu_cs_emit_qw(cs, iova | (static_cast<uint64_t>(A6XX_UBO_1_SIZE(size_vec4s)) << 32));
+
+   if constexpr (CHIP >= A7XX) {
+      tu_cs_emit_regs(cs, VPC_PA_CNTL(CHIP, .numtotalpavar = num_locs,
+                                            .startvaryid4pa = start_loc,
+                                            .vpcpafetchen = num_locs != 0));
+   }
+}
+
 static int
 tu6_vpc_varying_mode(const struct ir3_shader_variant *fs,
                      const struct ir3_shader_variant *last_shader,
@@ -782,7 +861,8 @@ tu6_emit_vpc(struct tu_cs *cs,
              const struct ir3_shader_variant *hs,
              const struct ir3_shader_variant *ds,
              const struct ir3_shader_variant *gs,
-             const struct ir3_shader_variant *fs)
+             const struct ir3_shader_variant *fs,
+             const struct tu_per_prim_layout *per_prim)
 {
    const struct ir3_shader_variant *last_shader;
    if (gs) {
@@ -823,20 +903,36 @@ tu6_emit_vpc(struct tu_cs *cs,
    uint32_t pointsize_loc = 0xff, position_loc = 0xff, layer_loc = 0xff, view_loc = 0xff;
    uint32_t shading_rate_loc = 0xff;
 
-   if (layer_regid != regid(63, 0)) {
-      layer_loc = linkage.max_loc;
-      ir3_link_add(&linkage, VARYING_SLOT_LAYER, layer_regid, 0x1, linkage.max_loc);
-   }
+   if (per_prim) {
+      /* With mesh shaders, these values come from the per-primitive varying space, which is allocated elsewhere.
+       */
+      layer_loc = per_prim->layer_loc;
+      if (layer_loc != 0xff)
+         linkage.max_loc = MAX2(linkage.max_loc, layer_loc + 1);
 
-   if (view_regid != regid(63, 0)) {
-      view_loc = linkage.max_loc;
-      ir3_link_add(&linkage, VARYING_SLOT_VIEWPORT, view_regid, 0x1, linkage.max_loc);
-   }
+      view_loc = per_prim->view_loc;
+      if (view_loc != 0xff)
+         linkage.max_loc = MAX2(linkage.max_loc, view_loc + 1);
 
-   if (shading_rate_regid != regid(63, 0)) {
-      shading_rate_loc = linkage.max_loc;
-      ir3_link_add(&linkage, VARYING_SLOT_PRIMITIVE_SHADING_RATE,
-                   shading_rate_regid, 0x1, linkage.max_loc);
+      shading_rate_loc = per_prim->shading_rate_loc;
+      if (shading_rate_loc != 0xff)
+         linkage.max_loc = MAX2(linkage.max_loc, shading_rate_loc + 1);
+   } else {
+      if (layer_regid != regid(63, 0)) {
+         layer_loc = linkage.max_loc;
+         ir3_link_add(&linkage, VARYING_SLOT_LAYER, layer_regid, 0x1, linkage.max_loc);
+      }
+
+      if (view_regid != regid(63, 0)) {
+         view_loc = linkage.max_loc;
+         ir3_link_add(&linkage, VARYING_SLOT_VIEWPORT, view_regid, 0x1, linkage.max_loc);
+      }
+
+      if (shading_rate_regid != regid(63, 0)) {
+         shading_rate_loc = linkage.max_loc;
+         ir3_link_add(&linkage, VARYING_SLOT_PRIMITIVE_SHADING_RATE,
+                      shading_rate_regid, 0x1, linkage.max_loc);
+      }
    }
 
    unsigned extra_pos = 0;
@@ -1049,6 +1145,15 @@ tu6_emit_vpc(struct tu_cs *cs,
             .clip_mask = COND(last, clip_cull_mask),
             .shadingrate = COND(last, VALIDREG(shading_rate_regid)),
          ));
+         if (per_prim) {
+            crb.add(VPC_MESH_CNTL(CHIP, .meshshaderen = true,
+                                         .view = view_loc != 0xff,
+                                         .layer = layer_loc != 0xff,
+                                         .shadingrate = shading_rate_loc != 0xff));
+            crb.add(VPC_PA_BUFFER_STRIDE(CHIP, per_prim->buffer_stride));
+         } else if (CHIP >= A7XX) {
+            crb.add(VPC_MESH_CNTL(CHIP, 0));
+         }
          break;
       case MESA_SHADER_TESS_CTRL:
          assert(!last);
@@ -1103,8 +1208,8 @@ tu6_emit_vpc(struct tu_cs *cs,
          ));
       }
       crb.add(GRAS_SU_VS_SIV_CNTL(CHIP,
-         .writes_layer = VALIDREG(layer_regid),
-         .writes_view = VALIDREG(view_regid),
+         .writes_layer = layer_loc != 0xff,
+         .writes_view = view_loc != 0xff,
       ));
       break;
    case MESA_SHADER_TESS_EVAL:
@@ -1346,9 +1451,10 @@ tu6_emit_geom_tess_consts(struct tu_cs *cs,
 template <chip CHIP>
 static void
 tu6_emit_program_config(struct tu_cs *cs,
-                        const struct tu_program_state *prog,
+                        struct tu_program_state *prog,
                         struct tu_shader **shaders,
-                        const struct ir3_shader_variant **variants)
+                        const struct ir3_shader_variant **variants,
+                        struct tu_per_prim_layout *per_prim_out)
 {
    STATIC_ASSERT(MESA_SHADER_VERTEX == 0);
 
@@ -1376,6 +1482,7 @@ tu6_emit_program_config(struct tu_cs *cs,
    const struct ir3_shader_variant *ds = variants[MESA_SHADER_TESS_EVAL];
    const struct ir3_shader_variant *gs = variants[MESA_SHADER_GEOMETRY];
    const struct ir3_shader_variant *fs = variants[MESA_SHADER_FRAGMENT];
+   const struct tu_shader *mesh = shaders[MESA_SHADER_MESH];
 
    tu6_emit_xs_config<CHIP>(crb, { .vs = vs, .hs = hs, .ds = ds, .gs = gs, .fs = fs });
 
@@ -1422,6 +1529,158 @@ tu6_emit_program_config(struct tu_cs *cs,
 
    if (gs || hs) {
       tu6_emit_geom_tess_consts<CHIP>(cs, vs, hs, ds, gs);
+   }
+
+   if (mesh)
+      tu6_emit_prim_varying_map<CHIP>(cs, mesh, fs, per_prim_out);
+}
+
+static enum a8xx_mesh_prim_type
+get_mesh_prim_type(mesa_prim prim_type)
+{
+   switch (prim_type) {
+   case MESA_PRIM_TRIANGLES:
+      return MESH_PT_TRILIST;
+   case MESA_PRIM_LINES:
+      return MESH_PT_LINELIST;
+   case MESA_PRIM_POINTS:
+      return MESH_PT_POINTLIST;
+   default:
+      UNREACHABLE("bad prim type");
+   }
+}
+
+static uint32_t
+get_ndrange_0(const struct ir3_shader_variant *v)
+{
+   return SP_CS_NDRANGE_0(A7XX, .kerneldim = 3,
+                          .localsizex = v->local_size[0] - 1,
+                          .localsizey = v->local_size[1] - 1,
+                          .localsizez = v->local_size[2] - 1).value;
+}
+
+static void
+tu8_emit_mesh_shader_descriptor(struct tu_cs *cs,
+                                const struct tu_per_prim_layout *per_prim,
+                                struct tu_shader **shaders)
+{
+   const struct tu_shader *mesh = shaders[MESA_SHADER_MESH], *task = shaders[MESA_SHADER_TASK];
+
+   tu_cs_emit(cs, COND(task, A8XX_MESH_SHADER_0_TASK_SHADER_EN) |
+                  COND(mesh->mesh.mesh_vis_stride, A8XX_MESH_SHADER_0_MESH_VIS_EN) |
+                  COND(per_prim->buffer_stride, A8XX_MESH_SHADER_0_USE_PRIMITIVE_VARYINGS) |
+                  A8XX_MESH_SHADER_0_PRIM_TYPE(get_mesh_prim_type(mesh->mesh.prim_type)));
+   tu_cs_emit_qw(cs, task ? task->state.iova : 0);
+   tu_cs_emit(cs, task ? task->state.size : 0);
+   tu_cs_emit_qw(cs, mesh->state.iova);
+   tu_cs_emit(cs, mesh->state.size);
+   unsigned index_count = mesh->mesh.primitive_count * tu_mesh_vertices_per_prim(mesh->mesh.prim_type);
+   tu_cs_emit(cs, index_count); /* per meshlet */
+   tu_cs_emit(cs, index_count); /* per view */
+   tu_cs_emit(cs, mesh->mesh.num_per_vertex_outputs * 16 * mesh->mesh.vertex_count); /* per meshlet */
+   tu_cs_emit(cs, mesh->mesh.num_per_vertex_outputs * 16 * mesh->mesh.vertex_count); /* per view */
+   tu_cs_emit(cs, per_prim->buffer_stride * mesh->mesh.primitive_count); /* per meshlet */
+   tu_cs_emit(cs, per_prim->buffer_stride * mesh->mesh.primitive_count); /* per view */
+   tu_cs_emit(cs, mesh->mesh.mesh_vis_stride);
+   tu_cs_emit(cs, 0);
+   tu_cs_emit(cs, mesh->mesh.vertex_count);
+   tu_cs_emit(cs, 0);
+   tu_cs_emit(cs, A8XX_MESH_SHADER_17_MESHSHADEREN |
+                  COND(per_prim->layer_loc != 0xff, A8XX_MESH_SHADER_17_LAYER) |
+                  COND(per_prim->view_loc != 0xff, A8XX_MESH_SHADER_17_VIEW) |
+                  COND(per_prim->shading_rate_loc != 0xff, A8XX_MESH_SHADER_17_SHADINGRATE));
+   tu_cs_emit(cs, task ? get_ndrange_0(task->variant) : 0);
+   tu_cs_emit(cs, get_ndrange_0(mesh->variant));
+   tu_cs_emit_qw(cs, 0); /* task SP_CS_BASE */
+   tu_cs_emit_qw(cs, 0); /* mesh SP_CS_BASE */
+   tu_cs_emit_qw(cs, 0); /* SP_PS_BASE */
+}
+
+static void
+tu_mesh_calc_buffer_layout(struct tu_device *dev, struct tu_program_state *prog,
+                           struct tu_per_prim_layout *per_prim, struct tu_shader **shaders)
+{
+   const struct tu_shader *mesh = shaders[MESA_SHADER_MESH];
+   struct tu_mesh_buffer_layout *layout = &prog->mesh_layout;
+   unsigned per_vertex_varying_stride = mesh->mesh.num_per_vertex_outputs * 16 * mesh->mesh.vertex_count;
+   unsigned per_primitive_varying_stride = per_prim->buffer_stride * mesh->mesh.primitive_count;
+
+   /* The total GMEM size in bytes per meshlet. Note that per-vertex and per-primitive varyings use separate memory in
+    * GMEM (struct of arrays), but we pretend that they are combined (array of structs) here in order to figure out how
+    * many meshes fit in GMEM, since both ways use the same amount of storage.
+    */
+   unsigned gmem_per_mesh_stride = per_vertex_varying_stride + per_primitive_varying_stride;
+
+   unsigned max_gmem_chunk_count = dev->physical_device->config_sysmem.mesh_size / MAX2(gmem_per_mesh_stride, 4) /
+      A8XX_MESH_SHADER_CTXTS;
+
+   unsigned index_buffer_stride = mesh->mesh.primitive_count * tu_mesh_vertices_per_prim(mesh->mesh.prim_type) * 2;
+   unsigned prim_count_stride = 4; /* Prim count is one dword per mesh */
+   unsigned mesh_vis_stride = mesh->mesh.mesh_vis_stride;
+   
+   /* Use the same logic as before to determine how many meshes can fit in the sysmem buffer. */
+   unsigned sysmem_per_mesh_stride = index_buffer_stride + prim_count_stride + mesh_vis_stride;
+
+   /* Reserve half the memory for task shader data if there is one. */
+   unsigned mesh_sysmem_buffer_size = shaders[MESA_SHADER_TASK] ? (TU_MESH_SYSMEM_BUFFER_SIZE / 2) :
+      TU_MESH_SYSMEM_BUFFER_SIZE;
+
+   unsigned max_sysmem_chunk_count = mesh_sysmem_buffer_size / sysmem_per_mesh_stride /
+      A8XX_MESH_SHADER_CTXTS;
+
+   /* Finally, compute the actual chunk count */
+   unsigned mesh_chunk_count = MIN2(max_sysmem_chunk_count, max_gmem_chunk_count);
+   layout->mesh_chunk_count = mesh_chunk_count;
+
+   /* Assign GMEM offsets */
+   unsigned gmem_offset = 0;
+
+   layout->varying_offset = gmem_offset;
+   layout->varying_size = per_vertex_varying_stride * mesh_chunk_count * A8XX_MESH_SHADER_CTXTS;
+   gmem_offset += layout->varying_size;
+
+   layout->per_prim_varying_offset = gmem_offset;
+   layout->per_prim_varying_size = per_primitive_varying_stride * mesh_chunk_count * A8XX_MESH_SHADER_CTXTS;
+   gmem_offset += layout->per_prim_varying_size;
+
+   assert(gmem_offset <= dev->physical_device->config_sysmem.mesh_size);
+
+   /* Assign sysmem offsets */
+   unsigned sysmem_offset = 0;
+
+   layout->index_buffer_offset = sysmem_offset;
+   layout->index_buffer_size = index_buffer_stride * mesh_chunk_count * A8XX_MESH_SHADER_CTXTS;
+   sysmem_offset += layout->index_buffer_size;
+
+   layout->mesh_vis_offset = sysmem_offset;
+   layout->mesh_vis_size = mesh_vis_stride * mesh_chunk_count * A8XX_MESH_SHADER_CTXTS;
+   sysmem_offset += layout->mesh_vis_size;
+
+   layout->prim_count_offset = sysmem_offset;
+   layout->prim_count_size = prim_count_stride * mesh_chunk_count * A8XX_MESH_SHADER_CTXTS;
+   sysmem_offset += layout->prim_count_size;
+
+   assert(sysmem_offset <= mesh_sysmem_buffer_size);
+
+   if (shaders[MESA_SHADER_TASK]) {
+      unsigned task_sysmem_buffer_size = TU_MESH_SYSMEM_BUFFER_SIZE - sysmem_offset;
+
+      unsigned task_payload_stride = mesh->mesh.task_payload_stride;
+      unsigned mesh_count_stride = 6 * 4; /* Mesh count payload is 6 dwords. */
+
+      unsigned sysmem_per_task_stride = task_payload_stride + mesh_count_stride;
+      unsigned task_chunk_count = task_sysmem_buffer_size / sysmem_per_task_stride;
+      layout->task_chunk_count = task_chunk_count;
+
+      layout->task_payload_offset = sysmem_offset;
+      layout->task_payload_size = task_payload_stride * task_chunk_count;
+      sysmem_offset += layout->task_payload_size;
+
+      layout->mesh_count_offset = sysmem_offset;
+      layout->mesh_count_size = mesh_count_stride * task_chunk_count;
+      sysmem_offset += layout->mesh_count_size;
+
+      assert(sysmem_offset <= TU_MESH_SYSMEM_BUFFER_SIZE);
    }
 }
 
@@ -1572,7 +1831,7 @@ tu_hash_shaders(unsigned char *hash,
    if (layout)
       _mesa_blake3_update(&ctx, layout->blake3, sizeof(layout->blake3));
 
-   for (int i = 0; i < MESA_SHADER_STAGES; ++i) {
+   for (int i = 0; i < MESA_SHADER_MESH_STAGES; ++i) {
       if (stages[i] || nir[i]) {
          tu_hash_stage(&ctx, pipeline_flags, stages[i], nir[i], &keys[i]);
       }
@@ -1746,13 +2005,13 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
                                     struct tu_pipeline *pipeline)
 {
    VkResult result = VK_SUCCESS;
-   const VkPipelineShaderStageCreateInfo *stage_infos[MESA_SHADER_STAGES] = {
+   const VkPipelineShaderStageCreateInfo *stage_infos[MESA_SHADER_MESH_STAGES] = {
       NULL
    };
    VkPipelineCreationFeedback pipeline_feedback = {
       .flags = VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT,
    };
-   VkPipelineCreationFeedback stage_feedbacks[MESA_SHADER_STAGES] = { 0 };
+   VkPipelineCreationFeedback stage_feedbacks[MESA_SHADER_MESH_STAGES] = { 0 };
 
    const bool executable_info =
       builder->create_flags &
@@ -1906,7 +2165,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
          }
       }
 
-      mesa_shader_stage last_pre_rast_stage = MESA_SHADER_VERTEX;
+      mesa_shader_stage last_pre_rast_stage = MESA_SHADER_MESH;
       for (int i = MESA_SHADER_GEOMETRY; i >= MESA_SHADER_VERTEX; i--) {
          if (nir[i]) {
             last_pre_rast_stage = static_cast<mesa_shader_stage>(i);
@@ -2329,8 +2588,10 @@ tu_emit_program_state(struct tu_cs *sub_cs,
       variants[stage] = shaders[stage] ? shaders[stage]->variant : NULL;
    }
 
-   if (shaders[MESA_SHADER_MESH])
+   if (shaders[MESA_SHADER_MESH]) {
       variants[MESA_SHADER_VERTEX] = shaders[MESA_SHADER_MESH]->passthrough_vs;
+      draw_states[MESA_SHADER_VERTEX] = shaders[MESA_SHADER_MESH]->passthrough_vs_state;
+   }
 
    uint32_t safe_variants =
       ir3_trim_constlen(variants, dev->compiler);
@@ -2362,7 +2623,7 @@ tu_emit_program_state(struct tu_cs *sub_cs,
    }
 
    for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
-      if (!variants[i])
+      if (!variants[i] || (variants[MESA_SHADER_MESH] && i == MESA_SHADER_VERTEX))
          continue;
 
       tu_pipeline_set_linkage(&prog->link[i],
@@ -2386,6 +2647,8 @@ tu_emit_program_state(struct tu_cs *sub_cs,
       dynamic_descriptor_offset += dynamic_descriptor_sizes[i];
    }
 
+   struct tu_per_prim_layout per_prim;
+
    /* Emit HLSQ_xS_CNTL/HLSQ_SP_xS_CONFIG *first*, before emitting anything
     * else that could depend on that state (like push constants)
     *
@@ -2398,8 +2661,17 @@ tu_emit_program_state(struct tu_cs *sub_cs,
     * and draw passes.
     */
    tu_cs_begin_sub_stream(sub_cs, 512, &prog_cs);
-   tu6_emit_program_config<CHIP>(&prog_cs, prog, shaders, variants);
+   tu6_emit_program_config<CHIP>(&prog_cs, prog, shaders, variants, &per_prim);
    prog->config_state = tu_cs_end_draw_state(sub_cs, &prog_cs);
+
+   if (shaders[MESA_SHADER_MESH]) {
+      tu_cs_begin_sub_stream(sub_cs, A8XX_MESH_SHADER_DWORDS, &prog_cs);
+      tu8_emit_mesh_shader_descriptor(&prog_cs, &per_prim, shaders);
+      struct tu_draw_state descriptor = tu_cs_end_draw_state(sub_cs, &prog_cs);
+      prog->mesh_shader_descriptor = descriptor.iova;
+
+      tu_mesh_calc_buffer_layout(dev, prog, &per_prim, shaders);
+   }
 
    prog->vs_state = draw_states[MESA_SHADER_VERTEX];
 
@@ -2408,7 +2680,7 @@ tu_emit_program_state(struct tu_cs *sub_cs,
    */
    if (variants[MESA_SHADER_GEOMETRY]) {
       prog->vs_binning_state = prog->vs_state;
-   } else {
+   } else if (!variants[MESA_SHADER_MESH]) {
       prog->vs_binning_state =
          (safe_variants & (1u << MESA_SHADER_VERTEX))
             ? shaders[MESA_SHADER_VERTEX]->safe_const_binning_state
@@ -2431,7 +2703,7 @@ tu_emit_program_state(struct tu_cs *sub_cs,
    const struct ir3_shader_variant *fs = variants[MESA_SHADER_FRAGMENT];
 
    tu_cs_begin_sub_stream(sub_cs, 512, &prog_cs);
-   tu6_emit_vpc<CHIP>(&prog_cs, vs, hs, ds, gs, fs);
+   tu6_emit_vpc<CHIP>(&prog_cs, vs, hs, ds, gs, fs, shaders[MESA_SHADER_MESH] ? &per_prim : NULL);
    prog->vpc_state = tu_cs_end_draw_state(sub_cs, &prog_cs);
 
    const struct ir3_shader_variant *last_variant;
@@ -2443,8 +2715,11 @@ tu_emit_program_state(struct tu_cs *sub_cs,
       last_shader = shaders[MESA_SHADER_TESS_EVAL];
       last_variant = ds;
    } else {
-      last_shader = shaders[MESA_SHADER_VERTEX];
       last_variant = vs;
+      if (shaders[MESA_SHADER_MESH])
+         last_shader = shaders[MESA_SHADER_MESH];
+      else
+         last_shader = shaders[MESA_SHADER_VERTEX];
    }
 
    prog->per_view_viewport =

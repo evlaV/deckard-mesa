@@ -40,7 +40,8 @@ struct tu_prim_varying_map
 {
    uint32_t buffer_stride;
    uint32_t padding[3];
-   uint32_t location[];
+   uint32_t location[32+1];
+   uint32_t padding2[3];
 };
 
 /* The meaning of the range depends on "type". If it's
@@ -153,7 +154,12 @@ struct tu_shader
             uint8_t dword_offset;
          } per_vertex_outputs[32];
 
-         uint32_t per_prim_map_size;
+         uint64_t per_prim_varyings_written;
+         uint32_t primitive_count;
+         uint32_t vertex_count;
+         uint32_t mesh_vis_stride;
+         uint32_t task_payload_stride;
+         mesa_prim prim_type;
       } mesh;
    };
 };
@@ -241,7 +247,7 @@ tu6_emit_xs_constants(struct tu_cs *cs,
 template <chip CHIP>
 void
 tu6_emit_vs(struct tu_cs *cs, const struct ir3_shader_variant *vs,
-            uint32_t view_mask);
+            uint32_t view_mask, bool passthrough);
 
 template <chip CHIP>
 void
@@ -312,5 +318,15 @@ tu_destroy_empty_shaders(struct tu_device *device);
 void
 tu_shader_destroy(struct tu_device *dev,
                   struct tu_shader *shader);
+
+static inline unsigned
+tu_mesh_vertices_per_prim(mesa_prim prim_type)
+{
+   /* For some reason, triangles have 4 vertices with an (unused?) vertex in the index buffer. */
+   if (prim_type == MESA_PRIM_TRIANGLES) {
+      return 4;
+   }
+   return mesa_vertices_per_prim(prim_type);
+}
 
 #endif /* TU_SHADER_H */

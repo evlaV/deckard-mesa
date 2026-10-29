@@ -3583,7 +3583,7 @@ static const struct type3_op {
    CP(DRAW_INDIRECT, cp_draw_indirect, {.load_all_groups = true}),
    CP(DRAW_INDX_INDIRECT, cp_draw_indx_indirect, {.load_all_groups = true}),
    CP(DRAW_INDIRECT_MULTI, cp_draw_indirect_multi, {.load_all_groups = true}),
-   CP(AQE_COMMAND, cp_aqe_command),
+   CP(AQE_COMMAND, cp_aqe_command, {.load_all_groups = true}),
    CP(SKIP_IB2_ENABLE_GLOBAL, cp_skip_ib2_enable_global),
    CP(SKIP_IB2_ENABLE_LOCAL, cp_skip_ib2_enable_local),
 
