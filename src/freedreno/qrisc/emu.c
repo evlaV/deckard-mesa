@@ -128,7 +128,7 @@ emu_instr(struct emu *emu, struct qrisc_instr *instr)
       break;
    case OPC_MSB:
    case OPC_POPCOUNT:
-   case OPC_ADD ... OPC_BIC: {
+   case OPC_ADD ... OPC_SETBIT: {
       uint32_t val = emu_alu(emu, instr->opc,
                              emu_get_gpr_reg(emu, instr->src1),
                              instr->has_immed ? instr->immed : 
@@ -317,6 +317,22 @@ emu_instr(struct emu *emu, struct qrisc_instr *instr)
 
       break;
    }
+   case OPC_IRET: {
+      /* Same encoding as ret apart from bit 25.  Treat it as ret: pop the
+       * return address off the SQE call stack, with a delay slot.
+       *
+       * TODO: the real instruction returns from the preemption interrupt
+       * handler, and we don't model delivering that interrupt, nor any
+       * interrupt-context state that iret might restore.
+       */
+      unsigned sp = emu_get_reg32(emu, &SP);
+      assert(sp > 0);
+
+      emu->branch_target = emu_get_sqe_reg(emu, emu_reg_offset(&STACK0) + sp - 1);
+      emu_set_reg32(emu, &SP, sp - 1);
+
+      break;
+   }
    case OPC_CALL: {
       unsigned sp = emu_get_reg32(emu, &SP);
       assert(sp + emu_reg_offset(&STACK0) < ARRAY_SIZE(emu->sqe_regs.val));
@@ -343,6 +359,13 @@ emu_instr(struct emu *emu, struct qrisc_instr *instr)
    }
    case OPC_JUMPR: {
       emu->branch_target = emu_get_gpr_reg(emu, instr->src1);
+      break;
+   }
+   case OPC_JUMPA: {
+      /* Absolute jump (a7xx), target encoded like bl/call.  Like the other
+       * jumps it has a delay slot.
+       */
+      emu->branch_target = instr->literal;
       break;
    }
    case OPC_JUMPD: {
