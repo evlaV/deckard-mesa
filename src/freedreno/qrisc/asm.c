@@ -336,6 +336,10 @@ void next_section(const char *section)
 unsigned
 parse_control_reg(const char *name)
 {
+   if (!gpuver) {
+      fprintf(stderr, "no firmware id: file has no version header, pass -g FWID\n");
+      exit(1);
+   }
    /* skip leading "@" */
    return qrisc_control_reg(name + 1);
 }
@@ -343,6 +347,10 @@ parse_control_reg(const char *name)
 unsigned
 parse_sqe_reg(const char *name)
 {
+   if (!gpuver) {
+      fprintf(stderr, "no firmware id: file has no version header, pass -g FWID\n");
+      exit(1);
+   }
    /* skip leading "%" */
    return qrisc_sqe_reg(name + 1);
 }
@@ -351,7 +359,9 @@ static void
 usage(void)
 {
    fprintf(stderr, "Usage:\n"
-                   "\tasm filename.asm filename.fw\n");
+                   "\tasm [-g FWID] filename.asm filename.fw\n"
+                   "\t\t-g - firmware id (hex, e.g. 520), for .asm files that\n"
+                   "\t\t     lack the version header (loose snippets)\n");
    exit(2);
 }
 
@@ -360,9 +370,20 @@ main(int argc, char **argv)
 {
    FILE *in;
    char *file, *outfile;
-   int ret;
+   int ret, c;
+   enum qrisc_fwid fw_id = 0;
 
-   if (optind >= (argc + 1)) {
+   while ((c = getopt(argc, argv, "g:")) != -1) {
+      switch (c) {
+      case 'g':
+         fw_id = strtol(optarg, NULL, 16);
+         break;
+      default:
+         usage();
+      }
+   }
+
+   if (optind + 1 >= argc) {
       fprintf(stderr, "no file specified!\n");
       usage();
    }
@@ -383,6 +404,9 @@ main(int argc, char **argv)
    }
 
    yyset_in(in);
+
+   if (fw_id && qrisc_util_init(fw_id, &gpuver, false) < 0)
+      usage();
 
    /* there is an extra 0x00000000 which kernel strips off.. we could
     * perhaps use it for versioning.
