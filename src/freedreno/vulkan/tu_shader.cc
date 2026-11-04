@@ -3727,6 +3727,17 @@ tu_lower_nir(struct tu_device *dev,
    NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_mem_global,
             nir_address_format_64bit_global_32bit_offset);
 
+   /* Task/mesh shaders: lay out shared memory and the task payload and turn their derefs into offset-based
+    * intrinsics (store/load_task_payload, which tu_nir_lower_task/tu_nir_lower_mesh then map to memory).
+    */
+   if (nir->info.stage == MESA_SHADER_TASK || nir->info.stage == MESA_SHADER_MESH) {
+      NIR_PASS(_, nir, nir_lower_vars_to_explicit_types,
+               nir_var_mem_shared | nir_var_mem_task_payload, shared_type_info);
+      NIR_PASS(_, nir, nir_lower_explicit_io,
+               nir_var_mem_shared | nir_var_mem_task_payload,
+               nir_address_format_32bit_offset);
+   }
+
    if (nir->info.stage == MESA_SHADER_COMPUTE) {
       NIR_PASS(_, nir, nir_lower_vars_to_explicit_types,
                nir_var_mem_shared, shared_type_info);

@@ -353,6 +353,7 @@ filter_mesh_intrinsic(const nir_instr *instr, UNUSED const void *_state)
    return intrin->intrinsic == nir_intrinsic_store_per_vertex_output ||
           intrin->intrinsic == nir_intrinsic_store_per_primitive_output ||
           intrin->intrinsic == nir_intrinsic_load_workgroup_index ||
+          intrin->intrinsic == nir_intrinsic_load_task_payload ||
           intrin->intrinsic == nir_intrinsic_set_vertex_and_primitive_count;
 }
 
