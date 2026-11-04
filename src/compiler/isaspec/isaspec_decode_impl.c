@@ -607,11 +607,20 @@ display_field(struct decode_scope *scope, const char *field_name)
 				offset = val;
 			}
 			if (offset < scope->state->num_instr) {
+				const struct isa_decode_options *opts = scope->state->options;
+				const char *name = opts->branch_label_cb ?
+					opts->branch_label_cb(opts->cbdata, offset, field->call) : NULL;
 				if (field->call) {
-					isa_print(print, "fxn%d", offset);
+					if (name)
+						isa_print(print, "%s", name);
+					else
+						isa_print(print, "fxn%d", offset);
 					BITSET_SET(scope->state->call_targets, offset);
 				} else {
-					isa_print(print, "l%d", offset);
+					if (name)
+						isa_print(print, "%s", name);
+					else
+						isa_print(print, "l%d", offset);
 					BITSET_SET(scope->state->branch_targets, offset);
 				}
 				break;
@@ -787,20 +796,35 @@ disasm(struct decode_state *state, void *bin, int sz)
 				state->next_entrypoint++;
 			}
 
+			const char *call_name = NULL, *branch_name = NULL;
+			if (state->options->branch_label_cb) {
+				call_name = state->options->branch_label_cb(state->options->cbdata, state->n, true);
+				branch_name = state->options->branch_label_cb(state->options->cbdata, state->n, false);
+			}
+
 			if (BITSET_TEST(state->call_targets, state->n)) {
 				if (state->options->pre_instr_cb) {
 					state->options->pre_instr_cb(state->options->cbdata,
 							state->n, instr.bitset);
 				}
-				isa_print(&state->print, "fxn%d:\n", state->n);
+				if (call_name)
+					isa_print(&state->print, "%s:\n", call_name);
+				else
+					isa_print(&state->print, "fxn%d:\n", state->n);
 			}
 
-			if (BITSET_TEST(state->branch_targets, state->n)) {
+			/* a named target is one label, however it is reached */
+			if (BITSET_TEST(state->branch_targets, state->n) &&
+			    !(branch_name && call_name && !strcmp(branch_name, call_name) &&
+			      BITSET_TEST(state->call_targets, state->n))) {
 				if (state->options->pre_instr_cb) {
 					state->options->pre_instr_cb(state->options->cbdata,
 							state->n, instr.bitset);
 				}
-				isa_print(&state->print, "l%d:\n", state->n);
+				if (branch_name)
+					isa_print(&state->print, "%s:\n", branch_name);
+				else
+					isa_print(&state->print, "l%d:\n", state->n);
 			}
 		}
 

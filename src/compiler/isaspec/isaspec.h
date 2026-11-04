@@ -114,6 +114,13 @@ struct isa_decode_options {
 	 */
 	unsigned entrypoint_count;
 	const struct isa_entrypoint *entrypoints;
+
+	/**
+	 * Optional: name of the branch/call target at instruction offset (used
+	 * with branch_labels, both where it is referenced and where the label is
+	 * printed).  Return NULL for the default "l<offset>" / "fxn<offset>".
+	 */
+	const char *(*branch_label_cb)(void *data, unsigned offset, bool call);
 };
 
 #ifdef __cplusplus
