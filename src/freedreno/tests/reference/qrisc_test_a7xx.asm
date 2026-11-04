@@ -18,7 +18,7 @@ cwrite $04, [$00 + @LOAD_STORE_HI]
 cwrite $rem, [$00 + @MEM_READ_DWORDS]
 cwrite $00, [$00 + @PACKET_TABLE_WRITE_ADDR]
 (rep)cwrite $memdata, [$00 + @PACKET_TABLE_WRITE]
-add $03, $01, 0x440	; RBBM_PERFCTR2_SP[0xb]+0
+add $03, $01, 0x440
 addhi $04, $02, 0x0
 cwrite $03, [$00 + @BV_INSTR_BASE]
 cwrite $04, [$00 + @BV_INSTR_BASE+0x1]

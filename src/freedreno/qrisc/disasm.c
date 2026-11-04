@@ -46,10 +46,16 @@ getpm4(uint32_t id)
    return qrisc_pm_id_name(id);
 }
 
+static bool annotate_all_immeds;
+
 static void
 print_gpu_reg(FILE *out, uint32_t regbase)
 {
    if (regbase < 0x100)
+      return;
+
+   /* 2^n - 1 is a mask far more often than a register */
+   if (!annotate_all_immeds && (regbase & (regbase + 1)) == 0)
       return;
 
    char *name = qrisc_gpu_reg_name(regbase);
@@ -99,8 +105,15 @@ struct decode_state {
    uint32_t immed;
    uint8_t shift;
    bool has_immed;
+   bool is_movi;
    bool dst_is_addr;
 };
+
+/* annotate_all_immeds (-A): annotate every immediate that happens to match a
+ * GPU register offset, instead of only unshifted move-immediates and raw data
+ * words.  ALU immediates are almost always masks, sizes and strides (0x3ff,
+ * 0x400, 0x58, ...), which made most annotations coincidental.
+ */
 
 static void
 field_print_cb(struct isa_print_state *state, const char *field_name, uint64_t val)
@@ -136,6 +149,10 @@ pre_instr_cb(void *data, unsigned n, void *instr)
    struct decode_state *state = data;
    state->has_immed = state->dst_is_addr = false;
    state->shift = 0;
+   /* move-immediate (see "movi" in qrisc.xml); decided from the opcode since
+    * the SHIFT field is not reported when the display omits it (shift == 0)
+    */
+   state->is_movi = (*(uint32_t *)instr >> 27) == (gpuver >= 7 ? 0x0e : 0x11);
 
    if (verbose)
       printf("\t%04x: %08x  ", n, *(uint32_t *)instr);
@@ -174,7 +191,9 @@ post_instr_cb(void *data, unsigned n, void *instr)
             printf("\t; ");
             print_pipe_reg(immed >> 24);
          }
-      } else {
+      } else if (annotate_all_immeds ||
+                 (state->is_movi && (state->shift == 0 || state->dst_is_addr))) {
+         /* a shifted move-immediate builds a constant (e.g. 0xa << 12), not a register offset */
          print_gpu_reg(stdout, immed);
       }
    }
@@ -480,7 +499,9 @@ static void
 usage(void)
 {
    fprintf(stderr, "Usage:\n"
-                   "\tdisasm [-g GPUVER] [-v] [-c] [-r] filename.asm\n"
+                   "\tdisasm [-g GPUVER] [-v] [-c] [-r] [-A] filename.asm\n"
+                   "\t\t-A - annotate every immediate that matches a GPU register\n"
+                   "\t\t     (default: only move-immediates and raw data words)\n"
                    "\t\t-c - use colors\n"
                    "\t\t-e - emulator mode\n"
                    "\t\t-g - override GPU firmware id\n"
@@ -503,8 +524,11 @@ main(int argc, char **argv)
    enum qrisc_fwid fw_id = 0;
 
    /* Argument parsing: */
-   while ((c = getopt(argc, argv, "ceg:rvu")) != -1) {
+   while ((c = getopt(argc, argv, "Aceg:rvu")) != -1) {
       switch (c) {
+      case 'A':
+         annotate_all_immeds = true;
+         break;
       case 'c':
          colors = true;
          break;
