@@ -36,7 +36,8 @@ SOFTWARE.
 		<map name="SRC2">src->src2</map>
 		<map name="IMMED">src->immed</map>
 		<map name="BIT">src->bit</map>
-		<!-- RIMMED is an alias of IMMED for immediates that might be a GPU register -->
+		<!-- RIMMED is an alias of IMMED for immediates that might be a GPU register
+		     (or, with a symbol file, a code address): printed by the disassembler -->
 		<map name="RIMMED">src->immed</map>
 	</encode>
 	<decode/>
@@ -181,20 +182,20 @@ SOFTWARE.
 
 <bitset name="#alu-2src-immed" extends="#instruction-rep">
 	<display>
-		{REP}{NAME} {DST}, {SRC1}, 0x{RIMMED}
+		{REP}{NAME} {DST}, {SRC1}, {RIMMED}
 	</display>
 
-	<field name="RIMMED" low="0" high="15" type="hex"/>
+	<field name="RIMMED" low="0" high="15" type="custom"/>
 	<field name="DST" low="16" high="20" type="#dst"/>
 	<field name="SRC1" low="21" high="25" type="#src"/>
 </bitset>
 
 <bitset name="#alu-2src-immed12" extends="#instruction-rep">
 	<display>
-		{REP}{NAME} {DST}, {SRC1}, 0x{RIMMED}
+		{REP}{NAME} {DST}, {SRC1}, {RIMMED}
 	</display>
 
-	<field name="RIMMED" low="0" high="11" type="hex"/>
+	<field name="RIMMED" low="0" high="11" type="custom"/>
 	<field name="DST" low="16" high="20" type="#dst"/>
 	<field name="SRC1" low="21" high="25" type="#src"/>
 	<pattern low="27" high="31">10010</pattern>
@@ -592,14 +593,14 @@ SOFTWARE.
 	<override>
 		<expr>{SHIFT} == 0</expr>
 		<display>
-			{REP}mov {DST}, 0x{RIMMED}
+			{REP}mov {DST}, {RIMMED}
 		</display>
 	</override>
 	<display>
-		{REP}mov {DST}, 0x{RIMMED} &lt;&lt; {SHIFT}
+		{REP}mov {DST}, {RIMMED} &lt;&lt; {SHIFT}
 	</display>
 
-	<field name="RIMMED" low="0" high="15" type="hex"/>
+	<field name="RIMMED" low="0" high="15" type="custom"/>
 	<field name="DST" low="16" high="20" type="#dst"/>
 	<field name="SHIFT" low="21" high="25" type="uint"/>
 

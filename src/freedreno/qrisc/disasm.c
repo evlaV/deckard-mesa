@@ -115,6 +115,9 @@ struct decode_state {
  * 0x400, 0x58, ...), which made most annotations coincidental.
  */
 
+/* instruction being printed (for symbol-file relocations) */
+static unsigned cur_instr;
+
 static void
 field_print_cb(struct isa_print_state *state, const char *field_name, uint64_t val)
 {
@@ -125,6 +128,21 @@ field_print_cb(struct isa_print_state *state, const char *field_name, uint64_t v
          free(name);
       } else {
          isa_print(state, "0x%03x", (unsigned)val);
+      }
+   } else if (!strcmp(field_name, "RIMMED")) {
+      /* an ALU / move immediate, possibly a code address from the symbol file */
+      unsigned target, scale;
+      const char *name = qrisc_reloc_symbol(cur_instr, &target, &scale);
+      if (name && val == (uint64_t)target * scale) {
+         if (scale == 1)
+            isa_print(state, "#%s", name);
+         else
+            isa_print(state, "#%s * %u", name, scale);
+      } else {
+         if (name)
+            fprintf(stderr, "warning: reloc at 0x%x: immediate 0x%x is not %s (0x%x) * %u\n",
+                    cur_instr, (unsigned)val, name, target, scale);
+         isa_print(state, "0x%x", (unsigned)val);
       }
    } else if (!strcmp(field_name, "MEMOFF")) {
       /* load/store offset: 12 bits, sign-extended by the hardware */
@@ -147,6 +165,7 @@ static void
 pre_instr_cb(void *data, unsigned n, void *instr)
 {
    struct decode_state *state = data;
+   cur_instr = n;
    state->has_immed = state->dst_is_addr = false;
    state->shift = 0;
    /* move-immediate (see "movi" in qrisc.xml); decided from the opcode since
@@ -245,7 +264,12 @@ static void
 setup_packet_table(struct isa_decode_options *options, uint32_t preempt_instr,
                    uint32_t *jmptbl, uint32_t sizedwords)
 {
-   struct isa_entrypoint *entrypoints = malloc((sizedwords + 1) * sizeof(struct isa_entrypoint));
+   unsigned num_reloc_targets = 0, target;
+   while (qrisc_reloc_target(num_reloc_targets, &target))
+      num_reloc_targets++;
+
+   struct isa_entrypoint *entrypoints =
+      malloc((sizedwords + 1 + num_reloc_targets) * sizeof(struct isa_entrypoint));
 
    for (unsigned i = 0; i < sizedwords; i++) {
       entrypoints[i].offset = jmptbl[i];
@@ -271,6 +295,15 @@ setup_packet_table(struct isa_decode_options *options, uint32_t preempt_instr,
    if (preempt_instr != ~0) {
       entrypoints[options->entrypoint_count].name = "preempt";
       entrypoints[options->entrypoint_count].offset = preempt_instr;
+      options->entrypoint_count++;
+   }
+
+   /* labels that symbol-file relocations refer to must be printed, even
+    * where nothing branches to them (e.g. data words in the code)
+    */
+   for (unsigned i = 0; i < num_reloc_targets; i++) {
+      entrypoints[options->entrypoint_count].name = qrisc_reloc_target(i, &target);
+      entrypoints[options->entrypoint_count].offset = target;
       options->entrypoint_count++;
    }
 }

@@ -14,6 +14,8 @@
 
 int qrisc_load_symbols(const char *path);
 const char *qrisc_label_symbol(unsigned offset);
+const char *qrisc_reloc_symbol(unsigned offset, unsigned *target, unsigned *scale);
+const char *qrisc_reloc_target(unsigned n, unsigned *target);
 
 unsigned qrisc_control_reg(const char *name);
 char * qrisc_control_reg_name(unsigned id);

@@ -44,11 +44,19 @@ find_reg(struct rnndomain *dom, const char *name)
  *    # comment
  *    label 0x1fd9 cmdq_reserve
  *    creg  0x4c1  CMDQ_PACKETS
+ *    reloc 0x45   aqe_init_data 4
+ *
+ * "reloc" marks an absolute code address in an immediate: the immediate of
+ * the instruction at 0x45 is the offset of label aqe_init_data times 4, and
+ * is printed as "#aqe_init_data * 4" so it follows the label when code moves.
  */
+enum qrisc_symbol_kind { SYM_LABEL, SYM_CREG, SYM_RELOC };
+
 struct qrisc_symbol {
-   bool is_creg;
-   unsigned val;
-   char *name;
+   enum qrisc_symbol_kind kind;
+   unsigned val;      /* label: instruction offset, creg: register, reloc: instruction offset */
+   char *name;        /* reloc: the label it refers to */
+   unsigned scale;    /* reloc only */
 };
 
 static struct qrisc_symbol *symbols;
@@ -80,7 +88,7 @@ qrisc_load_symbols(const char *path)
    unsigned lineno = 0;
    while (fgets(line, sizeof(line), f)) {
       char kind[16], name[256];
-      unsigned val;
+      unsigned val, scale = 1;
 
       lineno++;
       char *hash = strchr(line, '#');
@@ -89,17 +97,21 @@ qrisc_load_symbols(const char *path)
       if (sscanf(line, " %15s", kind) != 1)
          continue;   /* blank or comment */
 
-      if (sscanf(line, " %15s %i %255s", kind, &val, name) != 3 ||
-          (strcmp(kind, "label") && strcmp(kind, "creg")) || !valid_identifier(name)) {
-         fprintf(stderr, "%s:%u: expected \"label|creg <offset> <identifier>\"\n", path, lineno);
+      int n = sscanf(line, " %15s %i %255s %i", kind, &val, name, &scale);
+      bool is_reloc = !strcmp(kind, "reloc");
+      if (n < 3 || (n == 4 && !is_reloc) || scale == 0 ||
+          (strcmp(kind, "label") && strcmp(kind, "creg") && !is_reloc) ||
+          !valid_identifier(name)) {
+         fprintf(stderr, "%s:%u: expected \"label|creg <offset> <identifier>\" or "
+                 "\"reloc <offset> <label> [scale]\"\n", path, lineno);
          fclose(f);
          return -1;
       }
 
-      bool is_creg = !strcmp(kind, "creg");
+      enum qrisc_symbol_kind sk = is_reloc ? SYM_RELOC : !strcmp(kind, "creg") ? SYM_CREG : SYM_LABEL;
       for (unsigned i = 0; i < num_symbols; i++) {
-         if (symbols[i].is_creg == is_creg &&
-             (symbols[i].val == val || !strcmp(symbols[i].name, name))) {
+         if (symbols[i].kind == sk &&
+             (symbols[i].val == val || (sk != SYM_RELOC && !strcmp(symbols[i].name, name)))) {
             fprintf(stderr, "%s:%u: %s 0x%x / %s defined twice\n", path, lineno, kind, val, name);
             fclose(f);
             return -1;
@@ -108,12 +120,68 @@ qrisc_load_symbols(const char *path)
 
       symbols = realloc(symbols, (num_symbols + 1) * sizeof(*symbols));
       symbols[num_symbols++] = (struct qrisc_symbol) {
-         .is_creg = is_creg, .val = val, .name = strdup(name),
+         .kind = sk, .val = val, .name = strdup(name), .scale = scale,
       };
    }
 
    fclose(f);
+
+   /* every reloc must refer to a label */
+   for (unsigned i = 0; i < num_symbols; i++) {
+      if (symbols[i].kind != SYM_RELOC)
+         continue;
+      bool found = false;
+      for (unsigned j = 0; j < num_symbols; j++)
+         found |= symbols[j].kind == SYM_LABEL && !strcmp(symbols[j].name, symbols[i].name);
+      if (!found) {
+         fprintf(stderr, "%s: reloc at 0x%x refers to unknown label %s\n", path,
+                 symbols[i].val, symbols[i].name);
+         return -1;
+      }
+   }
    return 0;
+}
+
+/**
+ * The label relocation of the immediate of the instruction at offset, if any:
+ * returns the label name and sets *target (its instruction offset) and *scale.
+ */
+const char *
+qrisc_reloc_symbol(unsigned offset, unsigned *target, unsigned *scale)
+{
+   for (unsigned i = 0; i < num_symbols; i++) {
+      if (symbols[i].kind != SYM_RELOC || symbols[i].val != offset)
+         continue;
+      for (unsigned j = 0; j < num_symbols; j++) {
+         if (symbols[j].kind == SYM_LABEL && !strcmp(symbols[j].name, symbols[i].name)) {
+            *target = symbols[j].val;
+            *scale = symbols[i].scale;
+            return symbols[i].name;
+         }
+      }
+   }
+   return NULL;
+}
+
+/**
+ * Iterate over the labels that relocations refer to (they must be printed
+ * even when they are not branch targets): returns the n-th, or NULL.
+ */
+const char *
+qrisc_reloc_target(unsigned n, unsigned *target)
+{
+   for (unsigned i = 0; i < num_symbols; i++) {
+      if (symbols[i].kind != SYM_LABEL)
+         continue;
+      bool referenced = false;
+      for (unsigned j = 0; j < num_symbols; j++)
+         referenced |= symbols[j].kind == SYM_RELOC && !strcmp(symbols[j].name, symbols[i].name);
+      if (referenced && n-- == 0) {
+         *target = symbols[i].val;
+         return symbols[i].name;
+      }
+   }
+   return NULL;
 }
 
 /**
@@ -123,7 +191,7 @@ const char *
 qrisc_label_symbol(unsigned offset)
 {
    for (unsigned i = 0; i < num_symbols; i++)
-      if (!symbols[i].is_creg && symbols[i].val == offset)
+      if (symbols[i].kind == SYM_LABEL && symbols[i].val == offset)
          return symbols[i].name;
    return NULL;
 }
@@ -132,7 +200,7 @@ static const char *
 creg_symbol_name(unsigned id)
 {
    for (unsigned i = 0; i < num_symbols; i++)
-      if (symbols[i].is_creg && symbols[i].val == id)
+      if (symbols[i].kind == SYM_CREG && symbols[i].val == id)
          return symbols[i].name;
    return NULL;
 }
@@ -141,7 +209,7 @@ static int
 creg_symbol(const char *name)
 {
    for (unsigned i = 0; i < num_symbols; i++)
-      if (symbols[i].is_creg && !strcmp(symbols[i].name, name))
+      if (symbols[i].kind == SYM_CREG && !strcmp(symbols[i].name, name))
          return symbols[i].val;
    return -1;
 }

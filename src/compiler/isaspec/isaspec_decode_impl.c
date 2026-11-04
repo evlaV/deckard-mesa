@@ -786,6 +786,7 @@ disasm(struct decode_state *state, void *bin, int sz)
 				isa_print(&state->print, "\n");
 			}
 
+			const struct isa_entrypoint *first_entrypoint = state->next_entrypoint;
 			while (state->next_entrypoint != state->end_entrypoint &&
 			       state->next_entrypoint->offset == state->n) {
 				if (state->options->pre_instr_cb) {
@@ -796,13 +797,29 @@ disasm(struct decode_state *state, void *bin, int sz)
 				state->next_entrypoint++;
 			}
 
+			/* Names from branch_label_cb (NULL: default "fxn<n>"/"l<n>") */
 			const char *call_name = NULL, *branch_name = NULL;
 			if (state->options->branch_label_cb) {
 				call_name = state->options->branch_label_cb(state->options->cbdata, state->n, true);
 				branch_name = state->options->branch_label_cb(state->options->cbdata, state->n, false);
 			}
 
-			if (BITSET_TEST(state->call_targets, state->n)) {
+			/* A named label is printed once: not again if an entrypoint of the
+			 * same name was just printed, and once for a branch + call target.
+			 */
+			bool print_call = BITSET_TEST(state->call_targets, state->n);
+			bool print_branch = BITSET_TEST(state->branch_targets, state->n);
+			for (const struct isa_entrypoint *e = first_entrypoint; e != state->next_entrypoint; e++) {
+				if (call_name && !strcmp(e->name, call_name))
+					print_call = false;
+				if (branch_name && !strcmp(e->name, branch_name))
+					print_branch = false;
+			}
+			if (branch_name && call_name && !strcmp(branch_name, call_name) &&
+			    BITSET_TEST(state->call_targets, state->n))
+				print_branch = false;
+
+			if (print_call) {
 				if (state->options->pre_instr_cb) {
 					state->options->pre_instr_cb(state->options->cbdata,
 							state->n, instr.bitset);
@@ -813,10 +830,7 @@ disasm(struct decode_state *state, void *bin, int sz)
 					isa_print(&state->print, "fxn%d:\n", state->n);
 			}
 
-			/* a named target is one label, however it is reached */
-			if (BITSET_TEST(state->branch_targets, state->n) &&
-			    !(branch_name && call_name && !strcmp(branch_name, call_name) &&
-			      BITSET_TEST(state->call_targets, state->n))) {
+			if (print_branch) {
 				if (state->options->pre_instr_cb) {
 					state->options->pre_instr_cb(state->options->cbdata,
 							state->n, instr.bitset);

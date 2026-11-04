@@ -503,6 +503,21 @@ firmware's own scratch control registers, can be supplied in a symbol file with
 Pass the same file to the assembler (``qrisc-asm -s``) so that the ``@names``
 resolve; the listing then still reassembles to an identical image.
 
+Code addresses that the firmware computes from an immediate (the AQE boot
+code reads its init data at ``CP_AQE_INSTR_BASE + 0x8184 + 4``, and writes the
+preemption entry ``0x80`` to ``%PREEMPT_INSTR``) are plain numbers to the
+disassembler, so they silently break when code moves. Mark them with ``reloc``
+lines; the immediate is then printed as a label expression that the assembler
+re-resolves::
+
+  label 0x2061 aqe_init_data
+  reloc 0x45   aqe_init_data 4      # "mov $0d, #aqe_init_data * 4"
+  label 0x80   aqe_preempt_entry
+  reloc 0x5e   aqe_preempt_entry    # "mov $02, #aqe_preempt_entry"
+
+The label of a relocation is always printed, even where nothing branches to
+it, and the disassembler warns if the immediate does not match.
+
 Modifiers
 =========
 
