@@ -162,6 +162,8 @@ struct tu_shader
          uint32_t mesh_vis_stride;
          uint32_t task_payload_stride;
          mesa_prim prim_type;
+         /* points drawn as degenerate triangles with the point polygon mode (a7xx) */
+         bool points_as_tris;
       } mesh;
    };
 };
@@ -218,7 +220,8 @@ bool
 tu_nir_lower_demote_samples(nir_shader *nir);
 
 bool
-tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out);
+tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out,
+                  bool points_as_tris);
 
 bool
 tu_nir_lower_task(nir_shader *nir);

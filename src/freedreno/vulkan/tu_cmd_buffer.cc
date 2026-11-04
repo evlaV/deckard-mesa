@@ -5710,6 +5710,8 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
 
    vk_cmd_set_dynamic_graphics_state(&cmd->vk,
                                      &gfx_pipeline->dynamic_state);
+   if (cmd->state.program.mesh_points_as_tris != pipeline->program.mesh_points_as_tris)
+      cmd->state.dirty |= TU_CMD_DIRTY_RAST;
    cmd->state.program = pipeline->program;
 
    cmd->state.load_state = pipeline->load_state;

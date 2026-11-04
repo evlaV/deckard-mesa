@@ -2674,6 +2674,7 @@ tu_emit_program_state(struct tu_cs *sub_cs,
       tu8_emit_mesh_shader_descriptor(&prog_cs, &per_prim, shaders);
       struct tu_draw_state descriptor = tu_cs_end_draw_state(sub_cs, &prog_cs);
       prog->mesh_shader_descriptor = descriptor.iova;
+      prog->mesh_points_as_tris = shaders[MESA_SHADER_MESH]->mesh.points_as_tris;
 
       tu_mesh_calc_buffer_layout(dev, prog, &per_prim, shaders);
    }
@@ -3770,7 +3771,8 @@ tu6_rast_size(struct tu_device *dev,
               bool multiview,
               bool per_view_viewport,
               bool disable_fs,
-              bool fdm)
+              bool fdm,
+              bool force_points)
 {
    if (CHIP == A6XX && dev->physical_device->info->props.is_a702) {
       return 17;
@@ -3789,7 +3791,8 @@ tu6_emit_rast(struct tu_cs *cs,
               bool multiview,
               bool per_view_viewport,
               bool disable_fs,
-              bool fdm)
+              bool fdm,
+              bool force_points)
 {
    enum a5xx_line_mode line_mode =
       rs->line.mode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_KHR ?
@@ -3824,7 +3827,8 @@ tu6_emit_rast(struct tu_cs *cs,
                      .zero_gb_scale_z = vp->depth_clip_negative_one_to_one ? 0 : 1,
                      .vp_clip_code_ignore = 1));
 
-   enum a6xx_polygon_mode polygon_mode = tu6_polygon_mode(rs->polygon_mode);
+   enum a6xx_polygon_mode polygon_mode =
+      force_points ? POLYMODE6_POINTS : tu6_polygon_mode(rs->polygon_mode);
 
    tu_cs_emit_regs(cs, VPC_RAST_CNTL(CHIP, polygon_mode));
 
@@ -4365,7 +4369,8 @@ tu_pipeline_builder_emit_state(struct tu_pipeline_builder *builder,
                       builder->device->physical_device->info->props.has_hw_multiview,
                    pipeline->program.per_view_viewport,
                    pipeline->disable_fs.disable_fs,
-                   builder->fragment_density_map);
+                   builder->fragment_density_map,
+                   pipeline->program.mesh_points_as_tris);
    DRAW_STATE_COND(ds, TU_DYNAMIC_STATE_DS,
               attachments_valid,
               builder->graphics_state.ds,
@@ -4640,7 +4645,8 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
                    hw_multiview,
                    cmd->state.per_view_viewport,
                    cmd->state.disable_fs,
-                   cmd->state.has_fdm);
+                   cmd->state.has_fdm,
+                   cmd->state.program.mesh_points_as_tris);
    DRAW_STATE_COND(ds, TU_DYNAMIC_STATE_DS,
               cmd->state.dirty & TU_CMD_DIRTY_SUBPASS,
               &cmd->vk.dynamic_graphics_state.ds,

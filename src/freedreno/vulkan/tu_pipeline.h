@@ -135,6 +135,7 @@ struct tu_program_state
 
       uint64_t mesh_shader_descriptor;
       struct tu_mesh_buffer_layout mesh_layout;
+      bool mesh_points_as_tris;
 
       struct tu_push_constant_range shared_consts;
 

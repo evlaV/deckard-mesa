@@ -3866,7 +3866,7 @@ tu_shader_create(struct tu_device *dev,
    if (nir->info.stage == MESA_SHADER_MESH) {
       nir_shader *passthrough_vs = NULL;
 
-      NIR_PASS(_, nir, tu_nir_lower_mesh, shader, &passthrough_vs);
+      NIR_PASS(_, nir, tu_nir_lower_mesh, shader, &passthrough_vs, dev->physical_device->info->chip == 7);
       shader->passthrough_vs = compile_passthrough_vs(dev, passthrough_vs, executable_info);
    } else if (nir->info.stage == MESA_SHADER_TASK) {
       NIR_PASS(_, nir, tu_nir_lower_task);

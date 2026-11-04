@@ -168,6 +168,18 @@ struct mesh_state {
    } per_vertex_outputs[32];
 
    unsigned per_prim_map_size;
+
+   /* a7xx: the AQE firmware only draws line and triangle lists, so a point primitive i is stored as the triangle
+    * (i, V, V + 1) and rasterized with the point polygon mode. V and V + 1 are two extra vertices per meshlet placed
+    * outside the viewport (but inside the guardband, so nothing is clipped): their points are scissored away and only
+    * point i is drawn. A zero-area (i, i, i) triangle would be culled before the polygon mode applies.
+    */
+   bool points_as_tris;
+   unsigned extra_vtx; /* V: the application's max_vertices_out */
+   /* With the point polygon mode the VS point size output of the passthrough VS results in no points being drawn, so
+    * the point size is not passed on and GRAS_SU_POINT_SIZE (1.0) is used: gl_PointSize other than 1 is ignored.
+    */
+   bool drop_psiz;
 };
 
 static unsigned
@@ -190,6 +202,9 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
        intrin->intrinsic == nir_intrinsic_store_per_primitive_output) {
       nir_io_semantics sem = nir_intrinsic_io_semantics(intrin);
 
+      if (state->drop_psiz && sem.location == VARYING_SLOT_PSIZ)
+         return NIR_LOWER_INSTR_PROGRESS_REPLACE;
+
       nir_def *ptr_base, *ptr_offset;
 
       unsigned component_offset = nir_intrinsic_component(intrin);
@@ -204,6 +219,11 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
       unsigned const_offset;
 
       if (sem.location == VARYING_SLOT_PRIMITIVE_INDICES) {
+         if (state->points_as_tris) {
+            nir_def *idx = nir_channel(b, store_val, 0);
+            store_val = nir_vec3(b, idx, nir_imm_int(b, state->extra_vtx), nir_imm_int(b, state->extra_vtx + 1));
+            write_mask = 0x7;
+         }
          store_val = nir_u2u16(b, store_val);
          /* There is an extra index for each primitive type. Add a zero at the end.
           * TODO: What is this for?
@@ -309,6 +329,29 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
          nir_def *ptr_base = nir_load_prim_count_base_ir3(b);
          nir_store_global_offset(b, num_prm, ptr_base, nir_imul_imm(b, meshlet_idx, 4),
                                  .align_mul = 4);
+
+         if (state->points_as_tris) {
+            /* the two off-screen vertices of the point triangles */
+            unsigned vertex_stride = state->num_per_vertex_outputs * 16;
+            nir_def *vbase = nir_load_varying_base_ir3(b);
+            nir_def *moff = nir_umul24(b, meshlet_idx,
+                                       nir_imm_int(b, vertex_stride * b->shader->info.mesh.max_vertices_out));
+            for (unsigned v = 0; v < 2; v++) {
+               for (unsigned i = 0; i < state->num_per_vertex_outputs; i++) {
+                  nir_def *val;
+                  if (state->per_vertex_outputs[i].slot == VARYING_SLOT_POS)
+                     val = nir_imm_vec4(b, 2.0f, v ? -2.0f : 2.0f, 0.0f, 1.0f);
+                  else if (state->per_vertex_outputs[i].slot == VARYING_SLOT_PSIZ)
+                     val = nir_imm_vec4(b, 1.0f, 0.0f, 0.0f, 0.0f);
+                  else
+                     continue;
+                  nir_store_global_offset(b, val, vbase, moff,
+                                          .base = (state->extra_vtx + v) * vertex_stride +
+                                                  state->per_vertex_outputs[i].dword_offset * 4,
+                                          .align_mul = 4);
+               }
+            }
+         }
       }
       nir_pop_if(b, if_elected);
 
@@ -396,12 +439,23 @@ create_passthrough_vs(const struct mesh_state *state, nir_shader *shader)
 }
 
 bool
-tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out)
+tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **passthrough_vs_out,
+                  bool points_as_tris)
 {
    struct mesh_state state = {};
    nir_function_impl *impl = nir_shader_get_entrypoint(nir);
 
+   if (points_as_tris && nir->info.mesh.primitive_type == MESA_PRIM_POINTS) {
+      state.points_as_tris = true;
+      state.extra_vtx = nir->info.mesh.max_vertices_out;
+      nir->info.mesh.max_vertices_out += 2;
+      nir->info.mesh.primitive_type = MESA_PRIM_TRIANGLES;
+      state.drop_psiz = true;
+   }
+
    uint64_t per_vertex_outputs = nir->info.outputs_written & ~nir->info.per_primitive_outputs;
+   if (state.drop_psiz)
+      per_vertex_outputs &= ~VARYING_BIT_PSIZ;
 
    u_foreach_bit64(slot, per_vertex_outputs) {
       state.per_vertex_outputs[state.num_per_vertex_outputs].dword_offset =
@@ -434,6 +488,7 @@ tu_nir_lower_mesh(nir_shader *nir, struct tu_shader *tu_shader, nir_shader **pas
       (nir->info.per_primitive_outputs & VARYING_BIT_CULL_PRIMITIVE) ? get_mesh_vis_stride(nir) : 0;
    tu_shader->mesh.task_payload_stride = get_task_payload_stride(nir);
    tu_shader->mesh.prim_type = nir->info.mesh.primitive_type;
+   tu_shader->mesh.points_as_tris = state.points_as_tris;
 
    return nir_progress(progress, impl, nir_metadata_none);
 }
