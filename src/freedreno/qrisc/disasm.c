@@ -295,10 +295,25 @@ disasm_section(struct emu *emu, struct isa_decode_options *options,
 
    unsigned preempt_instr = emu_get_reg32(emu, &PREEMPT_INSTR);
 
-   setup_packet_table(options, preempt_instr, emu->jmptbl, ARRAY_SIZE(emu->jmptbl));
+   /* Coprocessor microcode such as the a7xx AQE (gen70900_aqe.fw, which
+    * carries the same firmware id as the SQE) does not parse PM4 and its
+    * bootstrap never writes a packet table.  Don't label every packet
+    * name at address 0 and don't look for a jump table then.
+    */
+   bool has_packet_table = false;
+   for (unsigned i = 0; i < ARRAY_SIZE(emu->jmptbl); i++)
+      has_packet_table |= emu->jmptbl[i] != 0;
 
-   jumptbl_offset = find_jump_table(emu->instrs + offset, size, emu->jmptbl,
-                                    ARRAY_SIZE(emu->jmptbl));
+   if (has_packet_table) {
+      setup_packet_table(options, preempt_instr, emu->jmptbl, ARRAY_SIZE(emu->jmptbl));
+
+      jumptbl_offset = find_jump_table(emu->instrs + offset, size, emu->jmptbl,
+                                       ARRAY_SIZE(emu->jmptbl));
+   } else {
+      printf("; no packet table (coprocessor microcode, e.g. AQE)\n\n");
+      setup_packet_table(options, preempt_instr ? preempt_instr : ~0, emu->jmptbl, 0);
+      jumptbl_offset = ~0;
+   }
 
    qrisc_isa_disasm(emu->instrs + offset, MIN2(size, jumptbl_offset) * 4, stdout, options);
 
