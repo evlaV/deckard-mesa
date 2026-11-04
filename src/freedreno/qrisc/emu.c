@@ -257,12 +257,13 @@ emu_instr(struct emu *emu, struct qrisc_instr *instr)
       break;
    }
    case OPC_LOAD: {
-      uintptr_t addr = load_store_addr(emu, instr->src1) +
-            instr->immed;
+      /* the 12-bit offset is sign-extended by the hardware */
+      int32_t off = util_sign_extend(instr->immed, 12);
+      uintptr_t addr = load_store_addr(emu, instr->src1) + off;
 
       if (instr->preincrement) {
          uint32_t src1 = emu_get_gpr_reg(emu, instr->src1);
-         emu_set_gpr_reg(emu, instr->src1, src1 + instr->immed);
+         emu_set_gpr_reg(emu, instr->src1, src1 + off);
       }
 
       uint32_t val = emu_mem_read_dword(emu, addr);
@@ -272,12 +273,13 @@ emu_instr(struct emu *emu, struct qrisc_instr *instr)
       break;
    }
    case OPC_STORE: {
-      uintptr_t addr = load_store_addr(emu, instr->src2) +
-            instr->immed;
+      /* the 12-bit offset is sign-extended by the hardware */
+      int32_t off = util_sign_extend(instr->immed, 12);
+      uintptr_t addr = load_store_addr(emu, instr->src2) + off;
 
       if (instr->preincrement) {
          uint32_t src2 = emu_get_gpr_reg(emu, instr->src2);
-         emu_set_gpr_reg(emu, instr->src2, src2 + instr->immed);
+         emu_set_gpr_reg(emu, instr->src2, src2 + off);
       }
 
       uint32_t val = emu_get_gpr_reg(emu, instr->src1);

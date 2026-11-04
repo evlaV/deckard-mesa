@@ -113,6 +113,12 @@ field_print_cb(struct isa_print_state *state, const char *field_name, uint64_t v
       } else {
          isa_print(state, "0x%03x", (unsigned)val);
       }
+   } else if (!strcmp(field_name, "MEMOFF")) {
+      /* load/store offset: 12 bits, sign-extended by the hardware */
+      if (val & 0x800)
+         isa_print(state, "- 0x%x", (unsigned)(0x1000 - val));
+      else
+         isa_print(state, "+ 0x%x", (unsigned)val);
    } else if (!strcmp(field_name, "SQEREG")) {
       char *name = qrisc_sqe_reg_name(val);
       if (name) {

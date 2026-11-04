@@ -85,6 +85,30 @@ immed(int num)
 	instr->has_immed = true;
 }
 
+/* load/store offset: a 12-bit field that the hardware sign-extends, so the
+ * reachable range is base - 0x800 .. base + 0x7ff.
+ */
+static void
+memoff(bool negative, uint32_t num)
+{
+	if (negative) {
+		if (num > 0x800) {
+			fprintf(stderr, "error at line %d: load/store offset - 0x%x is out of range (max - 0x800)\n",
+			        yyget_lineno(), num);
+			exit(1);
+		}
+		num = (0x1000 - num) & 0xfff;
+	} else if (num > 0xfff) {
+		fprintf(stderr, "error at line %d: load/store offset 0x%x does not fit in 12 bits\n",
+		        yyget_lineno(), num);
+		exit(1);
+	} else if (num >= 0x800) {
+		fprintf(stderr, "warning at line %d: load/store offset + 0x%x is sign-extended by the "
+		        "hardware and accesses base - 0x%x\n", yyget_lineno(), num, 0x1000 - num);
+	}
+	immed(num & 0xfff);
+}
+
 static void
 shift(int num)
 {
@@ -330,10 +354,16 @@ preincrement:
 |              '!'   { instr->preincrement = true; }
 
 load_instr:        load_op reg ',' '[' reg '+' immediate ']' preincrement {
-                       dst($2); src1($5); immed($7);
+                       dst($2); src1($5); memoff(false, $7);
+}
+|                  load_op reg ',' '[' reg '-' immediate ']' preincrement {
+                       dst($2); src1($5); memoff(true, $7);
 }
 store_instr:       store_op reg ',' '[' reg '+' immediate ']' preincrement {
-                       src1($2); src2($5); immed($7);
+                       src1($2); src2($5); memoff(false, $7);
+}
+|                  store_op reg ',' '[' reg '-' immediate ']' preincrement {
+                       src1($2); src2($5); memoff(true, $7);
 }
 
 branch_op:         T_OP_BRNE      { new_instr(OPC_BRNE); }
