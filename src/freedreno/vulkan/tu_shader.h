@@ -87,6 +87,8 @@ struct tu_shader
    struct tu_bo *pvtmem_bo;
 
    struct tu_draw_state state;
+   /* GPU address of the main variant's instructions (its SP_xS_BASE) */
+   uint64_t binary_iova;
    union {
       struct tu_draw_state safe_const_state;
       struct tu_draw_state passthrough_vs_state;

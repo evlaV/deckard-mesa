@@ -3395,6 +3395,7 @@ tu_upload_shader(struct tu_device *dev,
    tu_cs_init_suballoc(&shader->cs, dev, &shader->bo);
 
    uint64_t iova = tu_upload_variant(&shader->cs, v);
+   shader->binary_iova = iova;
    uint64_t binning_iova = tu_upload_variant(&shader->cs, binning);
    uint64_t safe_const_iova = tu_upload_variant(&shader->cs, safe_const);
    uint64_t safe_const_binning_iova = tu_upload_variant(&shader->cs, safe_const_binning);

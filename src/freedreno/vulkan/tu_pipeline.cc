@@ -1591,9 +1591,14 @@ tu8_emit_mesh_shader_descriptor(struct tu_cs *cs,
                   COND(per_prim->shading_rate_loc != 0xff, A8XX_MESH_SHADER_17_SHADINGRATE));
    tu_cs_emit(cs, task ? get_ndrange_0(task->variant) : 0);
    tu_cs_emit(cs, get_ndrange_0(mesh->variant));
-   tu_cs_emit_qw(cs, 0); /* task SP_CS_BASE */
-   tu_cs_emit_qw(cs, 0); /* mesh SP_CS_BASE */
-   tu_cs_emit_qw(cs, 0); /* SP_PS_BASE */
+   /* The shader instruction addresses. The AQE programs SP_CS_BASE/SP_PS_BASE from these when the corresponding flag
+    * in dword 0 is set, and the flag layout differs between firmwares: on a750 (gen70900) bit 6, which is part of
+    * PRIM_TYPE here (MESH_PT_POINTLIST), means "set the mesh SP_CS_BASE". So never leave them 0.
+    */
+   const struct tu_shader *fs = shaders[MESA_SHADER_FRAGMENT];
+   tu_cs_emit_qw(cs, task ? task->binary_iova : 0); /* task SP_CS_BASE */
+   tu_cs_emit_qw(cs, mesh->binary_iova);            /* mesh SP_CS_BASE */
+   tu_cs_emit_qw(cs, fs ? fs->binary_iova : 0);     /* SP_PS_BASE */
 }
 
 static void
