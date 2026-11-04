@@ -12,6 +12,9 @@
  * QRisc disasm / asm helpers
  */
 
+int qrisc_load_symbols(const char *path);
+const char *qrisc_label_symbol(unsigned offset);
+
 unsigned qrisc_control_reg(const char *name);
 char * qrisc_control_reg_name(unsigned id);
 

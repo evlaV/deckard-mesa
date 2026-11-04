@@ -214,6 +214,12 @@ no_match(FILE *out, const BITSET_WORD *bitset, size_t size)
    }
 }
 
+static const char *
+branch_label_cb(void *data, unsigned offset, bool call)
+{
+   return qrisc_label_symbol(offset);
+}
+
 static void
 get_decode_options(struct isa_decode_options *options)
 {
@@ -223,6 +229,7 @@ get_decode_options(struct isa_decode_options *options)
       .field_cb = field_cb,
       .field_print_cb = field_print_cb,
       .pre_instr_cb = pre_instr_cb,
+      .branch_label_cb = branch_label_cb,
       .post_instr_cb = post_instr_cb,
       .no_match_cb = no_match,
    };
@@ -499,13 +506,14 @@ static void
 usage(void)
 {
    fprintf(stderr, "Usage:\n"
-                   "\tdisasm [-g GPUVER] [-v] [-c] [-r] [-A] filename.asm\n"
+                   "\tdisasm [-g GPUVER] [-v] [-c] [-r] [-A] [-s SYMFILE] filename.asm\n"
                    "\t\t-A - annotate every immediate that matches a GPU register\n"
                    "\t\t     (default: only move-immediates and raw data words)\n"
                    "\t\t-c - use colors\n"
                    "\t\t-e - emulator mode\n"
                    "\t\t-g - override GPU firmware id\n"
                    "\t\t-r - raw disasm, don't try to find jumptable\n"
+                   "\t\t-s - symbol file: \"label <offset> <name>\" / \"creg <offset> <name>\" lines\n"
                    "\t\t-v - verbose output\n"
            );
    exit(2);
@@ -524,8 +532,12 @@ main(int argc, char **argv)
    enum qrisc_fwid fw_id = 0;
 
    /* Argument parsing: */
-   while ((c = getopt(argc, argv, "Aceg:rvu")) != -1) {
+   while ((c = getopt(argc, argv, "Aceg:rs:vu")) != -1) {
       switch (c) {
+      case 's':
+         if (qrisc_load_symbols(optarg) < 0)
+            return 1;
+         break;
       case 'A':
          annotate_all_immeds = true;
          break;

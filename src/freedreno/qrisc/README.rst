@@ -465,6 +465,44 @@ high 32 bits come from the ``@LOAD_STORE_HI``
 switch routine and even then very sparingly, before the memory read/write queue
 state is saved while it is being restored.
 
+The offset is a 12-bit immediate that the hardware **sign-extends**, so the
+reachable range is ``base - 0x800`` to ``base + 0x7ff``: on a750 the AQE
+executing ``load $03, [$17 + 0xde8]`` faulted at ``$17 - 0x218``. The
+disassembler prints such offsets as ``[$17 - 0x218]``, the assembler accepts
+both forms (and warns about ``+ 0x800`` .. ``+ 0xfff``), and the emulator
+sign-extends.
+
+AQE Microcode
+=============
+
+The a7xx AQE (``gen70900_aqe.fw``) uses the same instruction set and the same
+firmware id as the SQE, but it does not parse PM4: its bootstrap never writes a
+packet table, so the disassembler prints no packet labels or jump table for it
+(it says so in a comment). Unlike the SQE microcode it is compiled from C and
+uses ``load``/``store`` heavily, with ``$sp`` as a stack pointer and ``$17``
+as the base of its data memory. The SQE/AQE handshake registers
+(``@AQE0_REQUEST``, ``@AQE0_REPLY``, ``@AQE0_REPLY_PENDING``, ...) are in
+``adreno_control_regs.xml``.
+
+Annotations and Symbol Files
+============================
+
+Unshifted move-immediates and raw data words whose value matches a GPU
+register offset get the register name as a comment (``mov $03, 0xa9b4 ;
+SP_CS_BASE``). ALU immediates are not annotated, since they are almost always
+masks, sizes and strides; ``-A`` annotates every immediate as before.
+
+Names that are not in the register database, such as functions or the
+firmware's own scratch control registers, can be supplied in a symbol file with
+``-s``::
+
+  # comment
+  label 0x1fd9 cmdq_reserve     # name of the branch/call target at that instruction
+  creg  0x4c1  CMDQ_PACKETS     # name of a control register, printed as @CMDQ_PACKETS
+
+Pass the same file to the assembler (``qrisc-asm -s``) so that the ``@names``
+resolve; the listing then still reassembles to an identical image.
+
 Modifiers
 =========
 

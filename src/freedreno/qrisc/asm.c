@@ -359,9 +359,11 @@ static void
 usage(void)
 {
    fprintf(stderr, "Usage:\n"
-                   "\tasm [-g FWID] filename.asm filename.fw\n"
+                   "\tasm [-g FWID] [-s SYMFILE] filename.asm filename.fw\n"
                    "\t\t-g - firmware id (hex, e.g. 520), for .asm files that\n"
-                   "\t\t     lack the version header (loose snippets)\n");
+                   "\t\t     lack the version header (loose snippets)\n"
+                   "\t\t-s - symbol file (as for disasm), for @names of control\n"
+                   "\t\t     registers that are not in the register database\n");
    exit(2);
 }
 
@@ -373,8 +375,12 @@ main(int argc, char **argv)
    int ret, c;
    enum qrisc_fwid fw_id = 0;
 
-   while ((c = getopt(argc, argv, "g:")) != -1) {
+   while ((c = getopt(argc, argv, "g:s:")) != -1) {
       switch (c) {
+      case 's':
+         if (qrisc_load_symbols(optarg) < 0)
+            return 1;
+         break;
       case 'g':
          fw_id = strtol(optarg, NULL, 16);
          break;

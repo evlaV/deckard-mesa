@@ -5,6 +5,8 @@
 
 #include <err.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -31,6 +33,116 @@ find_reg(struct rnndomain *dom, const char *name)
       if (!strcmp(name, dom->subelems[i]->name))
          return dom->subelems[i]->offset;
    }
+   return -1;
+}
+
+/*
+ * Optional symbol file (-s): names for labels (instruction offsets) and
+ * control registers, e.g. for firmware-defined scratch registers that are
+ * not hardware registers and so are not in adreno_control_regs.xml.
+ *
+ *    # comment
+ *    label 0x1fd9 cmdq_reserve
+ *    creg  0x4c1  CMDQ_PACKETS
+ */
+struct qrisc_symbol {
+   bool is_creg;
+   unsigned val;
+   char *name;
+};
+
+static struct qrisc_symbol *symbols;
+static unsigned num_symbols;
+
+static bool
+valid_identifier(const char *s)
+{
+   if (!(s[0] == '_' || (s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z')))
+      return false;
+   for (; *s; s++) {
+      if (!(*s == '_' || (*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+            (*s >= '0' && *s <= '9')))
+         return false;
+   }
+   return true;
+}
+
+int
+qrisc_load_symbols(const char *path)
+{
+   FILE *f = fopen(path, "r");
+   if (!f) {
+      fprintf(stderr, "could not open symbol file \"%s\"\n", path);
+      return -1;
+   }
+
+   char line[512];
+   unsigned lineno = 0;
+   while (fgets(line, sizeof(line), f)) {
+      char kind[16], name[256];
+      unsigned val;
+
+      lineno++;
+      char *hash = strchr(line, '#');
+      if (hash)
+         *hash = '\0';
+      if (sscanf(line, " %15s", kind) != 1)
+         continue;   /* blank or comment */
+
+      if (sscanf(line, " %15s %i %255s", kind, &val, name) != 3 ||
+          (strcmp(kind, "label") && strcmp(kind, "creg")) || !valid_identifier(name)) {
+         fprintf(stderr, "%s:%u: expected \"label|creg <offset> <identifier>\"\n", path, lineno);
+         fclose(f);
+         return -1;
+      }
+
+      bool is_creg = !strcmp(kind, "creg");
+      for (unsigned i = 0; i < num_symbols; i++) {
+         if (symbols[i].is_creg == is_creg &&
+             (symbols[i].val == val || !strcmp(symbols[i].name, name))) {
+            fprintf(stderr, "%s:%u: %s 0x%x / %s defined twice\n", path, lineno, kind, val, name);
+            fclose(f);
+            return -1;
+         }
+      }
+
+      symbols = realloc(symbols, (num_symbols + 1) * sizeof(*symbols));
+      symbols[num_symbols++] = (struct qrisc_symbol) {
+         .is_creg = is_creg, .val = val, .name = strdup(name),
+      };
+   }
+
+   fclose(f);
+   return 0;
+}
+
+/**
+ * Name of the label at instruction offset from the symbol file, or NULL
+ */
+const char *
+qrisc_label_symbol(unsigned offset)
+{
+   for (unsigned i = 0; i < num_symbols; i++)
+      if (!symbols[i].is_creg && symbols[i].val == offset)
+         return symbols[i].name;
+   return NULL;
+}
+
+static const char *
+creg_symbol_name(unsigned id)
+{
+   for (unsigned i = 0; i < num_symbols; i++)
+      if (symbols[i].is_creg && symbols[i].val == id)
+         return symbols[i].name;
+   return NULL;
+}
+
+static int
+creg_symbol(const char *name)
+{
+   for (unsigned i = 0; i < num_symbols; i++)
+      if (symbols[i].is_creg && !strcmp(symbols[i].name, name))
+         return symbols[i].val;
    return -1;
 }
 
@@ -68,6 +180,9 @@ reg_name(struct rnndomain *dom, unsigned id)
 unsigned
 qrisc_control_reg(const char *name)
 {
+   int sym = creg_symbol(name);
+   if (sym >= 0)
+      return sym;
    return reg(control_regs, "control", name);
 }
 
@@ -95,6 +210,9 @@ qrisc_sqe_reg(const char *name)
 char *
 qrisc_control_reg_name(unsigned id)
 {
+   const char *sym = creg_symbol_name(id);
+   if (sym)
+      return strdup(sym);
    return reg_name(control_regs, id);
 }
 
