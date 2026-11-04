@@ -564,7 +564,43 @@ xsi:schemaLocation="https://gitlab.freedesktop.org/freedreno/ rules-fd.xsd">
 
 	<reg32 name="DDE_PM4_WRITE" offset="0x191" variants="A8XX-"/>
 
+	<!--
+		SQE <-> AQE request/reply handshake, one register per AQE instance
+		(AQEn = base + n; the AQE firmware addresses them as [$14 + base]
+		with $14 = its instance).  Roles inferred from the a750 SQE and AQE
+		firmwares (gen70900): the SQE writes REQUEST/REQUEST_DATA and reads
+		REPLY, the AQE the other way round; REPLY_PENDING is set by the AQE
+		after it writes REPLY and cleared by the SQE when it takes it, both
+		under COPROCESSOR_LOCK bit 6 on a8xx (the a750 AQE writes REPLY and
+		REPLY_PENDING without the lock).
+	-->
+	<reg32 name="AQE0_REQUEST" offset="0x261">
+		<doc> Request header from the SQE; the type is in bits 31:30 (2 = payload read, 3 = consumed position). </doc>
+	</reg32>
+	<reg32 name="AQE1_REQUEST" offset="0x262"/>
+	<reg32 name="AQE0_REQUEST_DATA" offset="0x263">
+		<doc> Second request word from the SQE (payload address / position). </doc>
+	</reg32>
+	<reg32 name="AQE1_REQUEST_DATA" offset="0x264"/>
+	<reg32 name="AQE0_REPLY" offset="0x265">
+		<doc> Reply from the AQE: type in bits 31:30, write position of its command queue below. </doc>
+	</reg32>
+	<reg32 name="AQE1_REPLY" offset="0x266"/>
+	<reg32 name="AQE0_MAILBOX0" offset="0x267">
+		<doc> On-chip timestamp slots written by CP_EVENT_WRITE7 (fences) and polled by the AQE: slot + 2 * instance. </doc>
+	</reg32>
+	<reg32 name="AQE0_MAILBOX1" offset="0x268"/>
+	<reg32 name="AQE1_MAILBOX0" offset="0x269"/>
+	<reg32 name="AQE1_MAILBOX1" offset="0x26a"/>
 	<reg64 name="AQE1_PREEMPT_BASE" offset="0x26e"/>
+	<reg32 name="AQE0_REQUEST_STATUS" offset="0x271">
+		<doc> Bit 0 set while there is no new request for the AQE to take. </doc>
+	</reg32>
+	<reg32 name="AQE1_REQUEST_STATUS" offset="0x272"/>
+	<reg32 name="AQE0_REPLY_PENDING" offset="0x273">
+		<doc> 1 = a REPLY the SQE has not taken yet. </doc>
+	</reg32>
+	<reg32 name="AQE1_REPLY_PENDING" offset="0x274"/>
 	<reg64 name="AQE0_PREEMPT_BASE" offset="0x275"/>
 
 	<reg32 name="THREAD_SYNC" offset="0x27f"/>
