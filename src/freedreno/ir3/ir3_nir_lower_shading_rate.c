@@ -55,7 +55,8 @@ static bool
 nir_lower_primitive_shading_rate(nir_builder *b, nir_intrinsic_instr *intr,
                                  UNUSED void *cb_data)
 {
-   if (intr->intrinsic != nir_intrinsic_store_output)
+   if (intr->intrinsic != nir_intrinsic_store_output &&
+       intr->intrinsic != nir_intrinsic_store_per_primitive_output)
       return false;
 
    unsigned loc = nir_intrinsic_io_semantics(intr).location;

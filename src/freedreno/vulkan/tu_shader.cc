@@ -3872,6 +3872,12 @@ tu_shader_create(struct tu_device *dev,
    if (nir->info.stage == MESA_SHADER_MESH) {
       nir_shader *passthrough_vs = NULL;
 
+      /* Convert the primitive shading rate to the HW encoding before tu_nir_lower_mesh packs it into the last index
+       * of the primitive; ir3 only does this for VS/GS outputs.
+       */
+      if (!dev->physical_device->info->props.shading_rate_matches_vk)
+         NIR_PASS(_, nir, ir3_nir_lower_primitive_shading_rate);
+
       NIR_PASS(_, nir, tu_nir_lower_mesh, shader, &passthrough_vs, dev->physical_device->info->chip == 7);
       shader->passthrough_vs = compile_passthrough_vs(dev, passthrough_vs, executable_info);
    } else if (nir->info.stage == MESA_SHADER_TASK) {

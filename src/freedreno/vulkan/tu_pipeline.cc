@@ -923,21 +923,10 @@ tu6_emit_vpc(struct tu_cs *cs,
    uint32_t pointsize_loc = 0xff, position_loc = 0xff, layer_loc = 0xff, view_loc = 0xff;
    uint32_t shading_rate_loc = 0xff;
 
-   if (per_prim) {
-      /* With mesh shaders, these values come from the per-primitive varying space, which is allocated elsewhere.
-       */
-      layer_loc = per_prim->layer_loc;
-      if (layer_loc != 0xff)
-         linkage.max_loc = MAX2(linkage.max_loc, layer_loc + 1);
-
-      view_loc = per_prim->view_loc;
-      if (view_loc != 0xff)
-         linkage.max_loc = MAX2(linkage.max_loc, view_loc + 1);
-
-      shading_rate_loc = per_prim->shading_rate_loc;
-      if (shading_rate_loc != 0xff)
-         linkage.max_loc = MAX2(linkage.max_loc, shading_rate_loc + 1);
-   } else {
+   /* With mesh shaders, layer/viewport/shading rate are packed into the last index of each primitive (see
+    * BUILTIN_OUTPUTS in tu_nir_lower_mesh.cc), so they get no VPC location here.
+    */
+   if (!per_prim) {
       if (layer_regid != regid(63, 0)) {
          layer_loc = linkage.max_loc;
          ir3_link_add(&linkage, VARYING_SLOT_LAYER, layer_regid, 0x1, linkage.max_loc);
@@ -1162,17 +1151,18 @@ tu6_emit_vpc(struct tu_cs *cs,
          crb.add(PC_VS_CNTL(CHIP,
             .stride_in_vpc = COND(last, linkage.max_loc),
             .psize = COND(last, VALIDREG(pointsize_regid)),
-            .layer = COND(last, VALIDREG(layer_regid)),
-            .view = COND(last, VALIDREG(view_regid)),
+            .layer = COND(last, VALIDREG(layer_regid) || (per_prim && per_prim->layer_loc != 0xff)),
+            .view = COND(last, VALIDREG(view_regid) || (per_prim && per_prim->view_loc != 0xff)),
             .primitive_id = primid,
             .clip_mask = COND(last, clip_cull_mask),
-            .shadingrate = COND(last, VALIDREG(shading_rate_regid)),
+            .shadingrate = COND(last, VALIDREG(shading_rate_regid) ||
+                                      (per_prim && per_prim->shading_rate_loc != 0xff)),
          ));
          if (per_prim) {
             crb.add(VPC_MESH_CNTL(CHIP, .meshshaderen = true,
-                                         .view = view_loc != 0xff,
-                                         .layer = layer_loc != 0xff,
-                                         .shadingrate = shading_rate_loc != 0xff));
+                                         .view = per_prim->view_loc != 0xff,
+                                         .layer = per_prim->layer_loc != 0xff,
+                                         .shadingrate = per_prim->shading_rate_loc != 0xff));
             crb.add(VPC_PA_BUFFER_STRIDE(CHIP, per_prim->buffer_stride));
          } else if (CHIP >= A7XX) {
             crb.add(VPC_MESH_CNTL(CHIP, 0));
@@ -2761,7 +2751,9 @@ tu_emit_program_state(struct tu_cs *sub_cs,
       (prog->per_view_viewport &&
        !dev->vk.enabled_features.multiviewPerViewViewports) ||
       prog->per_layer_viewport;
-   prog->writes_shading_rate = last_variant->writes_shading_rate;
+   prog->writes_shading_rate = last_variant->writes_shading_rate ||
+      (shaders[MESA_SHADER_MESH] &&
+       (shaders[MESA_SHADER_MESH]->mesh.per_prim_varyings_written & VARYING_BIT_PRIMITIVE_SHADING_RATE));
    prog->reads_shading_rate = fs->reads_shading_rate;
 }
 

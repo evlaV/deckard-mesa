@@ -192,6 +192,141 @@ get_mesh_vis_stride(nir_shader *shader)
 /* These per-primitive outputs are written to different buffers from the normal varying buffers. */
 #define SPECIAL_OUTPUTS (VARYING_BIT_CULL_PRIMITIVE | VARYING_BIT_PRIMITIVE_INDICES)
 
+/* These per-primitive outputs can be read by the fragment shader, so they can be written to the normal varying buffer,
+ * but also we need pack the value into the last index of the primitive to tell the HW what to do. The format is the
+ * following:
+ *
+ * bits 0-3: viewport
+ * bits 4-7: shading rate
+ * bits 8-15: layer
+ */
+#define BUILTIN_OUTPUTS (VARYING_BIT_LAYER | VARYING_BIT_VIEWPORT | VARYING_BIT_PRIMITIVE_SHADING_RATE)
+
+/* Only primitive types with a padding index have room for the builtin outputs (tu_mesh_vertices_per_prim). */
+static bool
+has_builtin_index(nir_shader *shader)
+{
+   return tu_mesh_vertices_per_prim(shader->info.mesh.primitive_type) >
+      mesa_vertices_per_prim(shader->info.mesh.primitive_type);
+}
+
+static bool
+writes_builtin_outputs(nir_shader *shader)
+{
+   return has_builtin_index(shader) && (shader->info.per_primitive_outputs & BUILTIN_OUTPUTS);
+}
+
+/* Initialize the last index of all primitives, which contains the builtin outputs, to 0. There are two cases:
+ *
+ * 1. If there are fewer primitives than invocations, we can have each invocation write to its corresponding primitive
+ *    but need to skip some invocations.
+ * 2. If there are more primitives than invocations, the N invocations clear the first N primitives and then each
+ *    invocation advances by N until we hit case 1 above.
+ */
+/* load_local_invocation_index is not available at this point, so build it from the local invocation ID. */
+static nir_def *
+local_invocation_index(nir_builder *b)
+{
+   nir_def *id = nir_load_local_invocation_id(b);
+   unsigned sx = b->shader->info.workgroup_size[0], sy = b->shader->info.workgroup_size[1];
+   nir_def *idx = nir_channel(b, id, 0);
+   if (sy > 1)
+      idx = nir_iadd(b, idx, nir_imul_imm(b, nir_channel(b, id, 1), sx));
+   if (b->shader->info.workgroup_size[2] > 1)
+      idx = nir_iadd(b, idx, nir_imul_imm(b, nir_channel(b, id, 2), sx * sy));
+   return idx;
+}
+
+static void
+init_builtin_outputs(nir_builder *b, nir_def *meshlet_idx)
+{
+   nir_def *local_idx = local_invocation_index(b);
+   nir_def *ptr_base = nir_load_index_base_ir3(b);
+   unsigned prim_stride = tu_mesh_vertices_per_prim(b->shader->info.mesh.primitive_type) * sizeof(uint16_t);
+   unsigned meshlet_stride = prim_stride * b->shader->info.mesh.max_primitives_out;
+
+   nir_def *ptr_offset = nir_umul24(b, meshlet_idx, nir_imm_int(b, meshlet_stride));
+   ptr_offset = nir_iadd(b, ptr_offset, nir_umul24(b, local_idx, nir_imm_int(b, prim_stride)));
+
+   unsigned remaining_prim_count = b->shader->info.mesh.max_primitives_out;
+   unsigned invocations = b->shader->info.workgroup_size[0] * b->shader->info.workgroup_size[1] *
+      b->shader->info.workgroup_size[2];
+
+   unsigned const_offset = 0;
+   while (remaining_prim_count > invocations) {
+      nir_store_global_offset(b, nir_imm_intN_t(b, 0, 16), ptr_base, ptr_offset,
+                              .base = const_offset + prim_stride - sizeof(uint16_t),
+                              .align_mul = 2);
+      const_offset += prim_stride * invocations;
+      remaining_prim_count -= invocations;
+   }
+
+   nir_if *elected = NULL;
+   if (remaining_prim_count < invocations) {
+      elected = nir_push_if(b, nir_ult_imm(b, local_idx, remaining_prim_count));
+   }
+
+   {
+      nir_store_global_offset(b, nir_imm_intN_t(b, 0, 16), ptr_base, ptr_offset,
+                              .base = const_offset + prim_stride - sizeof(uint16_t),
+                              .align_mul = 2);
+   }
+
+   if (elected)
+      nir_pop_if(b, elected);
+}
+
+/* Emulate 16-bit atomic.or with a 32-bit atomic. */
+static void
+atomic_or_16bit(nir_builder *b, nir_def *ptr, nir_def *val)
+{
+   val = nir_u2u32(b, val);
+   nir_if *nif = nir_push_if(b, nir_test_mask(b, ptr, 0x2));
+   {
+      nir_global_atomic(b, 32, nir_iand_imm(b, ptr, ~0x2ull), nir_ishl_imm(b, val, 16),
+                        .atomic_op = nir_atomic_op_ior);
+   }
+   nir_push_else(b, nif);
+   {
+      nir_global_atomic(b, 32, ptr, val,
+                        .atomic_op = nir_atomic_op_ior);
+   }
+   nir_pop_if(b, nif);
+}
+
+static void
+set_builtin_output(nir_builder *b, nir_def *meshlet_idx, nir_def *array_idx, gl_varying_slot slot, nir_def *value)
+{
+   nir_def *ptr_base = nir_load_index_base_ir3(b);
+   unsigned prim_stride = tu_mesh_vertices_per_prim(b->shader->info.mesh.primitive_type) * sizeof(uint16_t);
+   unsigned meshlet_stride = prim_stride * b->shader->info.mesh.max_primitives_out;
+
+   nir_def *ptr_offset = nir_umul24(b, meshlet_idx, nir_imm_int(b, meshlet_stride));
+   ptr_offset = nir_iadd(b, ptr_offset, nir_umul24(b, array_idx, nir_imm_int(b, prim_stride)));
+
+   unsigned offset;
+   switch (slot) {
+   case VARYING_SLOT_VIEWPORT:
+      offset = 0;
+      break;
+   case VARYING_SLOT_PRIMITIVE_SHADING_RATE:
+      offset = 4;
+      break;
+   case VARYING_SLOT_LAYER:
+      offset = 8;
+      break;
+   default:
+      UNREACHABLE("bad slot");
+   }
+
+   value = nir_u2u16(b, value);
+   value = nir_ishl_imm(b, value, offset);
+   nir_def *ptr = nir_iadd(b, ptr_base, nir_u2u64(b, nir_iadd_imm(b, ptr_offset, prim_stride - sizeof(uint16_t))));
+
+   /* OR in the value. */
+   atomic_or_16bit(b, ptr, value);
+}
+
 static nir_def *
 lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
 {
@@ -225,10 +360,13 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
             write_mask = 0x7;
          }
          store_val = nir_u2u16(b, store_val);
-         /* There is an extra index for each primitive type. Add a zero at the end.
-          * TODO: What is this for?
+         /* The last index of each primitive holds the builtin outputs (see BUILTIN_OUTPUTS). If we aren't writing
+          * builtin outputs, set it to 0 here. Otherwise init_builtin_outputs clears it at SetMeshOutputs time.
           */
-         store_val = nir_pad_vector_imm_int(b, store_val, 0, store_val->num_components + 1);
+         if (has_builtin_index(b->shader) && !writes_builtin_outputs(b->shader)) {
+            write_mask |= BITSET_BIT(store_val->num_components);
+            store_val = nir_pad_vector_imm_int(b, store_val, 0, store_val->num_components + 1);
+         }
          ptr_base = nir_load_index_base_ir3(b);
          ptr_offset = nir_imm_int(b, 0);
          unsigned prim_stride = tu_mesh_vertices_per_prim(b->shader->info.mesh.primitive_type) * sizeof(uint16_t);
@@ -287,6 +425,10 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
          array_stride = nir_load_per_primitive_stride_ir3(b);
          meshlet_stride = nir_umul24(b, nir_load_per_primitive_stride_ir3(b),
                                      nir_imm_int(b, b->shader->info.mesh.max_primitives_out));
+
+         if ((BITFIELD64_BIT(sem.location) & BUILTIN_OUTPUTS) && has_builtin_index(b->shader)) {
+            set_builtin_output(b, meshlet_idx, arr_index, (gl_varying_slot)sem.location, store_val);
+         }
       }
 
       ptr_offset = nir_iadd(b, ptr_offset, nir_umul24(b, arr_index, array_stride));
@@ -355,7 +497,10 @@ lower_mesh_intrinsic(nir_builder *b, nir_instr *instr, void *_state)
       }
       nir_pop_if(b, if_elected);
 
-      if (b->shader->info.per_primitive_outputs & VARYING_BIT_CULL_PRIMITIVE) {
+      if (writes_builtin_outputs(b->shader))
+         init_builtin_outputs(b, nir_channel(b, nir_load_workgroup_id(b), 0));
+
+      if ((b->shader->info.per_primitive_outputs & VARYING_BIT_CULL_PRIMITIVE) || writes_builtin_outputs(b->shader)) {
          /* Wait for writes to meshlet visibility to land. */
          nir_barrier(b, .execution_scope = SCOPE_WORKGROUP,
                         .memory_scope = SCOPE_WORKGROUP,
