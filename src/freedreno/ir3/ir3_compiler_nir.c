@@ -5163,14 +5163,27 @@ non_per_prim_inputs(struct ir3_context *ctx)
       VARYING_BIT_VIEWPORT | VARYING_BIT_LAYER |
       VARYING_BIT_PRIMITIVE_SHADING_RATE | VARYING_BIT_PRIMITIVE_ID;
    
-   return ctx->s->info.inputs_read & ~per_prim_builtins;
+   return ctx->s->info.inputs_read & ~per_prim_builtins & ~ctx->s->info.per_primitive_inputs;
+}
+
+/* VPC only fetches per-primitive varyings (VPC_PA_CNTL) for locations at or above the stride of the last geometry
+ * stage's outputs (VPC_xS_CNTL.STRIDE_IN_VPC); below that it hands the FS per-vertex data. That stride also covers the
+ * position, point size and clip distances that turnip places after the normal varyings, so leave room for them.
+ */
+#define PER_PRIM_VERTEX_ONLY_SLOTS 4
+
+static unsigned
+per_prim_first_slot(struct ir3_context *ctx)
+{
+   return util_bitcount64(non_per_prim_inputs(ctx)) +
+      (ctx->s->info.per_primitive_inputs ? PER_PRIM_VERTEX_ONLY_SLOTS : 0);
 }
 
 static void
 setup_frag_inputs(struct ir3_context *ctx)
 {
    /* Per-primitive varyings go after normal varyings. */
-   ctx->so->per_prim_start = util_bitcount64(non_per_prim_inputs(ctx)) * 4;
+   ctx->so->per_prim_start = per_prim_first_slot(ctx) * 4;
    ctx->so->per_prim_count = util_bitcount64(per_prim_inputs(ctx)) * 4;
 }
 
@@ -5183,7 +5196,7 @@ input_loc(struct ir3_context *ctx, nir_intrinsic_instr *intr,
        (ctx->so->type == MESA_SHADER_FRAGMENT &&
         (slot == VARYING_SLOT_VIEWPORT || slot == VARYING_SLOT_LAYER ||
          slot == VARYING_SLOT_PRIMITIVE_SHADING_RATE))) {
-      return util_bitcount64(non_per_prim_inputs(ctx)) +
+      return per_prim_first_slot(ctx) +
          util_bitcount64(per_prim_inputs(ctx) & BITFIELD64_MASK(slot));
    } else if (ctx->so->type == MESA_SHADER_FRAGMENT) {
       return util_bitcount64(non_per_prim_inputs(ctx) & BITFIELD64_MASK(slot));

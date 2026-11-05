@@ -749,6 +749,12 @@ tu6_emit_prim_varying_map(struct tu_cs *cs,
       tu_cs_emit_regs(cs, VPC_PA_CNTL(CHIP, .numtotalpavar = num_locs,
                                             .startvaryid4pa = start_loc,
                                             .vpcpafetchen = num_locs != 0));
+      if constexpr (CHIP == A7XX) {
+         tu_cs_emit_regs(cs, PC_PA_CNTL(CHIP,
+                                        .mesh_primiden = num_locs != 0 ||
+                                                         (producer->mesh.per_prim_varyings_written &
+                                                          VARYING_BIT_PRIMITIVE_ID)));
+      }
    }
 }
 
@@ -881,6 +887,20 @@ tu6_emit_vpc(struct tu_cs *cs,
    if (fs)
       ir3_link_shaders(&linkage, last_shader, fs, true);
 
+   /* Per-primitive inputs are fetched by VPC from the PA buffer, not written by the last stage. Keep them out of the
+    * output stride: position etc. go in the gap ir3 leaves before them (see PER_PRIM_VERTEX_ONLY_SLOTS).
+    */
+   if (per_prim && fs) {
+      linkage.max_loc = 0;
+      for (unsigned i = 0; i < fs->inputs_count; i++) {
+         if (fs->inputs[i].compmask && fs->inputs[i].bary && !fs->inputs[i].per_prim &&
+             fs->inputs[i].inloc < fs->total_in) {
+            linkage.max_loc = MAX2(linkage.max_loc,
+                                   fs->inputs[i].inloc + util_last_bit(fs->inputs[i].compmask));
+         }
+      }
+   }
+
    if (last_shader->stream_output.num_outputs)
       ir3_link_stream_out(&linkage, last_shader);
 
@@ -989,6 +1009,9 @@ tu6_emit_vpc(struct tu_cs *cs,
     */
    if (linkage.cnt == 0)
       ir3_link_add(&linkage, 0, 0, 0x1, linkage.max_loc);
+
+   if (per_prim && fs && fs->per_prim_count)
+      assert(linkage.max_loc <= fs->per_prim_start);
 
    tu6_emit_vpc_varying_modes<CHIP>(cs, fs, last_shader);
 

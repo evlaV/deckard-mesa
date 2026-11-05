@@ -3153,6 +3153,11 @@ by a particular renderpass/blit.
 	</bitset>
 
 	<reg32 offset="0x9237" name="VPC_PA_CNTL" type="a7xx_vpc_pa_cntl" variants="A7XX" usage="cmd"/>
+
+	<bitset name="a7xx_pc_pa_cntl" inline="yes">
+		<bitfield name="MESH_PRIMIDEN" pos="0" type="boolean"/>
+	</bitset>
+	<reg32 offset="0x9b0a" name="PC_PA_CNTL" variants="A7XX" type="a7xx_pc_pa_cntl" usage="cmd"/>
 	<reg32 offset="0x9311" name="VPC_PA_CNTL" type="a7xx_vpc_pa_cntl" variants="A8XX-" usage="cmd"/>
 
 	<reg32 offset="0x923b" name="VPC_PA_BUFFER_STRIDE" type="uint" variants="A7XX" usage="cmd"/>
