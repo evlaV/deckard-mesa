@@ -1779,7 +1779,12 @@ ir3_get_driver_param_info(const nir_shader *shader,
       param_info->offset = IR3_DP_CS(base_group_x);
       break;
    case nir_intrinsic_load_num_workgroups:
-      param_info->offset = IR3_DP_CS(num_work_groups_x);
+      if (shader->info.stage == MESA_SHADER_MESH)
+         param_info->offset = IR3_DP_MESH(wgcount_x);
+      else if (shader->info.stage == MESA_SHADER_TASK)
+         param_info->offset = IR3_DP_TASK(wgcount_x);
+      else
+         param_info->offset = IR3_DP_CS(num_work_groups_x);
       break;
    case nir_intrinsic_load_workgroup_size:
       param_info->offset = IR3_DP_CS(local_group_size_x);

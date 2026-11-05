@@ -3167,12 +3167,17 @@ emit_intrinsic(struct ir3_context *ctx, nir_intrinsic_instr *intr)
       }
       create_rpt = true;
       break;
-   case nir_intrinsic_load_num_workgroups:
+   case nir_intrinsic_load_num_workgroups: {
+      /* Task/mesh shaders get the workgroup counts from the AQE in their own driver params layout. */
+      unsigned base = ctx->so->type == MESA_SHADER_MESH ? IR3_DP_MESH(wgcount_x) :
+                      ctx->so->type == MESA_SHADER_TASK ? IR3_DP_TASK(wgcount_x) :
+                      IR3_DP_CS(num_work_groups_x);
       for (int i = 0; i < dest_components; i++) {
-         dst[i] = create_driver_param(ctx, IR3_DP_CS(num_work_groups_x) + i);
+         dst[i] = create_driver_param(ctx, base + i);
       }
       create_rpt = true;
       break;
+   }
    case nir_intrinsic_load_workgroup_size:
       for (int i = 0; i < dest_components; i++) {
          dst[i] = create_driver_param(ctx, IR3_DP_CS(local_group_size_x) + i);
