@@ -9920,6 +9920,55 @@ tu_emit_mesh_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    tu_cs_emit(cs, layout->mesh_count_size);
 }
 
+/* Task and mesh shaders get the AQE-provided params (buffer bases, workgroup counts, ...) as constants, but the driver
+ * params they share with compute (subgroup size/shift) are lowered to the driver params UBO when consts are loaded via
+ * the preamble.  Nothing else uploads that UBO for them, so the preamble would read whatever descriptor was left in
+ * that slot of the CS UBO table.  Both stages run on the CS pipe and share its UBO table.
+ */
+static void
+tu_emit_mesh_driver_params(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+{
+   if (!cmd->device->physical_device->info->props.load_shader_consts_via_preamble)
+      return;
+
+   for (mesa_shader_stage stage : { MESA_SHADER_TASK, MESA_SHADER_MESH }) {
+      const struct tu_shader *shader = cmd->state.shaders[stage];
+      if (!shader || !shader->variant)
+         continue;
+
+      const struct ir3_shader_variant *variant = shader->variant;
+      const struct ir3_const_state *const_state = variant->const_state;
+      uint32_t num_consts = const_state->driver_params_ubo.size;
+      if (num_consts == 0 || const_state->driver_params_ubo.idx < 0)
+         continue;
+
+      unsigned subgroup_size = variant->info.subgroup_size;
+      struct ir3_driver_params_cs params = {};
+      params.subgroup_size = subgroup_size;
+      params.subgroup_id_shift = util_logbase2(subgroup_size);
+      assert(num_consts <= dword_sizeof(params));
+
+      struct tu_cs_memory consts;
+      VkResult result = tu_cs_alloc(&cmd->sub_cs, DIV_ROUND_UP(num_consts, 4), 4, &consts);
+      if (result != VK_SUCCESS) {
+         vk_command_buffer_set_error(&cmd->vk, result);
+         return;
+      }
+      memcpy(consts.map, &params, num_consts * sizeof(uint32_t));
+
+      tu_cs_emit_pkt7(cs, CP_LOAD_STATE6_FRAG, 5);
+      tu_cs_emit(cs, CP_LOAD_STATE6_0_DST_OFF(const_state->driver_params_ubo.idx) |
+                     CP_LOAD_STATE6_0_STATE_TYPE(ST6_UBO) |
+                     CP_LOAD_STATE6_0_STATE_SRC(SS6_DIRECT) |
+                     CP_LOAD_STATE6_0_STATE_BLOCK(SB6_CS_SHADER) |
+                     CP_LOAD_STATE6_0_NUM_UNIT(1));
+      tu_cs_emit(cs, CP_LOAD_STATE6_1_EXT_SRC_ADDR(0));
+      tu_cs_emit(cs, CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI(0));
+      tu_cs_emit_qw(cs, consts.iova |
+                        (static_cast<uint64_t>(A6XX_UBO_1_SIZE(DIV_ROUND_UP(num_consts, 4))) << 32));
+   }
+}
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdDrawMeshTasksEXT(
@@ -9932,6 +9981,7 @@ tu_CmdDrawMeshTasksEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
+   tu_emit_mesh_driver_params(cmd, cs);
 
    /* DEBUG: TU_MESH_DRAWS="n1,n2,..." emits the k-th mesh draw of the process n_k times (default 1) */
    static unsigned dbg_draw_idx;
@@ -9975,6 +10025,7 @@ tu_CmdDrawMeshTasksIndirectEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
+   tu_emit_mesh_driver_params(cmd, cs);
 
    uint64_t iova = buf->vk.device_address + offset;
 
@@ -10004,6 +10055,7 @@ tu_CmdDrawMeshTasksIndirectCountEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
+   tu_emit_mesh_driver_params(cmd, cs);
 
    uint64_t iova = buf->vk.device_address + offset;
    uint64_t count_iova = count_buf->vk.device_address + countBufferOffset;
