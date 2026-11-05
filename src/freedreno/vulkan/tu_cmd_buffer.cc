@@ -9920,13 +9920,14 @@ tu_emit_mesh_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    tu_cs_emit(cs, layout->mesh_count_size);
 }
 
-/* Task and mesh shaders get the AQE-provided params (buffer bases, workgroup counts, ...) as constants, but the driver
- * params they share with compute (subgroup size/shift) are lowered to the driver params UBO when consts are loaded via
- * the preamble.  Nothing else uploads that UBO for them, so the preamble would read whatever descriptor was left in
- * that slot of the CS UBO table.  Both stages run on the CS pipe and share its UBO table.
+/* Task and mesh shaders get the AQE-provided params (buffer bases, workgroup counts, ...) as constants, but the other
+ * driver params they use (subgroup size/shift, gl_DrawID) are lowered to the driver params UBO when consts are loaded
+ * via the preamble.  Nothing else uploads that UBO for them, so the preamble would read whatever descriptor was left in
+ * that slot of the CS UBO table.  Both stages run on the CS pipe and share its UBO table.  It is emitted per draw, so
+ * that each draw of a multi-draw sees its own gl_DrawID.
  */
 static void
-tu_emit_mesh_driver_params(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+tu_emit_mesh_driver_params(struct tu_cmd_buffer *cmd, struct tu_cs *cs, uint32_t draw_id)
 {
    if (!cmd->device->physical_device->info->props.load_shader_consts_via_preamble)
       return;
@@ -9946,6 +9947,11 @@ tu_emit_mesh_driver_params(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
       struct ir3_driver_params_cs params = {};
       params.subgroup_size = subgroup_size;
       params.subgroup_id_shift = util_logbase2(subgroup_size);
+      /* gl_DrawID is read at IR3_DP_VS(draw_id), which overlaps num_work_groups_x of the CS layout; task/mesh shaders
+       * read the workgroup counts from the AQE-provided params instead, so the slot is free.
+       */
+      STATIC_ASSERT(IR3_DP_VS(draw_id) == IR3_DP_CS(num_work_groups_x));
+      params.num_work_groups_x = draw_id;
       assert(num_consts <= dword_sizeof(params));
 
       struct tu_cs_memory consts;
@@ -9981,7 +9987,6 @@ tu_CmdDrawMeshTasksEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
-   tu_emit_mesh_driver_params(cmd, cs);
 
    /* DEBUG: TU_MESH_DRAWS="n1,n2,..." emits the k-th mesh draw of the process n_k times (default 1) */
    static unsigned dbg_draw_idx;
@@ -10000,6 +10005,7 @@ tu_CmdDrawMeshTasksEXT(
    }
    dbg_draw_idx++;
 
+   tu_emit_mesh_driver_params(cmd, cs, 0);
    for (unsigned r = 0; r < reps; r++) {
       tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
       tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
@@ -10025,11 +10031,11 @@ tu_CmdDrawMeshTasksIndirectEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
-   tu_emit_mesh_driver_params(cmd, cs);
 
    uint64_t iova = buf->vk.device_address + offset;
 
    for (uint32_t i = 0; i < drawCount; i++, iova += stride) {
+      tu_emit_mesh_driver_params(cmd, cs, i);
       tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 30);
       tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH_INDIRECT));
       tu_cs_emit_qw(cs, iova);
@@ -10055,12 +10061,12 @@ tu_CmdDrawMeshTasksIndirectCountEXT(
    struct tu_cs *cs = &cmd->draw_cs;
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
-   tu_emit_mesh_driver_params(cmd, cs);
 
    uint64_t iova = buf->vk.device_address + offset;
    uint64_t count_iova = count_buf->vk.device_address + countBufferOffset;
 
    for (uint32_t i = 0; i < maxDrawCount; i++, iova += stride) {
+      tu_emit_mesh_driver_params(cmd, cs, i);
       tu_cs_reserve_space(cs, 7 + 1 + 31);
 
       tu_cs_emit_pkt7(cs, CP_COND_EXEC, 6);
