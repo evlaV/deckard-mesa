@@ -9933,12 +9933,31 @@ tu_CmdDrawMeshTasksEXT(
 
    tu6_draw_common<CHIP>(cmd, cs, false, 0);
 
-   tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
-   tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
-   tu_cs_emit(cs, groupCountX);
-   tu_cs_emit(cs, groupCountY);
-   tu_cs_emit(cs, groupCountZ);
-   tu_emit_mesh_common(cmd, cs);
+   /* DEBUG: TU_MESH_DRAWS="n1,n2,..." emits the k-th mesh draw of the process n_k times (default 1) */
+   static unsigned dbg_draw_idx;
+   unsigned reps = 1;
+   if (const char *e = getenv("TU_MESH_DRAWS")) {
+      unsigned k = 0;
+      for (const char *p = e; *p; p++) {
+         if (k == dbg_draw_idx) {
+            reps = strtoul(p, NULL, 0);
+            break;
+         }
+         if (*p == ',')
+            k++;
+      }
+      mesa_logi("TU_MESH_DRAWS: draw %u x%u", dbg_draw_idx, reps);
+   }
+   dbg_draw_idx++;
+
+   for (unsigned r = 0; r < reps; r++) {
+      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
+      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+      tu_cs_emit(cs, groupCountX);
+      tu_cs_emit(cs, groupCountY);
+      tu_cs_emit(cs, groupCountZ);
+      tu_emit_mesh_common(cmd, cs);
+   }
 }
 TU_GENX(tu_CmdDrawMeshTasksEXT);
 
