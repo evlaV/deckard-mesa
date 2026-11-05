@@ -9979,8 +9979,8 @@ tu_CmdDrawMeshTasksIndirectEXT(
    uint64_t iova = buf->vk.device_address + offset;
 
    for (uint32_t i = 0; i < drawCount; i++, iova += stride) {
-      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
-      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 30);
+      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH_INDIRECT));
       tu_cs_emit_qw(cs, iova);
       tu_emit_mesh_common(cmd, cs);
    }
@@ -10009,7 +10009,7 @@ tu_CmdDrawMeshTasksIndirectCountEXT(
    uint64_t count_iova = count_buf->vk.device_address + countBufferOffset;
 
    for (uint32_t i = 0; i < maxDrawCount; i++, iova += stride) {
-      tu_cs_reserve_space(cs, 7 + 1 + 32);
+      tu_cs_reserve_space(cs, 7 + 1 + 31);
 
       tu_cs_emit_pkt7(cs, CP_COND_EXEC, 6);
       tu_cs_emit_qw(cs, global_iova(cmd, always_one));
@@ -10018,11 +10018,11 @@ tu_CmdDrawMeshTasksIndirectCountEXT(
       tu_cs_emit(cs, 1); /* dword count */
 
       /* if (i - *count_iova < (1u << 31)) { ... } */
-      tu_cs_emit_pkt7(cs, CP_NOP, 32);
+      tu_cs_emit_pkt7(cs, CP_NOP, 31);
       
       /* } else { ... */
-      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 31);
-      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH));
+      tu_cs_emit_pkt7(cs, CP_AQE_COMMAND, 30);
+      tu_cs_emit(cs, CP_AQE_COMMAND_0_OPCODE(AQE_DISPATCH_MESH_INDIRECT));
       tu_cs_emit_qw(cs, iova);
       tu_emit_mesh_common(cmd, cs);
    }
