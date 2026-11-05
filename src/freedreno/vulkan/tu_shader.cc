@@ -2559,7 +2559,13 @@ tu6_emit_cs_config(struct tu_cs *cs,
                              .workgrouprastorderzfirsten = true,
                              .wgtilewidth = 4, .wgtileheight = tile_height));
 
-      crb.add(SP_PS_WAVE_CNTL(CHIP, .threadsize = THREAD64));
+      /* Task and mesh shader state is executed by the AQE in the middle of a mesh draw, after the FS state has been
+       * emitted and before the AQE draws. Clobbering SP_PS_WAVE_CNTL there leaves the mesh draw with the wrong FS
+       * threadsize and without VARYINGS, which loses per-primitive varyings and hangs VPC once more than ~24
+       * primitives with live fragments are in flight.
+       */
+      if (v->type != MESA_SHADER_TASK && v->type != MESA_SHADER_MESH)
+         crb.add(SP_PS_WAVE_CNTL(CHIP, .threadsize = THREAD64));
 
       crb.add(A6XX_SP_CS_WIE_CNTL_0(.wgidconstid = work_group_id,
                                     .wgsizeconstid = regid(63, 0),
