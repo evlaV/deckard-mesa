@@ -9900,7 +9900,13 @@ tu_emit_mesh_common(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    struct tu_mesh_buffer_layout *layout = &cmd->state.program.mesh_layout;
 
    tu_cs_emit_qw(cs, cmd->state.program.mesh_shader_descriptor);
-   tu_cs_emit(cs, 0); /* PC_MESH_STEREO_RENDERING_CNTL */
+   /* PC_MESH_STEREO_RENDERING_CNTL: with ENABLE clear the a750 hangs once more than 24 primitives of one
+    * mesh draw have fragments in flight (only when varyings go to the FS). Single view only for now: the
+    * mesh path has no hw multiview yet.
+    */
+   tu_cs_emit(cs, AQE_DISPATCH_MESH_CP_AQE_COMMAND_6_ENABLE |
+                  AQE_DISPATCH_MESH_CP_AQE_COMMAND_6_VIEWS(0) |
+                  AQE_DISPATCH_MESH_CP_AQE_COMMAND_6_VIEWMASK(1));
    tu_cs_emit(cs, 0); /* unknown */
    tu_cs_emit(cs, layout->task_chunk_count);
    tu_cs_emit(cs, layout->mesh_chunk_count);
