@@ -155,7 +155,10 @@ tu_nir_lower_task(nir_shader *nir)
 
    progress |= nir_shader_lower_instructions(nir, filter_task_intrinsic, lower_task_intrinsic, NULL);
 
-   return nir_progress(progress, impl, nir_metadata_control_flow);
+   /* lower_task_intrinsic adds control flow (the elected store of the mesh counts), which
+    * nir_shader_lower_instructions does not notice when the replaced instruction has no result.
+    */
+   return nir_progress(progress, impl, nir_metadata_none);
 }
 
 struct mesh_state {
