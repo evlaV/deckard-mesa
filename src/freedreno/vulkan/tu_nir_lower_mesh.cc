@@ -555,6 +555,12 @@ create_passthrough_vs(const struct mesh_state *state, nir_shader *shader)
       nir_builder_init_simple_shader(MESA_SHADER_VERTEX, shader->options, "passthrough VS (%s)", shader->info.name);
    nir_builder *b = &_b;
    memcpy(b->shader->info.source_blake3, shader->info.source_blake3, sizeof(shader->info.source_blake3));
+   /* ir3 derives the clip/cull masks of the last geometry stage from these.  Without them the clip distances are
+    * linked to a VPC location with an empty component mask, outside STRIDE_IN_VPC, and the rasterizer does no
+    * clipping/culling (with per-primitive varyings this hangs the GPU).
+    */
+   b->shader->info.clip_distance_array_size = shader->info.clip_distance_array_size;
+   b->shader->info.cull_distance_array_size = shader->info.cull_distance_array_size;
 
    for (unsigned i = 0; i < state->num_per_vertex_outputs; i++) {
       if (!state->per_vertex_outputs[i].num_components)
