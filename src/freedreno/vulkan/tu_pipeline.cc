@@ -702,6 +702,13 @@ tu6_emit_prim_varying_map(struct tu_cs *cs,
    unsigned index = 0;
    u_foreach_bit64 (slot, producer->mesh.per_prim_varyings_written) {
       unsigned loc = consumer ? ir3_find_input_loc(consumer, (gl_varying_slot)slot) : 0xff;
+      /* A fragment shader compiled separately (pipeline libraries) doesn't know that a mesh shader writes the
+       * builtins (gl_PrimitiveID, gl_Layer, ...) per primitive and reads them as per-vertex inputs, below the
+       * per-primitive block.  The offset relative to the block would be negative, and the mesh shader would store
+       * outside the per-primitive buffer, so treat such inputs as not read from the per-primitive block.
+       */
+      if (loc != 0xff && (loc < start_loc || loc >= start_loc + consumer->per_prim_count))
+         loc = 0xff;
       if (loc == 0xff) {
          if (slot == VARYING_SLOT_LAYER || slot == VARYING_SLOT_VIEWPORT ||
              slot == VARYING_SLOT_PRIMITIVE_SHADING_RATE) {
