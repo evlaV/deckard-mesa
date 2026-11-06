@@ -893,8 +893,10 @@ tu6_emit_vpc(struct tu_cs *cs,
    if (per_prim && fs) {
       linkage.max_loc = 0;
       for (unsigned i = 0; i < fs->inputs_count; i++) {
+         /* Builtins such as gl_ViewportIndex are read like normal inputs but also live in the per-primitive block. */
          if (fs->inputs[i].compmask && fs->inputs[i].bary && !fs->inputs[i].per_prim &&
-             fs->inputs[i].inloc < fs->total_in) {
+             fs->inputs[i].inloc < fs->total_in &&
+             (!fs->per_prim_count || fs->inputs[i].inloc < fs->per_prim_start)) {
             linkage.max_loc = MAX2(linkage.max_loc,
                                    fs->inputs[i].inloc + util_last_bit(fs->inputs[i].compmask));
          }
@@ -926,6 +928,15 @@ tu6_emit_vpc(struct tu_cs *cs,
    /* With mesh shaders, layer/viewport/shading rate are packed into the last index of each primitive (see
     * BUILTIN_OUTPUTS in tu_nir_lower_mesh.cc), so they get no VPC location here.
     */
+   /* On a7xx the rasterizer takes the layer/viewport/shading rate of mesh primitives from the VPC SIV locations, so point
+    * them at the per-primitive varyings (VPC fetches those per primitive).  They are above the output stride, so they do
+    * not count towards it.
+    */
+   if (per_prim && CHIP == A7XX) {
+      layer_loc = per_prim->layer_loc;
+      view_loc = per_prim->view_loc;
+      shading_rate_loc = per_prim->shading_rate_loc;
+   }
    if (!per_prim) {
       if (layer_regid != regid(63, 0)) {
          layer_loc = linkage.max_loc;

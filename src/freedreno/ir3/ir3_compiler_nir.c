@@ -5181,7 +5181,7 @@ static unsigned
 per_prim_first_slot(struct ir3_context *ctx)
 {
    return util_bitcount64(non_per_prim_inputs(ctx)) +
-      (ctx->s->info.per_primitive_inputs ? PER_PRIM_VERTEX_ONLY_SLOTS : 0);
+      (per_prim_inputs(ctx) ? PER_PRIM_VERTEX_ONLY_SLOTS : 0);
 }
 
 static void
