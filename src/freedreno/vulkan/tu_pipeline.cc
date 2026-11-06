@@ -4576,10 +4576,19 @@ tu_emit_draw_state(struct tu_cmd_buffer *cmd)
    }
 #define DRAW_STATE(name, id, ...) DRAW_STATE_COND(name, id, false, __VA_ARGS__)
 
-   DRAW_STATE_COND(vertex_input, TU_DYNAMIC_STATE_VERTEX_INPUT,
-                   cmd->state.dirty & TU_CMD_DIRTY_VS,
-                   cmd->vk.dynamic_graphics_state.vi,
-                   cmd->state.shaders[MESA_SHADER_VERTEX]->variant->attr_in);
+   if (cmd->state.shaders[MESA_SHADER_VERTEX]) {
+      DRAW_STATE_COND(vertex_input, TU_DYNAMIC_STATE_VERTEX_INPUT,
+                      cmd->state.dirty & TU_CMD_DIRTY_VS,
+                      cmd->vk.dynamic_graphics_state.vi,
+                      cmd->state.shaders[MESA_SHADER_VERTEX]->variant->attr_in);
+   } else if (!(cmd->state.pipeline_draw_states & (1u << TU_DYNAMIC_STATE_VERTEX_INPUT)) &&
+              cmd->state.dynamic_state[TU_DYNAMIC_STATE_VERTEX_INPUT].size) {
+      /* Mesh pipelines have no vertex shader: the vertex fetch of the passthrough VS comes with the mesh shader state,
+       * so drop any vertex input state left over from a previous pipeline.
+       */
+      cmd->state.dynamic_state[TU_DYNAMIC_STATE_VERTEX_INPUT] = {};
+      dirty_draw_states |= (1u << TU_DYNAMIC_STATE_VERTEX_INPUT);
+   }
 
    /* Vertex input stride is special because it's part of the vertex input in
     * the pipeline but a separate array when it's dynamic state so we have to
