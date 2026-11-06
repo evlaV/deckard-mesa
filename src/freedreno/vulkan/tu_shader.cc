@@ -4029,6 +4029,34 @@ link_opts(nir_shader *shader, void *data)
    ir3_optimize_loop(compiler, &optimize_options, shader);
 }
 
+/* With a mesh shader, gl_PrimitiveID/gl_Layer/gl_ViewportIndex are per-primitive outputs, but the fragment shader
+ * reads them with load_input like the outputs of any other stage.  nir_opt_varyings decides whether a slot is
+ * per-primitive from the FS load, so it would move gl_PrimitiveID into a generic slot shared with flat per-vertex
+ * varyings, and the mesh shader then has a slot that is per-primitive for one component and per-vertex for others.
+ */
+static bool
+lower_fs_mesh_builtin_input(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+   if (intr->intrinsic != nir_intrinsic_load_input)
+      return false;
+
+   nir_io_semantics sem = nir_intrinsic_io_semantics(intr);
+   if (sem.location != VARYING_SLOT_PRIMITIVE_ID && sem.location != VARYING_SLOT_LAYER &&
+       sem.location != VARYING_SLOT_VIEWPORT)
+      return false;
+
+   b->cursor = nir_before_instr(&intr->instr);
+   nir_def *def = nir_load_per_primitive_input(b, intr->def.num_components, intr->def.bit_size,
+                                               intr->src[0].ssa,
+                                               .base = nir_intrinsic_base(intr),
+                                               .component = nir_intrinsic_component(intr),
+                                               .dest_type = nir_intrinsic_dest_type(intr),
+                                               .io_semantics = sem);
+   nir_def_replace(&intr->def, def);
+   b->shader->info.per_primitive_inputs |= BITFIELD64_BIT(sem.location);
+   return true;
+}
+
 static void
 tu_link_shaders(struct tu_device *dev,
                 nir_shader **shaders,
@@ -4036,6 +4064,11 @@ tu_link_shaders(struct tu_device *dev,
 {
    nir_shader *link_shaders[MESA_SHADER_MESH_STAGES] = {};
    assert(shaders_count <= ARRAY_SIZE(link_shaders));
+
+   if (shaders[MESA_SHADER_MESH] && shaders[MESA_SHADER_FRAGMENT]) {
+      NIR_PASS(_, shaders[MESA_SHADER_FRAGMENT], nir_shader_intrinsics_pass, lower_fs_mesh_builtin_input,
+               nir_metadata_control_flow, NULL);
+   }
 
    unsigned link_shaders_count = 0;
 
