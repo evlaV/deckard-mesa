@@ -314,9 +314,7 @@ tu_restore_compute_state(struct tu_cmd_buffer *cmd,
                          struct tu_saved_compute_state *state)
 {
    cmd->state.shaders[MESA_SHADER_COMPUTE] = state->compute_shader;
-   if (state->compute_shader) {
-      tu_cs_emit_state_ib(&cmd->cs, state->compute_shader->state);
-   }
+   cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_PIPELINE;
    memcpy(cmd->push_constants, state->push_constants, sizeof(cmd->push_constants));
    cmd->state.dirty |= TU_CMD_DIRTY_SHADER_CONSTS;
 }

@@ -5859,11 +5859,9 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_pipeline, pipeline, _pipeline);
 
    if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-      cmd->state.shaders[MESA_SHADER_COMPUTE] =
-         pipeline->shaders[MESA_SHADER_COMPUTE];
-      tu_cs_emit_state_ib(&cmd->cs,
-                          pipeline->shaders[MESA_SHADER_COMPUTE]->state);
+      cmd->state.shaders[MESA_SHADER_COMPUTE] = pipeline->shaders[MESA_SHADER_COMPUTE];
       cmd->state.compute_load_state = pipeline->load_state;
+      cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_PIPELINE;
       return;
    }
 
@@ -9210,7 +9208,7 @@ tu6_draw_common(struct tu_cmd_buffer *cmd,
     * bits to preserve instead. The only things not emitted here are
     * compute-related state.
     */
-   cmd->state.dirty &= TU_CMD_DIRTY_COMPUTE_DESC_SETS;
+   cmd->state.dirty &= TU_CMD_DIRTY_COMPUTE_DESC_SETS | TU_CMD_DIRTY_COMPUTE_PIPELINE;
    BITSET_ZERO(cmd->vk.dynamic_graphics_state.dirty);
    return VK_SUCCESS;
 }
@@ -10371,6 +10369,13 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
       tu_cs_emit_state_ib(&cmd->cs, shader->state);
       cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_DESC_SETS;
    }
+
+   /* Emit pipeline state */
+   if (cmd->device->dbg_renderpass_stomp_cs || (cmd->state.dirty & TU_CMD_DIRTY_COMPUTE_PIPELINE)) {
+      tu_cs_emit_state_ib(&cmd->cs, shader->state);
+      cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_DESC_SETS;
+   }
+   cmd->state.dirty &= ~TU_CMD_DIRTY_COMPUTE_PIPELINE;
 
    /* There appears to be a HW bug where in some rare circumstances it appears
     * to accidentally use the FS instrlen instead of the CS instrlen, which
