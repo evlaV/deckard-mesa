@@ -110,6 +110,9 @@
 
 #if defined(HAVE_RTKIT_PRIO)
 #include "rtkit.h"
+#include <linux/sched.h>
+#include <linux/sched/types.h>
+#include <sys/syscall.h>
 #endif
 
 #if 0
@@ -2207,6 +2210,23 @@ static drmEventContext event_context = {
    .sequence_handler = wsi_display_sequence_handler,
 };
 
+#if defined(HAVE_RTKIT_PRIO)
+#define WSI_DISPLAY_WAIT_THREAD_UCLAMP_MIN 512
+
+static void
+wsi_display_set_uclamp_min(const uint32_t util_min)
+{
+   struct sched_attr attr;
+   memset(&attr, 0, sizeof(attr));
+   attr.size = sizeof(attr);
+   attr.sched_flags = SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN;
+   attr.sched_util_min = util_min;
+   if (syscall(SYS_sched_setattr, 0, &attr, 0) < 0 && errno != EOPNOTSUPP)
+      mesa_logw("wsi_display: sched_setattr(uclamp.min %u) failed: %s",
+                util_min, strerror(errno));
+}
+#endif
+
 static void *
 wsi_display_wait_thread(void *data)
 {
@@ -2221,6 +2241,7 @@ wsi_display_wait_thread(void *data)
       assert(system_bus);
       rtkit_make_realtime(system_bus, 0, p.sched_priority);
    }
+   wsi_display_set_uclamp_min(WSI_DISPLAY_WAIT_THREAD_UCLAMP_MIN);
 #endif
 
    struct wsi_display *wsi = data;
