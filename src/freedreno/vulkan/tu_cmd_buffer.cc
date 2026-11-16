@@ -5859,6 +5859,11 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    VK_FROM_HANDLE(tu_pipeline, pipeline, _pipeline);
 
    if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+      /* LPAC only has 20KB of shared memory, fallback to GFX if more is needed*/
+      if (tu_cmd_is_on_lpac_queue(cmd) &&
+          pipeline->shaders[MESA_SHADER_COMPUTE]->variant->shared_size > 20 * 1024)
+         cmd->requires_gfx = true;
+
       cmd->state.shaders[MESA_SHADER_COMPUTE] = pipeline->shaders[MESA_SHADER_COMPUTE];
       cmd->state.compute_load_state = pipeline->load_state;
       cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_PIPELINE;
