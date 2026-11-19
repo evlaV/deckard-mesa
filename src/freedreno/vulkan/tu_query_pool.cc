@@ -1163,6 +1163,13 @@ emit_begin_stat_query(struct tu_cmd_buffer *cmdbuf,
    struct tu_cs *cs = cmdbuf->state.pass ? &cmdbuf->draw_cs : &cmdbuf->cs;
    uint64_t begin_iova = pipeline_stat_query_iova(pool, query, begin, 0);
 
+   /* The RBBM_PIPESTAT counters only count work on the BR pipe: dispatches
+    * on the LPAC ring are invisible to them, so run this command buffer on
+    * the graphics ring instead.
+    */
+   if (tu_cmd_is_on_lpac_queue(cmdbuf))
+      cmdbuf->requires_gfx = true;
+
    if (is_pipeline_query_with_vertex_stage(pool->vk.pipeline_statistics)) {
       bool need_cond_exec = cmdbuf->state.pass && cmdbuf->state.prim_counters_running;
       cmdbuf->state.prim_counters_running++;
