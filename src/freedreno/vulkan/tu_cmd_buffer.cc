@@ -11164,8 +11164,12 @@ tu_CmdBeginConditionalRenderingEXT(VkCommandBuffer commandBuffer,
          tu_cs_emit_pkt7(cs, CP_THREAD_CONTROL, 1);
          tu_cs_emit(cs, CP_THREAD_CONTROL_0_THREAD(CP_SET_THREAD_BOTH));
       }
+      /* LPAC runs compute command buffers on its own thread: it needs the
+       * BR copy of the predicate (LPAC never runs the BV half).
+       */
       tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
-                             CP_COND_REG_EXEC_0_BR);
+                             CP_COND_REG_EXEC_0_BR |
+                             CP_COND_REG_EXEC_0_LPAC);
    }
 
    tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 5);
@@ -11194,7 +11198,8 @@ tu_CmdBeginConditionalRenderingEXT(VkCommandBuffer commandBuffer,
 
    if (CHIP >= A7XX) {
       tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
-                             CP_COND_REG_EXEC_0_BR);
+                             CP_COND_REG_EXEC_0_BR |
+                             CP_COND_REG_EXEC_0_LPAC);
    }
    tu_cs_emit_pkt7(cs, CP_DRAW_PRED_SET, 3);
    tu_cs_emit(cs, CP_DRAW_PRED_SET_0_SRC(PRED_SRC_MEM) |
