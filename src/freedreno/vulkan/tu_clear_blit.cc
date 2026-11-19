@@ -2579,6 +2579,14 @@ rcs_setup(struct tu_cmd_buffer *cmd,
 
    tu_emit_cache_flush<CHIP>(cmd);
 
+   /* Transfer commands ignore conditional rendering, but CP_RUN_OPENCL is
+    * predicated like any dispatch (same as r3d_setup for draws).
+    */
+   if (cmd->state.predication_active) {
+      tu_cs_emit_pkt7(cs, CP_DRAW_PRED_ENABLE_LOCAL, 1);
+      tu_cs_emit(cs, 0);
+   }
+
    enum a6xx_format fmt = blit_base_format<CHIP>(dst_format, ubwc,
                                                  blit_param & R3D_DST_GMEM);
    fixup_dst_format(src_format, &dst_format, &fmt);
@@ -2686,6 +2694,11 @@ template <chip CHIP>
 static void
 rcs_teardown(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
+   if (cmd->state.predication_active) {
+      tu_cs_emit_pkt7(cs, CP_DRAW_PRED_ENABLE_LOCAL, 1);
+      tu_cs_emit(cs, 1);
+   }
+
    cmd->state.dirty |= TU_CMD_DIRTY_COMPUTE_PIPELINE | TU_CMD_DIRTY_COMPUTE_DESC_SETS;
 }
 
