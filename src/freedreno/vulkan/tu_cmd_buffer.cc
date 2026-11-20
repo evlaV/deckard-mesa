@@ -14,6 +14,8 @@
 #include "vk_render_pass.h"
 #include "vk_util.h"
 
+#include "util/u_debug.h"
+
 #include "common/freedreno_gpu_event.h"
 #include "common/freedreno_lrz.h"
 #include "common/freedreno_vrs.h"
@@ -5750,6 +5752,9 @@ tu_CmdBindPipeline(VkCommandBuffer commandBuffer,
    }
 
    cmd->state.pipeline_draw_states = set_state_mask;
+   cmd->state.pipeline_vi_instance_divisor =
+      (set_state_mask & (1u << TU_DYNAMIC_STATE_VERTEX_INPUT)) &&
+      pipeline->vi_instance_divisor;
    u_foreach_bit(i, set_state_mask)
       cmd->state.dynamic_state[i] = pipeline->dynamic_state[i];
 
@@ -9164,7 +9169,9 @@ tu6_emit_vs_params(struct tu_cmd_buffer *cmd,
                    uint32_t vertex_offset,
                    uint32_t first_instance,
                    uint32_t draw_id_offset = 0,
-                   bool indirect = false)
+                   bool indirect = false,
+                   uint32_t split_vtx_add = 0,
+                   uint32_t split_inst_add = 0)
 {
    uint32_t offset = vs_params_offset(cmd);
 
@@ -9194,6 +9201,8 @@ tu6_emit_vs_params(struct tu_cmd_buffer *cmd,
        sw_multiview == cmd->state.last_vs_params.sw_multiview &&
        view_index == cmd->state.last_vs_params.view_index &&
        draw_id_offset == cmd->state.last_vs_params.draw_id_offset &&
+       split_vtx_add == cmd->state.last_vs_params.split_vtx_add &&
+       split_inst_add == cmd->state.last_vs_params.split_inst_add &&
        indirect == cmd->state.last_vs_params.indirect) {
       return;
    }
@@ -9240,8 +9249,9 @@ tu6_emit_vs_params(struct tu_cmd_buffer *cmd,
 
    if (!indirect) {
       tu_cs_emit_regs(&cs,
-                      A6XX_VFD_INDEX_OFFSET(vertex_offset),
-                      A6XX_VFD_INSTANCE_START_OFFSET(first_instance));
+                      A6XX_VFD_INDEX_OFFSET(vertex_offset + split_vtx_add),
+                      A6XX_VFD_INSTANCE_START_OFFSET(first_instance +
+                                                     split_inst_add));
    }
 
    /* It is implemented as INDIRECT load even on a750+ because with UBO
@@ -9263,6 +9273,8 @@ tu6_emit_vs_params(struct tu_cmd_buffer *cmd,
    cmd->state.last_vs_params.draw_id = draw_id;
    cmd->state.last_vs_params.view_index = view_index;
    cmd->state.last_vs_params.draw_id_offset = draw_id_offset;
+   cmd->state.last_vs_params.split_vtx_add = split_vtx_add;
+   cmd->state.last_vs_params.split_inst_add = split_inst_add;
    cmd->state.last_vs_params.sw_multiview = sw_multiview;
    cmd->state.last_vs_params.indirect = indirect;
    cmd->state.last_vs_params.empty = false;
@@ -9305,6 +9317,160 @@ tu6_emit_empty_vs_params(struct tu_cmd_buffer *cmd)
    cmd->state.last_vs_params.empty = true;
 }
 
+/* TU_DRAW_SPLIT=N (0 = off): the most vertex invocations (indices or vertices
+ * x instances) one hardware draw of a split draw may have.  Preemption can
+ * only switch between draws, so one huge draw (Stray's 1.6 M-index
+ * alpha-tested shadow draw, ~13 ms) is a preemption latency floor; split into
+ * pieces it is not.  Only draws whose result cannot change are split.
+ *
+ * An instanced draw is split into ranges of whole instances, in order, which
+ * keeps the instance-major primitive order Vulkan requires (splitting the
+ * index range across all instances would not).  Each range moves
+ * VFD_INSTANCE_START_OFFSET (the hardware adds it to the instance id, so
+ * gl_InstanceIndex is unchanged; gl_BaseInstance is a driver param and is not
+ * touched).  Not with an instance-rate binding whose divisor is not 1: the
+ * attribute index is firstInstance + id / divisor, which a moved start
+ * offset would change.
+ *
+ * Within one instance the index (or vertex) range is split on whole
+ * primitives: list topologies only, no primitive restart, no tessellation or
+ * geometry shader, no fragment shader reading gl_PrimitiveID (it restarts in
+ * each draw).  A non-indexed piece moves VFD_INDEX_OFFSET (added to the vertex
+ * id, gl_VertexIndex unchanged; gl_BaseVertex is a driver param).
+ *
+ * Never with transform feedback.
+ */
+struct tu_draw_split {
+   uint32_t inst_chunk;  /* instances per hardware draw */
+   uint32_t piece;       /* indices / vertices per hardware draw */
+};
+
+static struct tu_draw_split
+tu_draw_split_plan(struct tu_cmd_buffer *cmd, uint32_t count,
+                   uint32_t instanceCount)
+{
+   static int split = -1;
+   if (split < 0)
+      split = MAX2(0, (int) debug_get_num_option("TU_DRAW_SPLIT", 0));
+
+   struct tu_draw_split whole = { MAX2(instanceCount, 1), MAX2(count, 1) };
+   if (!split || !count || !instanceCount ||
+       (uint64_t) count * instanceCount <= (uint64_t) split)
+      return whole;
+
+   if (cmd->state.rp.xfb_used || cmd->state.sw_multiview ||
+       cmd->state.shaders[MESA_SHADER_TESS_CTRL]->variant ||
+       cmd->state.shaders[MESA_SHADER_GEOMETRY]->variant)
+      return whole;
+
+   struct tu_draw_split plan = whole;
+
+   if (instanceCount > 1) {
+      const struct vk_vertex_input_state *vi =
+         cmd->vk.dynamic_graphics_state.vi;
+      /* a static pipeline's vertex input is baked into its draw state and
+       * is not in the dynamic state: the pipeline records it at bind
+       */
+      bool divisor = cmd->state.pipeline_vi_instance_divisor;
+      u_foreach_bit (b, vi->bindings_valid) {
+         if (vi->bindings[b].input_rate == VK_VERTEX_INPUT_RATE_INSTANCE &&
+             vi->bindings[b].divisor != 1)
+            divisor = true;
+      }
+      if (!divisor)
+         plan.inst_chunk = MAX2(1, (uint32_t) split / count);
+   }
+
+   if (count <= (uint32_t) split || plan.inst_chunk != 1)
+      return plan;
+
+   /* one instance at a time is still too big: split the range */
+   const struct vk_input_assembly_state *ia =
+      &cmd->vk.dynamic_graphics_state.ia;
+   uint32_t per_prim;
+   switch (ia->primitive_topology) {
+   case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:
+      per_prim = 3;
+      break;
+   case VK_PRIMITIVE_TOPOLOGY_LINE_LIST:
+      per_prim = 2;
+      break;
+   case VK_PRIMITIVE_TOPOLOGY_POINT_LIST:
+      per_prim = 1;
+      break;
+   default:
+      return plan;
+   }
+
+   if (ia->primitive_restart_enable)
+      return plan;
+
+   const struct ir3_shader_variant *fs =
+      cmd->state.shaders[MESA_SHADER_FRAGMENT]->variant;
+   if (fs && (ir3_find_input_loc(fs, VARYING_SLOT_PRIMITIVE_ID) != 0xff ||
+              VALIDREG(ir3_find_sysval_regid(fs, SYSTEM_VALUE_PRIMITIVE_ID))))
+      return plan;
+
+   uint32_t piece = (uint32_t) split / per_prim * per_prim;
+   if (piece)
+      plan.piece = piece;
+   return plan;
+}
+
+/* Emit one draw, split as tu_draw_split_plan() says.  The hardware offsets
+ * of a piece go into the VS_PARAMS draw state (not straight into the stream:
+ * draw state groups are re-applied at each GMEM tile and after a preemption
+ * restore, and would overwrite them).  The caller has emitted the vs params
+ * of the whole draw; the next draw re-emits them since the split adds are
+ * part of the cache key.
+ */
+template <chip CHIP>
+static void
+tu_draw_split_emit(struct tu_cmd_buffer *cmd, struct tu_cs *cs, bool indexed,
+                   uint32_t count, uint32_t instanceCount, uint32_t first,
+                   uint32_t vertexOffset, uint32_t firstInstance)
+{
+   struct tu_draw_split plan = tu_draw_split_plan(cmd, count, instanceCount);
+   bool split = plan.inst_chunk < instanceCount || plan.piece < count;
+
+   for (uint32_t inst = 0; inst < MAX2(instanceCount, 1);
+        inst += plan.inst_chunk) {
+      uint32_t ninst = MIN2(plan.inst_chunk, instanceCount - inst);
+      uint32_t done = 0;
+      do {
+         uint32_t n = MIN2(count - done, plan.piece);
+
+         if (split) {
+            tu6_emit_vs_params(cmd, NULL, 0, vertexOffset, firstInstance, 0,
+                               false, indexed ? 0 : done, inst);
+         }
+
+         tu6_draw_common<CHIP>(cmd, cs, indexed, n);
+
+         if (indexed) {
+            tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 7);
+            tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA));
+            tu_cs_emit(cs, ninst);
+            tu_cs_emit(cs, n);
+            tu_cs_emit(cs, first + done);
+            tu_cs_emit_qw(cs, cmd->state.index_va);
+            tu_cs_emit(cs, cmd->state.max_index_count);
+         } else {
+            tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
+            tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX));
+            tu_cs_emit(cs, ninst);
+            tu_cs_emit(cs, n);
+         }
+
+         trace_end_draw(&cmd->rp_trace, cs);
+         done += n;
+      } while (done < count);
+
+      if (!instanceCount)
+         break;
+   }
+}
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdDraw(VkCommandBuffer commandBuffer,
@@ -9318,14 +9484,9 @@ tu_CmdDraw(VkCommandBuffer commandBuffer,
 
    tu6_emit_vs_params(cmd, NULL, 0, firstVertex, firstInstance);
 
-   tu6_draw_common<CHIP>(cmd, cs, false, vertexCount);
-
-   tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 3);
-   tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_AUTO_INDEX));
-   tu_cs_emit(cs, instanceCount);
-   tu_cs_emit(cs, vertexCount);
-
-   trace_end_draw(&cmd->rp_trace, cs);
+   /* TU_DRAW_SPLIT: see tu_draw_split_plan() */
+   tu_draw_split_emit<CHIP>(cmd, cs, false, vertexCount, instanceCount, 0,
+                            firstVertex, firstInstance);
 }
 TU_GENX(tu_CmdDraw);
 
@@ -9378,6 +9539,7 @@ tu_CmdDrawMultiEXT(VkCommandBuffer commandBuffer,
 }
 TU_GENX(tu_CmdDrawMultiEXT);
 
+
 template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_CmdDrawIndexed(VkCommandBuffer commandBuffer,
@@ -9392,17 +9554,11 @@ tu_CmdDrawIndexed(VkCommandBuffer commandBuffer,
 
    tu6_emit_vs_params(cmd, NULL, 0, vertexOffset, firstInstance);
 
-   tu6_draw_common<CHIP>(cmd, cs, true, indexCount);
-
-   tu_cs_emit_pkt7(cs, CP_DRAW_INDX_OFFSET, 7);
-   tu_cs_emit(cs, tu_draw_initiator(cmd, DI_SRC_SEL_DMA));
-   tu_cs_emit(cs, instanceCount);
-   tu_cs_emit(cs, indexCount);
-   tu_cs_emit(cs, firstIndex);
-   tu_cs_emit_qw(cs, cmd->state.index_va);
-   tu_cs_emit(cs, cmd->state.max_index_count);
-
-   trace_end_draw(&cmd->rp_trace, cs);
+   /* TU_DRAW_SPLIT: emit a big draw as several smaller draws, so preemption
+    * (which can only switch between draws) never waits for one huge draw.
+    */
+   tu_draw_split_emit<CHIP>(cmd, cs, true, indexCount, instanceCount,
+                            firstIndex, vertexOffset, firstInstance);
 }
 TU_GENX(tu_CmdDrawIndexed);
 

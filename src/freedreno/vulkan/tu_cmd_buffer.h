@@ -296,6 +296,11 @@ struct tu_vs_params {
    uint32_t draw_id;
    uint32_t view_index;
    uint32_t draw_id_offset;
+   /* TU_DRAW_SPLIT: added to VFD_INDEX_OFFSET / VFD_INSTANCE_START_OFFSET
+    * only (not to the driver params) for one piece of a split draw.
+    */
+   uint32_t split_vtx_add;
+   uint32_t split_inst_add;
    /* Whether the last emitted params were for a SW multiview replay. Both the
     * size of the uploaded const and whether VFD registers are part of the draw
     * state depend on it, so it has to invalidate the cache below.
@@ -641,6 +646,8 @@ struct tu_cmd_state
 
    bool pipeline_blend_lrz, pipeline_bandwidth, pipeline_disable_fs;
    uint32_t pipeline_draw_states;
+   /* the bound pipeline's static vertex input has an instance divisor != 1 */
+   bool pipeline_vi_instance_divisor;
 
    /* VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT and
     * VK_QUERY_TYPE_PRIMITIVES_GENERATED_EXT are allowed to run simultaniously,

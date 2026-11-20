@@ -3990,6 +3990,15 @@ tu_pipeline_builder_emit_state(struct tu_pipeline_builder *builder,
                    pipeline->shaders[MESA_SHADER_VERTEX]->variant->attr_in);
    DRAW_STATE(vertex_stride, TU_DYNAMIC_STATE_VB_STRIDE,
               builder->graphics_state.vi);
+   if (builder->graphics_state.vi &&
+       (pipeline->set_state_mask & (1u << TU_DYNAMIC_STATE_VERTEX_INPUT))) {
+      const struct vk_vertex_input_state *vi = builder->graphics_state.vi;
+      u_foreach_bit (b, vi->bindings_valid) {
+         if (vi->bindings[b].input_rate == VK_VERTEX_INPUT_RATE_INSTANCE &&
+             vi->bindings[b].divisor != 1)
+            pipeline->vi_instance_divisor = true;
+      }
+   }
    /* If (a) per-view viewport is used or (b) we don't know yet, then we need
     * to set viewport and stencil state dynamically.
     *

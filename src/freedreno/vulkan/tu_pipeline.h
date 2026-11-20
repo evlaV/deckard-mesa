@@ -193,6 +193,11 @@ struct tu_pipeline
    uint32_t set_state_mask;
    struct tu_draw_state dynamic_state[TU_DYNAMIC_STATE_COUNT];
 
+   /* static vertex input has an instance-rate binding with divisor != 1
+    * (TU_DRAW_SPLIT must not split such draws by instance range)
+    */
+   bool vi_instance_divisor;
+
    BITSET_DECLARE(static_state_mask, MESA_VK_DYNAMIC_GRAPHICS_STATE_ENUM_MAX);
 
    struct {
