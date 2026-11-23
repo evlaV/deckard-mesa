@@ -756,6 +756,7 @@ by a particular renderpass/blit.
 	<reg64 offset="0x0550" name="RBBM_PIPESTAT_CPRIMITIVES" variants="A6XX-A7XX"/>
 	<reg64 offset="0x0552" name="RBBM_PIPESTAT_PSINVOCATIONS" variants="A6XX-A7XX"/>
 	<reg64 offset="0x0554" name="RBBM_PIPESTAT_CSINVOCATIONS" variants="A6XX-A7XX"/>
+	<reg64 offset="0x05fc" name="RBBM_LPAC_PIPESTAT_CSINVOCATIONS" variants="A6XX-A7XX"/>
 
 	<reg64 offset="0x0380" name="RBBM_PIPESTAT_IAVERTICES" variants="A8XX-"/>
 	<reg64 offset="0x0382" name="RBBM_PIPESTAT_IAPRIMITIVES" variants="A8XX-"/>
