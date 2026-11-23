@@ -28,7 +28,9 @@
 #define NSEC_PER_SEC 1000000000ull
 #define WAIT_TIMEOUT 5
 #define __COUNTER_REG(CHIP, name) __RBBM_PIPESTAT_ ## name <CHIP>({})
+#define __COUNTER_REG_LPAC(CHIP, name) __RBBM_LPAC_PIPESTAT_ ## name <CHIP>({})
 #define COUNTER_REG(name) __COUNTER_REG(CHIP, name)
+#define COUNTER_REG_LPAC(name) __COUNTER_REG_LPAC(CHIP, name)
 
 /* Note: gen8 changes the order of the pipestat regs, but in either case
  * they ones we are interested in are consecutive, so for the purposes of
@@ -1156,6 +1158,35 @@ emit_begin_occlusion_query(struct tu_cmd_buffer *cmdbuf,
 
 template <chip CHIP>
 static void
+emit_stat_read(struct tu_cs *cs,
+               uint64_t iova)
+{
+   if (CHIP >= A7XX) {
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
+                             CP_COND_REG_EXEC_0_BR |
+                             CP_COND_REG_EXEC_0_BV);
+   }
+
+   cs->reg_to_mem(iova, COUNTER_REG(IAVERTICES), {
+      .cnt = STAT_COUNT * 2,
+      .is_64b = true,
+   });
+
+   if (CHIP >= A7XX) {
+      iova += (STAT_COUNT - 1) * 8;
+      tu_cond_exec_end(cs);
+      tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(THREAD_MODE) |
+                             CP_COND_REG_EXEC_0_LPAC);
+      cs->reg_to_mem(iova, COUNTER_REG_LPAC(CSINVOCATIONS), {
+         .cnt = 2,
+         .is_64b = true,
+      });
+      tu_cond_exec_end(cs);
+   }
+}
+
+template <chip CHIP>
+static void
 emit_begin_stat_query(struct tu_cmd_buffer *cmdbuf,
                       struct tu_query_pool *pool,
                       uint32_t query)
@@ -1216,10 +1247,7 @@ emit_begin_stat_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   cs->reg_to_mem(begin_iova, COUNTER_REG(IAVERTICES), {
-      .cnt = STAT_COUNT * 2,
-      .is_64b = true,
-   });
+   emit_stat_read<CHIP>(cs, begin_iova);
 }
 
 template <chip CHIP>
@@ -1701,10 +1729,7 @@ emit_end_stat_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   cs->reg_to_mem(end_iova, COUNTER_REG(IAVERTICES), {
-      .cnt = STAT_COUNT * 2,
-      .is_64b = true,
-   });
+   emit_stat_read<CHIP>(cs, end_iova);
 
    for (int i = 0; i < STAT_COUNT; i++) {
       result_iova = query_result_iova(pool, query, uint64_t, i);
